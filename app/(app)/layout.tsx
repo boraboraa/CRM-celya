@@ -26,26 +26,7 @@ export default async function AppLayout({
 
   const { me, email } = session;
 
-  if (!me || !me.is_active) {
-    return (
-      <main className="grid min-h-screen place-items-center px-4">
-        <div className="card max-w-md p-8 text-center">
-          <Logo className="mb-6 justify-center" />
-          <h1 className="font-display text-lg font-semibold text-slate-50">
-            Compte en attente d&apos;activation
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            Votre compte <span className="text-slate-200">{email}</span> a bien été
-            créé, mais un administrateur doit encore l&apos;activer avant que vous
-            puissiez accéder aux données.
-          </p>
-          <div className="mt-6">
-            <SignOutButton full />
-          </div>
-        </div>
-      </main>
-    );
-  }
+  if (!me || !me.is_active) redirect("/acces-refuse");
 
   const items = me.role === "admin" ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
 

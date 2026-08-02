@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 
@@ -27,8 +28,9 @@ export const getSession = cache(async (): Promise<Session | null> => {
 
 export async function requireMember(): Promise<Session & { me: Profile }> {
   const session = await getSession();
-  if (!session?.me?.is_active) {
-    throw new Error("Compte inactif");
-  }
+  if (!session) redirect("/login");
+  // Compte auth.users sans fiche crm_users active (ex. compte de l'app
+  // comptable qui partage ce projet Supabase) : page dédiée, pas de 500.
+  if (!session.me?.is_active) redirect("/acces-refuse");
   return session as Session & { me: Profile };
 }

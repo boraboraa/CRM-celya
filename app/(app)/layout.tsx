@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/ui";
-import { NavLinks, NAV_ITEMS, ADMIN_ITEM, ACCOUNT_ITEM } from "@/components/Nav";
+import { NavLinks } from "@/components/Nav";
+import { NAV_ITEMS, ADMIN_ITEM, ACCOUNT_ITEM } from "@/lib/nav";
 
 function SignOutButton({ full = false }: { full?: boolean }) {
   return (

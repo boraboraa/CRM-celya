@@ -2,18 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-export type NavItem = { href: string; label: string; icon: string };
-
-export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Aujourd'hui", icon: "◉" },
-  { href: "/pipeline", label: "Pipeline", icon: "▤" },
-  { href: "/clients", label: "Clients", icon: "◇" },
-  { href: "/taches", label: "Relances", icon: "◷" },
-];
-
-export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "◍" };
-export const ACCOUNT_ITEM: NavItem = { href: "/compte", label: "Mon compte", icon: "⚙" };
+import type { NavItem } from "@/lib/nav";
 
 export function NavLinks({
   items,

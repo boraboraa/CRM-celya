@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #0a0e1a;
+  color: #e6ebf5;
+}
+
+body {
+  background-image:
+    radial-gradient(70rem 40rem at 8% -12%, rgba(34, 211, 238, 0.1), transparent 60%),
+    radial-gradient(60rem 36rem at 96% 0%, rgba(168, 85, 247, 0.1), transparent 60%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-space-800/70 ring-1 ring-white/[0.06] backdrop-blur-sm;
+  }
+
+  .card-hover {
+    @apply transition hover:ring-white/15 hover:bg-space-700/70;
+  }
+
+  .label {
+    @apply block text-[11px] font-medium uppercase tracking-wider text-slate-400 mb-1.5;
+  }
+
+  .input {
+    @apply w-full rounded-xl bg-space-700/70 px-3.5 py-2.5 text-sm text-slate-100
+           ring-1 ring-white/10 placeholder:text-slate-500 outline-none
+           focus:ring-2 focus:ring-celya-blue/60 transition;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
+           text-sm font-medium transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-celya-gradient text-slate-950 font-semibold shadow-glow
+           hover:brightness-110 active:brightness-95;
+  }
+
+  .btn-ghost {
+    @apply btn bg-white/[0.04] text-slate-200 ring-1 ring-white/10 hover:bg-white/[0.08];
+  }
+
+  .btn-danger {
+    @apply btn bg-rose-500/15 text-rose-300 ring-1 ring-rose-400/25 hover:bg-rose-500/25;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1
+           text-[11px] font-medium ring-1;
+  }
+
+  .gradient-text {
+    @apply bg-celya-gradient bg-clip-text text-transparent;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-400
+           transition hover:bg-white/[0.05] hover:text-slate-100;
+  }
+
+  .nav-link-active {
+    @apply bg-white/[0.07] text-slate-50 ring-1 ring-white/10;
+  }
+
+  .th {
+    @apply px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  .td {
+    @apply px-4 py-3.5 text-sm text-slate-300 align-middle;
+  }
+}
+
+/* Barre de défilement discrète */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.32);
+  background-clip: content-box;
+}
+
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}

@@ -31,6 +31,7 @@ pour Bora, sans dépendance à un projet tiers sous licence contraignante.
 | Edge function | `crm-admin` (v2, `verify_jwt: true`) |
 | Compte admin | `dogrulbora@gmail.com` |
 | Équipe Vercel | `bora` (`team_pPDHLPxzzBYl4oq0J1cnZiUX`) |
+| Dépôt GitHub | `https://github.com/boraboraa/CRM-celya` (branche `main`) — **public, à passer en privé** |
 
 L'URL et la clé publiable sont en dur dans `lib/env.ts`, surchargeables par
 `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`. C'est volontaire :
@@ -186,16 +187,26 @@ l'API bucket exige la clé service_role. À faire depuis le tableau de bord.
 
 ## Reste à faire
 
-1. **Déployer sur Vercel** — jamais fait, le connecteur MCP n'a pas le droit de
-   créer un projet.
-2. **Phase 2 : réception des emails.** `gocelya.com` est sur **Mailgun** (le
+1. **Déployer sur Vercel** — toujours pas fait. Confirmé le 2 août : le
+   connecteur MCP renvoie bien `403 forbidden` à la création de projet (il ne
+   peut que déployer dans un projet existant). Marche à suivre : sur vercel.com
+   (équipe `bora`), Add New → Project → importer `boraboraa/CRM-celya` → Deploy.
+   Aucune variable d'environnement requise (coordonnées en dur dans
+   `lib/env.ts`) ; chaque push sur `main` redéploiera ensuite tout seul.
+   Vérifier après coup : `/` redirige vers `/login`, connexion admin, les cinq
+   écrans, création + suppression d'un client de test.
+2. **Passer le dépôt GitHub en privé** (Settings → General → Change visibility)
+   — ce fichier expose les coordonnées de l'infra et l'email admin.
+3. **Changer le mot de passe admin** depuis Mon compte : celui d'origine suit
+   un motif devinable et la page de connexion est publique.
+4. **Phase 2 : réception des emails.** `gocelya.com` est sur **Mailgun** (le
    plan gratuit inclut 1 route entrante, suffisant). `celya.be` est sur **Zoho**,
    qui a retiré IMAP et le transfert automatique de son offre gratuite → il
    faudra Zoho Mail Lite (~1 €/mois) ou basculer le MX vers ForwardEmail.net.
    Rattachement par adresse exacte, jamais par domaine grand public ; stocker
    `message_id` (contrainte unique = idempotence) et `in_reply_to` pour le fil.
-3. Supprimer le bucket Storage `documents`, vide mais toujours présent.
-4. Activer la protection contre les mots de passe compromis (tableau de bord
+5. Supprimer le bucket Storage `documents`, vide mais toujours présent.
+6. Activer la protection contre les mots de passe compromis (tableau de bord
    Supabase → Authentication).
 
 ---

@@ -31,6 +31,8 @@ pour Bora, sans dépendance à un projet tiers sous licence contraignante.
 | Edge function | `crm-admin` (v2, `verify_jwt: true`) |
 | Compte admin | `dogrulbora@gmail.com` |
 | Équipe Vercel | `bora` (`team_pPDHLPxzzBYl4oq0J1cnZiUX`) |
+| URL de production | `https://celya-accounting-app.vercel.app` — vérifiée de bout en bout le 2 août |
+| Projet Vercel | `celya-accounting-app` — ancien projet de l'app comptable réutilisé, relié au dépôt (push sur `main` = redéploiement auto). À renommer en `celya-crm`, voir Reste à faire |
 | Dépôt GitHub | `https://github.com/boraboraa/CRM-celya` (branche `main`) — **public, à passer en privé** |
 
 L'URL et la clé publiable sont en dur dans `lib/env.ts`, surchargeables par
@@ -122,13 +124,22 @@ transmet de vive voix. L'utilisateur le change dans `/compte`. Mot de passe
 oublié → l'admin le réinitialise. Tout passe par l'edge function `crm-admin`,
 appelée uniquement depuis les server actions avec le JWT de l'appelant.
 
+Le projet Supabase est partagé avec l'ancienne app comptable, donc `auth.users`
+aussi : un compte qui se connecte sans fiche `crm_users` active est redirigé
+vers `/acces-refuse` — page neutre avec bouton de déconnexion, qui ne révèle
+rien sur l'état du compte (ni 500, ni « compte en attente »).
+
 ---
 
 ## Écrans
 
 `/dashboard` (Aujourd'hui) · `/pipeline` (kanban glisser-déposer) ·
 `/clients` + `/clients/[id]` + `/clients/import` · `/taches` ·
-`/equipe` (admin) · `/compte`
+`/equipe` (admin) · `/compte` · `/acces-refuse` (compte connecté sans accès CRM)
+
+« Aujourd'hui » ne liste que les relances dues aujourd'hui ou en retard : une
+relance « dans 3 jours » n'y remonte qu'à son échéance — c'est voulu, elle est
+visible dans `/taches` entre-temps.
 
 Toute l'interface est en **français**, vouvoiement.
 
@@ -150,12 +161,9 @@ Toute l'interface est en **français**, vouvoiement.
 
 ## Déploiement
 
-```bash
-npm install
-npx vercel --prod
-```
-
-Aucune variable d'environnement à configurer.
+Chaque push sur `main` redéploie automatiquement le projet Vercel
+`celya-accounting-app` (intégration GitHub). Aucune variable d'environnement à
+configurer. Déploiement manuel possible avec `npx vercel --prod`.
 
 Migrations SQL : appliquées via le MCP Supabase, copies dans
 `supabase/migrations/`. Edge function : déployée via le MCP Supabase avec
@@ -183,18 +191,28 @@ conclure à tort que la base était vide. Toujours vérifier `status` avant.
 **Suppression d'un bucket Storage.** Impossible en SQL (`protect_delete`) et
 l'API bucket exige la clé service_role. À faire depuis le tableau de bord.
 
+**Frontière client/serveur.** Ne jamais importer une constante depuis un module
+`"use client"` dans un composant serveur : Next.js remplace la valeur par une
+référence client inutilisable (`TypeError: NAV_ITEMS is not iterable`, 500 sur
+toutes les pages internes) et le build reste vert, car les routes dynamiques ne
+s'exécutent pas à la compilation. Les constantes partagées vivent dans un module
+neutre — voir `lib/nav.ts`.
+
+**Connecteur MCP Vercel.** Il ne voit pas le projet `celya-accounting-app`
+(l'équipe `bora` accessible au connecteur n'en contient pas la trace) : suivi de
+déploiement impossible par le MCP. Vérifier la production directement en HTTP,
+ou depuis vercel.com.
+
 ---
 
 ## Reste à faire
 
-1. **Déployer sur Vercel** — toujours pas fait. Confirmé le 2 août : le
-   connecteur MCP renvoie bien `403 forbidden` à la création de projet (il ne
-   peut que déployer dans un projet existant). Marche à suivre : sur vercel.com
-   (équipe `bora`), Add New → Project → importer `boraboraa/CRM-celya` → Deploy.
-   Aucune variable d'environnement requise (coordonnées en dur dans
-   `lib/env.ts`) ; chaque push sur `main` redéploiera ensuite tout seul.
-   Vérifier après coup : `/` redirige vers `/login`, connexion admin, les cinq
-   écrans, création + suppression d'un client de test.
+1. **Renommer le projet Vercel** `celya-accounting-app` → `celya-crm`
+   (vercel.com → Settings → General → Project Name), pour que l'URL corresponde
+   au contenu. Attention : ce projet portait l'app comptable et le renommage
+   change l'URL de production — ne le faire qu'après avoir confirmé que l'app
+   comptable n'a plus besoin de ce projet, puis mettre à jour l'URL dans ce
+   fichier. Le connecteur MCP ne voit pas ce projet : à faire à la main.
 2. **Passer le dépôt GitHub en privé** (Settings → General → Change visibility)
    — ce fichier expose les coordonnées de l'infra et l'email admin.
 3. **Changer le mot de passe admin** depuis Mon compte : celui d'origine suit

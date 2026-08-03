@@ -334,16 +334,45 @@ brut : `bump_last_contact` et `sync_next_action` référençaient encore
 `clients` après le rename et auraient cassé au premier insert — toujours les
 recréer dans la même migration.
 
+**Ordre migration ↔ déploiement — la règle à ne jamais enfreindre.** Le 3 août,
+la base a été migrée (`clients` → `prospects`) *avant* que le code correspondant
+ne soit en ligne : la production a interrogé `public.clients` disparue et toutes
+les pages de données ont renvoyé « Could not find the table 'public.clients' in
+the schema cache ». Sans conséquence ici (tables vides), mais avec de vrais
+prospects c'eût été une interruption réelle. **Toute migration doit rester
+compatible avec le code déjà en production** — vue de compatibilité, colonne
+conservée le temps d'une transition, renommage en deux temps (ajouter la
+nouvelle forme, migrer le code, retirer l'ancienne) — **ou bien le code part en
+premier et la migration suit. Jamais l'inverse.** Un renommage sec de table est
+par nature incompatible : il exige que le code soit déployé dans le même geste,
+pas après.
+
+**`email_accounts` : RLS activée sans aucune politique — c'est voulu, ne pas le
+« corriger ».** L'audit de sécurité Supabase (et n'importe quel lint RLS) signale
+« RLS enabled, no policy » sur cette table et proposera d'ajouter une politique.
+**Ignorer.** Sans politique, la table est fermée à *tous* les rôles clients
+(`anon`, `authenticated`) et n'est accessible qu'aux fonctions serveur en
+`service_role` (l'edge function `crm-mail`) — exactement ce qu'on veut, puisque
+c'est elle qui porte `credentials_secret_id`, la référence vers le mot de passe
+de la boîte mail de Bora dans le Vault. Y ajouter la moindre politique
+l'ouvrirait. Les autres avertissements de l'audit (`is_admin`, `is_member`,
+`can_see_prospect`, `mail_account_status` exécutables par `authenticated`) sont
+le fonctionnement normal des fonctions d'appui de la RLS ; `mail_account_status`
+a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
+« des identifiants existent », et n'est ouverte qu'aux admins. Rien à changer.
+
 ---
 
 ## Reste à faire
 
-1. **Fusionner la branche `claude/celya-crm-phone-prospecting-wmgwry` dans
-   `main`.** La base de données est déjà migrée (prospects, états, Zoho) : tant
-   que `main` n'est pas mis à jour, la production interroge encore `clients`
-   et ses pages de données sont cassées. Les tables étaient vides, l'impact
-   est nul, mais la fusion est le premier geste à poser.
-2. **Activer la boîte Zoho** (une fois la branche en production) :
+1. ~~**Fusionner la branche dans `main`.**~~ **Fait le 3 août** :
+   `claude/celya-crm-phone-prospecting-wmgwry` (`d9ac296`) fusionnée en
+   fast-forward dans `main`, poussée, redéployée automatiquement par Vercel.
+   Production vérifiée de bout en bout à travers l'UF réelle (login, file
+   d'appels, création d'un prospect de test, « pas répondu » → rappel J+2 +
+   compteur, « rappeler plus tard » → sortie de file, suppression) : les
+   pages de données répondent, plus de « public.clients not found ».
+2. **Activer la boîte Zoho** (le code est en production) :
    dans Zoho Mail, créer un mot de passe d'application (Sécurité → Mots de
    passe d'application) et vérifier qu'IMAP est activé (Paramètres → Comptes
    mail) ; puis `/reglages-email` → adresse, mot de passe, centre de données

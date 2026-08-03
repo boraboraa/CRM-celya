@@ -2,18 +2,18 @@ import Link from "next/link";
 import { completeTaskAction, snoozeTaskAction, deleteTaskAction } from "@/app/actions";
 import { fmtDateTime, relative } from "@/lib/constants";
 
-export type TaskWithClient = {
+export type TaskWithProspect = {
   id: string;
   title: string;
   details: string | null;
   due_at: string;
   status: string;
   priority: number;
-  client_id: string | null;
-  clients?: { id: string; company_name: string; contact_name: string | null } | null;
+  prospect_id: string | null;
+  prospects?: { id: string; company_name: string; contact_name: string | null } | null;
 };
 
-export function TaskRow({ task }: { task: TaskWithClient }) {
+export function TaskRow({ task }: { task: TaskWithProspect }) {
   const done = task.status === "fait";
   const overdue = !done && new Date(task.due_at).getTime() < Date.now();
 
@@ -21,7 +21,7 @@ export function TaskRow({ task }: { task: TaskWithClient }) {
     <li className="flex flex-wrap items-start gap-3 px-4 py-3.5 sm:flex-nowrap">
       <form action={completeTaskAction} className="pt-0.5">
         <input type="hidden" name="id" value={task.id} />
-        <input type="hidden" name="client_id" value={task.client_id ?? ""} />
+        <input type="hidden" name="prospect_id" value={task.prospect_id ?? ""} />
         <input type="hidden" name="done" value={done ? "0" : "1"} />
         <button
           type="submit"
@@ -53,13 +53,13 @@ export function TaskRow({ task }: { task: TaskWithClient }) {
         </p>
 
         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-          {task.clients && (
+          {task.prospects && (
             <>
               <Link
-                href={`/clients/${task.clients.id}`}
+                href={`/prospects/${task.prospects.id}`}
                 className="text-slate-400 underline-offset-2 hover:text-celya-cyan hover:underline"
               >
-                {task.clients.company_name}
+                {task.prospects.company_name}
               </Link>
               <span aria-hidden>·</span>
             </>
@@ -82,7 +82,7 @@ export function TaskRow({ task }: { task: TaskWithClient }) {
           {[1, 3, 7].map((d) => (
             <form key={d} action={snoozeTaskAction}>
               <input type="hidden" name="id" value={task.id} />
-              <input type="hidden" name="client_id" value={task.client_id ?? ""} />
+              <input type="hidden" name="prospect_id" value={task.prospect_id ?? ""} />
               <input type="hidden" name="days" value={d} />
               <button
                 type="submit"
@@ -95,7 +95,7 @@ export function TaskRow({ task }: { task: TaskWithClient }) {
           ))}
           <form action={deleteTaskAction}>
             <input type="hidden" name="id" value={task.id} />
-            <input type="hidden" name="client_id" value={task.client_id ?? ""} />
+            <input type="hidden" name="prospect_id" value={task.prospect_id ?? ""} />
             <button
               type="submit"
               title="Supprimer la relance"

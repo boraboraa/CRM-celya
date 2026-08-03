@@ -5,10 +5,12 @@ import { addActivityAction } from "@/app/actions";
 import { ACTIVITY_LABEL } from "@/lib/constants";
 import type { ActivityType } from "@/lib/types";
 
-const TYPES: ActivityType[] = ["appel", "email", "reunion", "whatsapp", "note"];
+// Les résultats d'appel passent par CallActions (cadence automatique) ;
+// ici on note les autres échanges : email, réunion, note libre…
+const TYPES: ActivityType[] = ["note", "email", "reunion", "whatsapp"];
 
-export function QuickNote({ clientId }: { clientId: string }) {
-  const [type, setType] = useState<ActivityType>("appel");
+export function QuickNote({ prospectId }: { prospectId: string }) {
+  const [type, setType] = useState<ActivityType>("note");
   const formRef = useRef<HTMLFormElement>(null);
 
   return (
@@ -17,11 +19,11 @@ export function QuickNote({ clientId }: { clientId: string }) {
       action={async (fd) => {
         await addActivityAction(fd);
         formRef.current?.reset();
-        setType("appel");
+        setType("note");
       }}
       className="card p-5"
     >
-      <input type="hidden" name="client_id" value={clientId} />
+      <input type="hidden" name="prospect_id" value={prospectId} />
       <input type="hidden" name="type" value={type} />
 
       <div className="mb-4 flex flex-wrap gap-1.5">
@@ -46,29 +48,10 @@ export function QuickNote({ clientId }: { clientId: string }) {
         rows={3}
         required
         className="input resize-y"
-        placeholder={
-          type === "appel"
-            ? "Ce qui s'est dit pendant l'appel, ce qu'il/elle attend, objections…"
-            : "Notez ce qu'il faut retenir."
-        }
+        placeholder="Notez ce qu'il faut retenir."
       />
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
-        <div>
-          <label className="label" htmlFor="outcome">
-            Résultat
-          </label>
-          <select id="outcome" name="outcome" className="input" defaultValue="">
-            <option value="">—</option>
-            <option value="Intéressé">Intéressé</option>
-            <option value="À rappeler">À rappeler</option>
-            <option value="Pas joignable">Pas joignable</option>
-            <option value="Rendez-vous fixé">Rendez-vous fixé</option>
-            <option value="Pas intéressé">Pas intéressé</option>
-            <option value="Devis demandé">Devis demandé</option>
-          </select>
-        </div>
-
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label" htmlFor="duration_min">
             Durée (min)
@@ -90,7 +73,7 @@ export function QuickNote({ clientId }: { clientId: string }) {
             id="follow_up_days"
             name="follow_up_days"
             className="input"
-            defaultValue="3"
+            defaultValue="none"
           >
             <option value="none">Pas de relance</option>
             <option value="1">1 jour</option>
@@ -114,7 +97,7 @@ export function QuickNote({ clientId }: { clientId: string }) {
           Enregistrer
         </button>
         <span className="text-xs text-slate-500">
-          Une relance est créée automatiquement selon le délai choisi.
+          Une relance est créée si vous choisissez un délai.
         </span>
       </div>
     </form>

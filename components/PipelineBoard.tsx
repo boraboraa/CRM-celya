@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
-import { moveClientAction } from "@/app/actions";
+import { moveProspectAction } from "@/app/actions";
 import {
   STATUS_ORDER,
   STATUS_LABEL,
@@ -10,28 +10,28 @@ import {
   fmtMoney,
   relative,
 } from "@/lib/constants";
-import type { ClientStatus } from "@/lib/types";
+import type { ProspectStatus } from "@/lib/types";
 
-export type BoardClient = {
+export type BoardProspect = {
   id: string;
   company_name: string;
   contact_name: string | null;
-  status: ClientStatus;
+  status: ProspectStatus;
   value_estimate: number | null;
   next_action_at: string | null;
 };
 
-export function PipelineBoard({ clients }: { clients: BoardClient[] }) {
-  const [items, setItems] = useState(clients);
+export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
+  const [items, setItems] = useState(prospects);
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overColumn, setOverColumn] = useState<ClientStatus | null>(null);
+  const [overColumn, setOverColumn] = useState<ProspectStatus | null>(null);
   const [error, setError] = useState<string>();
   const [, startTransition] = useTransition();
 
   // Resynchronise quand le serveur renvoie des données fraîches.
-  useEffect(() => setItems(clients), [clients]);
+  useEffect(() => setItems(prospects), [prospects]);
 
-  function move(id: string, status: ClientStatus) {
+  function move(id: string, status: ProspectStatus) {
     const current = items.find((c) => c.id === id);
     if (!current || current.status === status) return;
 
@@ -43,7 +43,7 @@ export function PipelineBoard({ clients }: { clients: BoardClient[] }) {
 
     startTransition(async () => {
       try {
-        await moveClientAction(id, status);
+        await moveProspectAction(id, status);
       } catch {
         setItems(previous);
         setError("Le déplacement n'a pas pu être enregistré. Réessayez.");
@@ -139,7 +139,7 @@ export function PipelineBoard({ clients }: { clients: BoardClient[] }) {
                           dragging ? "opacity-40" : ""
                         }`}
                       >
-                        <Link href={`/clients/${c.id}`} className="block">
+                        <Link href={`/prospects/${c.id}`} className="block">
                           <p className="truncate text-sm font-medium text-slate-100">
                             {c.company_name}
                           </p>
@@ -163,7 +163,7 @@ export function PipelineBoard({ clients }: { clients: BoardClient[] }) {
                         {/* Repli tactile : le glisser-déposer HTML5 ne marche pas au doigt. */}
                         <select
                           value={c.status}
-                          onChange={(e) => move(c.id, e.target.value as ClientStatus)}
+                          onChange={(e) => move(c.id, e.target.value as ProspectStatus)}
                           aria-label={`Statut de ${c.company_name}`}
                           className="mt-2.5 w-full rounded-lg bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60 lg:hidden"
                         >

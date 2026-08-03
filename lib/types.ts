@@ -1,13 +1,29 @@
 export type UserRole = "admin" | "commercial";
 
-export type ClientStatus =
-  | "nouveau"
-  | "contacte"
-  | "qualifie"
+/** Trajet d'un démarchage téléphonique, de la liste brute au client signé. */
+export type ProspectStatus =
+  | "a_appeler"
+  | "sans_reponse"
+  | "contact_etabli"
+  | "rappel_programme"
+  | "rdv"
   | "proposition"
-  | "negociation"
   | "gagne"
   | "perdu";
+
+/** Résultats possibles d'une tentative d'appel (voir CALL_OUTCOMES). */
+export type CallOutcome =
+  | "pas_repondu"
+  | "repondeur"
+  | "barrage_secretaire"
+  | "mauvais_numero"
+  | "refus"
+  | "rappeler_plus_tard"
+  | "interesse"
+  | "rdv_fixe";
+
+/** Créneau horaire d'un appel, heure de Bruxelles. */
+export type CallSlot = "matin" | "midi" | "apres_midi" | "fin_journee";
 
 export type ActivityType =
   | "appel"
@@ -30,7 +46,7 @@ export type Profile = {
   created_at: string;
 };
 
-export type Client = {
+export type Prospect = {
   id: string;
   company_name: string;
   contact_name: string | null;
@@ -40,7 +56,7 @@ export type Client = {
   sector: string | null;
   city: string | null;
   country: string | null;
-  status: ClientStatus;
+  status: ProspectStatus;
   source: string | null;
   value_estimate: number | null;
   currency: string;
@@ -50,6 +66,9 @@ export type Client = {
   next_action_at: string | null;
   last_contact_at: string | null;
   lost_reason: string | null;
+  call_attempts: number;
+  last_outcome: CallOutcome | null;
+  last_call_slot: CallSlot | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -57,7 +76,7 @@ export type Client = {
 
 export type Activity = {
   id: string;
-  client_id: string;
+  prospect_id: string;
   author_id: string | null;
   type: ActivityType;
   subject: string | null;
@@ -70,7 +89,7 @@ export type Activity = {
 
 export type Task = {
   id: string;
-  client_id: string | null;
+  prospect_id: string | null;
   title: string;
   details: string | null;
   due_at: string;
@@ -84,7 +103,7 @@ export type Task = {
 
 export type Email = {
   id: string;
-  client_id: string | null;
+  prospect_id: string | null;
   direction: "entrant" | "sortant";
   from_name: string | null;
   from_email: string;

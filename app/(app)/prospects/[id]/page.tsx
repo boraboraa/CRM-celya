@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { StatusChip, Avatar } from "@/components/ui";
-import { ClientForm } from "@/components/ClientForm";
+import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
-import { TaskRow, type TaskWithClient } from "@/components/TaskRow";
+import { CallActions } from "@/components/CallActions";
+import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
 import {
-  updateClientAction,
-  setClientStatusAction,
-  deleteClientAction,
+  updateProspectAction,
+  setProspectStatusAction,
+  deleteProspectAction,
   createTaskAction,
 } from "@/app/actions";
 import {
@@ -20,7 +21,7 @@ import {
   fmtMoney,
   relative,
 } from "@/lib/constants";
-import type { Activity, Client, Email, Profile } from "@/lib/types";
+import type { Activity, Prospect, Email, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ type TimelineItem =
   | { kind: "activity"; at: string; data: Activity & { crm_users: { full_name: string | null } | null } }
   | { kind: "email"; at: string; data: Email };
 
-export default async function ClientDetailPage({
+export default async function ProspectDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -37,9 +38,9 @@ export default async function ClientDetailPage({
   const supabase = await createClient();
   const session = await getSession();
 
-  const [clientRes, membersRes, activitiesRes, emailsRes, tasksRes] =
+  const [prospectRes, membersRes, activitiesRes, emailsRes, tasksRes] =
     await Promise.all([
-      supabase.from("clients").select("*").eq("id", id).maybeSingle(),
+      supabase.from("prospects").select("*").eq("id", id).maybeSingle(),
       supabase
         .from("crm_users")
         .select("id, full_name, email")
@@ -48,31 +49,31 @@ export default async function ClientDetailPage({
       supabase
         .from("activities")
         .select("*, crm_users!activities_author_id_fkey(full_name)")
-        .eq("client_id", id)
+        .eq("prospect_id", id)
         .order("occurred_at", { ascending: false })
         .limit(100),
       supabase
         .from("emails")
         .select("*")
-        .eq("client_id", id)
+        .eq("prospect_id", id)
         .order("received_at", { ascending: false })
         .limit(50),
       supabase
         .from("tasks")
-        .select("id, title, details, due_at, status, priority, client_id")
-        .eq("client_id", id)
+        .select("id, title, details, due_at, status, priority, prospect_id")
+        .eq("prospect_id", id)
         .order("status")
         .order("due_at", { ascending: true }),
     ]);
 
-  const client = clientRes.data as Client | null;
-  if (!client) notFound();
+  const prospect = prospectRes.data as Prospect | null;
+  if (!prospect) notFound();
 
   const members = (membersRes.data ?? []) as Pick<
     Profile,
     "id" | "full_name" | "email"
   >[];
-  const owner = members.find((m) => m.id === client.owner_id);
+  const owner = members.find((m) => m.id === prospect.owner_id);
 
   const timeline: TimelineItem[] = [
     ...((activitiesRes.data ?? []) as never[]).map((a: never) => ({
@@ -87,7 +88,7 @@ export default async function ClientDetailPage({
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
-  const tasks = (tasksRes.data ?? []) as unknown as TaskWithClient[];
+  const tasks = (tasksRes.data ?? []) as unknown as TaskWithProspect[];
   const openTasks = tasks.filter((t) => t.status === "a_faire");
   const doneTasks = tasks.filter((t) => t.status !== "a_faire");
 
@@ -96,46 +97,46 @@ export default async function ClientDetailPage({
       {/* ---------- En-tête ---------- */}
       <div className="mb-6">
         <Link
-          href="/clients"
+          href="/prospects"
           className="text-xs text-slate-500 transition hover:text-slate-300"
         >
-          ← Tous les clients
+          ← Tous les prospects
         </Link>
 
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-50">
-              {client.company_name}
+              {prospect.company_name}
             </h1>
             <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400">
-              {client.contact_name && <span>{client.contact_name}</span>}
-              {client.phone && (
+              {prospect.contact_name && <span>{prospect.contact_name}</span>}
+              {prospect.phone && (
                 <a
-                  href={`tel:${client.phone.replace(/\s/g, "")}`}
+                  href={`tel:${prospect.phone.replace(/\s/g, "")}`}
                   className="text-celya-cyan hover:underline"
                 >
-                  {client.phone}
+                  {prospect.phone}
                 </a>
               )}
-              {client.email && (
+              {prospect.email && (
                 <a
-                  href={`mailto:${client.email}`}
+                  href={`mailto:${prospect.email}`}
                   className="text-celya-cyan hover:underline"
                 >
-                  {client.email}
+                  {prospect.email}
                 </a>
               )}
-              {client.city && <span>{client.city}</span>}
+              {prospect.city && <span>{prospect.city}</span>}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <StatusChip status={client.status} />
-            <form action={setClientStatusAction} className="flex items-center gap-2">
-              <input type="hidden" name="id" value={client.id} />
+            <StatusChip status={prospect.status} />
+            <form action={setProspectStatusAction} className="flex items-center gap-2">
+              <input type="hidden" name="id" value={prospect.id} />
               <select
                 name="status"
-                defaultValue={client.status}
+                defaultValue={prospect.status}
                 className="input py-2 text-xs"
               >
                 {STATUS_ORDER.map((s) => (
@@ -155,7 +156,7 @@ export default async function ClientDetailPage({
               Valeur estimée
             </p>
             <p className="mt-0.5 text-sm font-medium text-slate-100">
-              {fmtMoney(client.value_estimate, client.currency)}
+              {fmtMoney(prospect.value_estimate, prospect.currency)}
             </p>
           </div>
           <div className="card px-4 py-3">
@@ -163,22 +164,28 @@ export default async function ClientDetailPage({
               Dernier contact
             </p>
             <p className="mt-0.5 text-sm font-medium text-slate-100">
-              {client.last_contact_at ? relative(client.last_contact_at) : "Jamais"}
+              {prospect.last_contact_at ? relative(prospect.last_contact_at) : "Jamais"}
+              {prospect.call_attempts > 0 && (
+                <span className="text-xs text-slate-500">
+                  {" "}
+                  · {prospect.call_attempts} appel{prospect.call_attempts > 1 ? "s" : ""}
+                </span>
+              )}
             </p>
           </div>
           <div className="card px-4 py-3">
             <p className="text-[11px] uppercase tracking-wider text-slate-500">
-              Prochaine relance
+              Prochain rappel
             </p>
             <p
               className={`mt-0.5 text-sm font-medium ${
-                client.next_action_at &&
-                new Date(client.next_action_at).getTime() < Date.now()
+                prospect.next_action_at &&
+                new Date(prospect.next_action_at).getTime() < Date.now()
                   ? "text-rose-400"
                   : "text-slate-100"
               }`}
             >
-              {client.next_action_at ? fmtDateTime(client.next_action_at) : "—"}
+              {prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—"}
             </p>
           </div>
           <div className="card flex items-center gap-3 px-4 py-3">
@@ -200,9 +207,25 @@ export default async function ClientDetailPage({
         <div className="space-y-6 lg:col-span-2">
           <section>
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Résultat d&apos;appel
+            </h2>
+            <div className="card p-5">
+              <CallActions
+                prospect={{
+                  id: prospect.id,
+                  company_name: prospect.company_name,
+                  status: prospect.status,
+                  call_attempts: prospect.call_attempts,
+                }}
+              />
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Noter un échange
             </h2>
-            <QuickNote clientId={client.id} />
+            <QuickNote prospectId={prospect.id} />
           </section>
 
           <section>
@@ -281,19 +304,19 @@ export default async function ClientDetailPage({
                 Modifier la fiche
               </summary>
               <div className="mt-5">
-                <ClientForm
-                  client={client}
+                <ProspectForm
+                  prospect={prospect}
                   members={members}
-                  action={updateClientAction}
+                  action={updateProspectAction}
                   currentUserId={session?.userId}
                 />
               </div>
 
-              <form action={deleteClientAction} className="mt-8 border-t border-white/[0.06] pt-5">
-                <input type="hidden" name="id" value={client.id} />
-                <button className="btn-danger">Supprimer ce client</button>
+              <form action={deleteProspectAction} className="mt-8 border-t border-white/[0.06] pt-5">
+                <input type="hidden" name="id" value={prospect.id} />
+                <button className="btn-danger">Supprimer ce prospect</button>
                 <p className="mt-2 text-[11px] text-slate-500">
-                  Supprime aussi son historique et ses relances. Action définitive.
+                  Supprime aussi son historique et ses rappels. Action définitive.
                 </p>
               </form>
             </details>
@@ -308,7 +331,7 @@ export default async function ClientDetailPage({
             </h2>
 
             <form action={createTaskAction} className="card mb-4 space-y-3 p-5">
-              <input type="hidden" name="client_id" value={client.id} />
+              <input type="hidden" name="prospect_id" value={prospect.id} />
               <div>
                 <label className="label" htmlFor="title">
                   Quoi faire
@@ -351,7 +374,7 @@ export default async function ClientDetailPage({
 
             {openTasks.length === 0 ? (
               <p className="card px-5 py-6 text-center text-sm text-slate-500">
-                Aucune relance planifiée.
+                Aucun rappel planifié.
               </p>
             ) : (
               <ul className="card divide-y divide-white/[0.05]">
@@ -364,7 +387,7 @@ export default async function ClientDetailPage({
             {doneTasks.length > 0 && (
               <details className="mt-4">
                 <summary className="cursor-pointer px-1 text-xs text-slate-500 hover:text-slate-300">
-                  {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} terminée
+                  {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} passée
                   {doneTasks.length > 1 ? "s" : ""}
                 </summary>
                 <ul className="card mt-2 divide-y divide-white/[0.05]">
@@ -376,13 +399,13 @@ export default async function ClientDetailPage({
             )}
           </section>
 
-          {client.notes && (
+          {prospect.notes && (
             <section>
               <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
                 Notes générales
               </h2>
               <p className="card whitespace-pre-wrap px-5 py-4 text-sm leading-relaxed text-slate-300">
-                {client.notes}
+                {prospect.notes}
               </p>
             </section>
           )}

@@ -2,13 +2,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
-import { ClientForm } from "@/components/ClientForm";
-import { createClientAction } from "@/app/actions";
+import { ProspectForm } from "@/components/ProspectForm";
+import { createProspectAction } from "@/app/actions";
 import type { Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewClientPage() {
+export default async function NewProspectPage() {
   const supabase = await createClient();
   const session = await getSession();
 
@@ -23,19 +23,19 @@ export default async function NewClientPage() {
   return (
     <>
       <PageHeader
-        title="Nouveau client"
-        subtitle="Créez la fiche, puis notez chaque appel et planifiez la relance."
+        title="Nouveau prospect"
+        subtitle="Créez la fiche, puis notez chaque appel et planifiez le rappel."
         action={
-          <Link href="/clients" className="btn-ghost">
+          <Link href="/prospects" className="btn-ghost">
             Annuler
           </Link>
         }
       />
 
       <div className="card max-w-3xl p-6">
-        <ClientForm
+        <ProspectForm
           members={members}
-          action={createClientAction}
+          action={createProspectAction}
           submitLabel="Créer la fiche"
           currentUserId={session?.userId}
         />

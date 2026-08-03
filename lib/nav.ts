@@ -5,9 +5,9 @@
 export type NavItem = { href: string; label: string; icon: string };
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Aujourd'hui", icon: "◉" },
+  { href: "/dashboard", label: "Appels", icon: "◉" },
   { href: "/pipeline", label: "Pipeline", icon: "▤" },
-  { href: "/clients", label: "Clients", icon: "◇" },
+  { href: "/prospects", label: "Prospects", icon: "◇" },
   { href: "/taches", label: "Relances", icon: "◷" },
 ];
 

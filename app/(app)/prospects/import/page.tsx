@@ -27,7 +27,7 @@ export default async function ImportPage() {
         title="Importer des prospects"
         subtitle="Chargez une liste d'entreprises depuis un fichier CSV."
         action={
-          <Link href="/clients" className="btn-ghost">
+          <Link href="/prospects" className="btn-ghost">
             Annuler
           </Link>
         }

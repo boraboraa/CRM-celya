@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader, EmptyState } from "@/components/ui";
-import { TaskRow, type TaskWithClient } from "@/components/TaskRow";
+import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
 import { createTaskAction } from "@/app/actions";
 import { todayBounds } from "@/lib/time";
 
@@ -23,7 +23,7 @@ export default async function TasksPage({
   let query = supabase
     .from("tasks")
     .select(
-      "id, title, details, due_at, status, priority, client_id, clients(id, company_name, contact_name)"
+      "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name)"
     );
 
   if (view === "terminees") {
@@ -43,7 +43,7 @@ export default async function TasksPage({
   }
 
   const { data } = await query.limit(200);
-  const tasks = (data ?? []) as unknown as TaskWithClient[];
+  const tasks = (data ?? []) as unknown as TaskWithProspect[];
 
   const filters = [
     { key: "ouvertes", label: "Toutes les relances" },
@@ -112,9 +112,9 @@ export default async function TasksPage({
                 ? "Rien en retard — bravo"
                 : "Aucune relance planifiée"
           }
-          hint="Les relances se créent aussi automatiquement quand vous notez un appel sur une fiche client."
-          href="/clients"
-          cta="Voir les clients"
+          hint="Les rappels se créent aussi automatiquement quand vous enregistrez un résultat d'appel sur une fiche prospect."
+          href="/prospects"
+          cta="Voir les prospects"
         />
       ) : (
         <ul className="card divide-y divide-white/[0.05]">

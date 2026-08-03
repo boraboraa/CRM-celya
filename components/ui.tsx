@@ -1,8 +1,8 @@
 import Link from "next/link";
-import type { ClientStatus } from "@/lib/types";
+import type { ProspectStatus } from "@/lib/types";
 import { STATUS_CHIP, STATUS_LABEL, STATUS_DOT, initials } from "@/lib/constants";
 
-export function StatusChip({ status }: { status: ClientStatus }) {
+export function StatusChip({ status }: { status: ProspectStatus }) {
   return (
     <span className={`chip ${STATUS_CHIP[status]}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />

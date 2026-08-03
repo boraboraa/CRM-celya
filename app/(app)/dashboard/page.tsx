@@ -1,192 +1,257 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { todayBounds } from "@/lib/time";
-import { PageHeader, Stat, StatusChip, EmptyState, Avatar } from "@/components/ui";
-import { TaskRow, type TaskWithClient } from "@/components/TaskRow";
-import { ACTIVITY_LABEL, fmtMoney, relative } from "@/lib/constants";
-import type { ActivityType, ClientStatus } from "@/lib/types";
+import { todayBounds, slotOfISO } from "@/lib/time";
+import { PageHeader, StatusChip, EmptyState } from "@/components/ui";
+import { CallActions } from "@/components/CallActions";
+import {
+  CALL_OUTCOMES,
+  CALL_SLOT_LABEL,
+  OTHER_SLOT,
+  relative,
+} from "@/lib/constants";
+import type { CallOutcome, CallSlot, ProspectStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const OPEN_STATUSES: ClientStatus[] = [
-  "nouveau",
-  "contacte",
-  "qualifie",
+/** Statuts qui peuvent porter un rappel dû (tout sauf gagné/perdu). */
+const RAPPEL_STATUSES: ProspectStatus[] = [
+  "a_appeler",
+  "sans_reponse",
+  "contact_etabli",
+  "rappel_programme",
+  "rdv",
   "proposition",
-  "negociation",
 ];
+
+type QueueProspect = {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  phone: string | null;
+  city: string | null;
+  status: ProspectStatus;
+  call_attempts: number;
+  last_outcome: CallOutcome | null;
+  last_contact_at: string | null;
+  next_action_at: string | null;
+};
+
+const QUEUE_SELECT =
+  "id, company_name, contact_name, phone, city, status, call_attempts, last_outcome, last_contact_at, next_action_at";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
   const session = await getSession();
-  const { end } = todayBounds();
+  const { start, end } = todayBounds();
 
-  const [dueRes, clientsRes, activityRes, staleRes] = await Promise.all([
+  const [overdueRes, todayRes, neverRes] = await Promise.all([
+    // 1. En retard — rappels dont la date est passée, les plus anciens d'abord.
     supabase
-      .from("tasks")
-      .select("id, title, details, due_at, status, priority, client_id, clients(id, company_name, contact_name)")
-      .eq("status", "a_faire")
-      .lte("due_at", end)
-      .order("due_at", { ascending: true })
-      .limit(50),
+      .from("prospects")
+      .select(QUEUE_SELECT)
+      .in("status", RAPPEL_STATUSES)
+      .lt("next_action_at", start)
+      .order("next_action_at", { ascending: true })
+      .limit(60),
 
-    supabase.from("clients").select("id, status, value_estimate"),
-
+    // 2. Aujourd'hui — rappels du jour (un rappel programmé y remonte seul).
     supabase
-      .from("activities")
-      .select("id, type, subject, body, occurred_at, client_id, clients(id, company_name)")
-      .order("occurred_at", { ascending: false })
-      .limit(8),
+      .from("prospects")
+      .select(QUEUE_SELECT)
+      .in("status", RAPPEL_STATUSES)
+      .gte("next_action_at", start)
+      .lte("next_action_at", end)
+      .order("next_action_at", { ascending: true })
+      .limit(60),
 
+    // 3. Jamais appelés.
     supabase
-      .from("clients")
-      .select("id, company_name, contact_name, status, last_contact_at, owner_id")
-      .in("status", OPEN_STATUSES)
-      .or(
-        `last_contact_at.is.null,last_contact_at.lt.${new Date(Date.now() - 14 * 86400000).toISOString()}`
-      )
-      .order("last_contact_at", { ascending: true, nullsFirst: true })
-      .limit(6),
+      .from("prospects")
+      .select(QUEUE_SELECT)
+      .eq("status", "a_appeler")
+      .order("created_at", { ascending: true })
+      .limit(60),
   ]);
 
-  const tasks = (dueRes.data ?? []) as unknown as TaskWithClient[];
-  const clients = clientsRes.data ?? [];
-  const activities = (activityRes.data ?? []) as unknown as {
-    id: string;
-    type: ActivityType;
-    subject: string | null;
-    body: string | null;
-    occurred_at: string;
-    clients: { id: string; company_name: string } | null;
-  }[];
-  const stale = staleRes.data ?? [];
+  const overdue = (overdueRes.data ?? []) as QueueProspect[];
+  const today = (todayRes.data ?? []) as QueueProspect[];
+  const scheduled = new Set([...overdue, ...today].map((p) => p.id));
+  const never = ((neverRes.data ?? []) as QueueProspect[]).filter(
+    (p) => !scheduled.has(p.id)
+  );
 
-  const openClients = clients.filter((c) =>
-    OPEN_STATUSES.includes(c.status as ClientStatus)
-  );
-  const pipelineValue = openClients.reduce(
-    (sum, c) => sum + Number(c.value_estimate ?? 0),
-    0
-  );
-  const won = clients.filter((c) => c.status === "gagne").length;
-  const overdue = tasks.filter(
-    (t) => new Date(t.due_at).getTime() < Date.now()
-  ).length;
+  // Variation d'horaire : si les 3 derniers appels d'un prospect ont eu lieu
+  // dans le même créneau, on en propose un autre.
+  const calledIds = [...overdue, ...today].map((p) => p.id);
+  const slotHints = new Map<string, string>();
+  if (calledIds.length > 0) {
+    const { data: calls } = await supabase
+      .from("activities")
+      .select("prospect_id, occurred_at")
+      .in("prospect_id", calledIds)
+      .eq("type", "appel")
+      .order("occurred_at", { ascending: false })
+      .limit(400);
+
+    const byProspect = new Map<string, CallSlot[]>();
+    for (const c of calls ?? []) {
+      const list = byProspect.get(c.prospect_id) ?? [];
+      if (list.length < 3) {
+        list.push(slotOfISO(c.occurred_at));
+        byProspect.set(c.prospect_id, list);
+      }
+    }
+    for (const [id, slots] of byProspect) {
+      if (slots.length === 3 && slots.every((s) => s === slots[0])) {
+        slotHints.set(
+          id,
+          `3 derniers appels ${CALL_SLOT_LABEL[slots[0]]} — essayez ${CALL_SLOT_LABEL[OTHER_SLOT[slots[0]]]}.`
+        );
+      }
+    }
+  }
 
   const firstName = session?.me?.full_name?.split(" ")[0];
+  const empty = overdue.length + today.length + never.length === 0;
 
   return (
     <>
       <PageHeader
-        title={firstName ? `Bonjour ${firstName}` : "Aujourd'hui"}
-        subtitle="Ce qui doit être relancé, et où en est le pipeline."
+        title={firstName ? `Bonjour ${firstName}` : "File d'appels"}
+        subtitle="Qui j'appelle maintenant — en retard d'abord, puis le jour, puis les jamais appelés."
         action={
-          <Link href="/clients/nouveau" className="btn-primary">
-            + Nouveau client
+          <Link href="/prospects/nouveau" className="btn-primary">
+            + Nouveau prospect
           </Link>
         }
       />
 
-      <div className="mb-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          label="À relancer"
-          value={tasks.length}
-          tone={tasks.length ? "warn" : "default"}
-          hint={overdue ? `dont ${overdue} en retard` : "aujourd'hui ou avant"}
+      {empty ? (
+        <EmptyState
+          title="Rien à appeler pour l'instant"
+          hint="Ajoutez des prospects ou importez une liste : ils apparaîtront ici, dans l'ordre où il faut les appeler."
+          href="/prospects/nouveau"
+          cta="Créer un prospect"
         />
-        <Stat label="Clients en cours" value={openClients.length} />
-        <Stat label="Pipeline estimé" value={fmtMoney(pipelineValue)} />
-        <Stat label="Gagnés" value={won} tone={won ? "good" : "default"} />
-      </div>
+      ) : (
+        <div className="space-y-8">
+          <QueueSection
+            title="En retard"
+            tone="late"
+            prospects={overdue}
+            slotHints={slotHints}
+          />
+          <QueueSection
+            title="Aujourd'hui"
+            prospects={today}
+            slotHints={slotHints}
+          />
+          <QueueSection
+            title="Jamais appelés"
+            prospects={never}
+            slotHints={slotHints}
+          />
+        </div>
+      )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <section className="lg:col-span-2">
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Relances du jour
-          </h2>
-
-          {tasks.length === 0 ? (
-            <EmptyState
-              title="Rien à relancer aujourd'hui"
-              hint="Après un appel, ajoutez une note sur la fiche client et planifiez la prochaine relance en un clic."
-              href="/clients"
-              cta="Voir les clients"
-            />
-          ) : (
-            <ul className="card divide-y divide-white/[0.05]">
-              {tasks.map((task) => (
-                <TaskRow key={task.id} task={task} />
-              ))}
-            </ul>
-          )}
-
-          {stale.length > 0 && (
-            <>
-              <h2 className="mb-3 mt-8 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-                Sans contact depuis 2 semaines
-              </h2>
-              <ul className="card divide-y divide-white/[0.05]">
-                {stale.map((c) => (
-                  <li key={c.id} className="flex items-center gap-3 px-4 py-3">
-                    <Avatar name={c.contact_name ?? c.company_name} />
-                    <Link
-                      href={`/clients/${c.id}`}
-                      className="min-w-0 flex-1 text-sm text-slate-200 hover:text-celya-cyan"
-                    >
-                      <span className="block truncate">{c.company_name}</span>
-                      <span className="block text-xs text-slate-500">
-                        {c.last_contact_at
-                          ? `Dernier contact ${relative(c.last_contact_at)}`
-                          : "Jamais contacté"}
-                      </span>
-                    </Link>
-                    <StatusChip status={c.status as ClientStatus} />
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
-
-        <section>
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Dernière activité
-          </h2>
-
-          {activities.length === 0 ? (
-            <div className="card px-5 py-8 text-center text-sm text-slate-500">
-              Aucune activité enregistrée pour l&apos;instant.
-            </div>
-          ) : (
-            <ul className="card divide-y divide-white/[0.05]">
-              {activities.map((a) => (
-                <li key={a.id} className="px-4 py-3">
-                  <p className="flex items-center gap-2 text-xs text-slate-500">
-                    <span className="chip bg-white/[0.05] text-slate-300 ring-white/10">
-                      {ACTIVITY_LABEL[a.type]}
-                    </span>
-                    {relative(a.occurred_at)}
-                  </p>
-                  {a.clients && (
-                    <Link
-                      href={`/clients/${a.clients.id}`}
-                      className="mt-1.5 block text-sm text-slate-200 hover:text-celya-cyan"
-                    >
-                      {a.clients.company_name}
-                    </Link>
-                  )}
-                  {(a.subject || a.body) && (
-                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400">
-                      {a.subject ?? a.body}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+      {/* 4. Réponses reçues — alimenté par la boîte Zoho (phase C). */}
+      <section className="mt-8">
+        <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+          Réponses reçues
+        </h2>
+        <div className="card px-5 py-6 text-center text-sm text-slate-500">
+          Les réponses aux emails apparaîtront ici une fois la boîte Zoho
+          connectée.
+        </div>
+      </section>
     </>
+  );
+}
+
+function QueueSection({
+  title,
+  prospects,
+  slotHints,
+  tone,
+}: {
+  title: string;
+  prospects: QueueProspect[];
+  slotHints: Map<string, string>;
+  tone?: "late";
+}) {
+  if (prospects.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+        {title}
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] ${
+            tone === "late"
+              ? "bg-rose-500/15 text-rose-300"
+              : "bg-white/[0.06] text-slate-400"
+          }`}
+        >
+          {prospects.length}
+        </span>
+      </h2>
+
+      <ul className="card divide-y divide-white/[0.05]">
+        {prospects.map((p) => (
+          <li key={p.id} className="px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              {p.phone ? (
+                <a
+                  href={`tel:${p.phone.replace(/\s/g, "")}`}
+                  className="btn-primary shrink-0 px-3.5 py-2 text-xs"
+                >
+                  📞 {p.phone}
+                </a>
+              ) : (
+                <span className="chip bg-rose-500/10 text-rose-300 ring-rose-400/20">
+                  Pas de numéro
+                </span>
+              )}
+
+              <Link
+                href={`/prospects/${p.id}`}
+                className="min-w-0 font-medium text-slate-100 hover:text-celya-cyan"
+              >
+                {p.company_name}
+              </Link>
+
+              {p.contact_name && (
+                <span className="text-xs text-slate-400">{p.contact_name}</span>
+              )}
+              {p.city && <span className="text-xs text-slate-500">{p.city}</span>}
+
+              <span className="ml-auto flex items-center gap-2">
+                <StatusChip status={p.status} />
+              </span>
+            </div>
+
+            <p className="mt-1.5 text-xs text-slate-500">
+              {p.last_outcome
+                ? `Dernier appel : ${CALL_OUTCOMES[p.last_outcome]?.label ?? p.last_outcome} · ${relative(p.last_contact_at)} · ${p.call_attempts} tentative${p.call_attempts > 1 ? "s" : ""}`
+                : "Jamais appelé"}
+              {p.next_action_at && ` · rappel prévu ${relative(p.next_action_at)}`}
+            </p>
+
+            <div className="mt-2.5">
+              <CallActions
+                prospect={{
+                  id: p.id,
+                  company_name: p.company_name,
+                  status: p.status,
+                  call_attempts: p.call_attempts,
+                }}
+                slotHint={slotHints.get(p.id)}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

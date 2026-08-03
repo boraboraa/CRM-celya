@@ -400,11 +400,19 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
    (ou `AGENT_PROVIDER=minimax MINIMAX_*=…`), via `supabase secrets set` ou le
    tableau de bord. Sans eux, le bouton ✨ Analyser des cartes fait le même
    travail via le fournisseur configuré sur Vercel.
-3. **Activer Claude sur Vercel** (optionnel) : `AGENT_PROVIDER=anthropic` +
-   `ANTHROPIC_API_KEY` dans les variables du projet Vercel. Repasser sur
-   MiniMax = remettre `AGENT_PROVIDER=minimax`. Rappel : pas de résidence des
-   données en Europe chez Anthropic à ce jour — OK pour des coordonnées
-   publiques, à réexaminer avant d'analyser le contenu privé des réponses.
+3. **Rétablir le fournisseur IA en production.** Le 3 août, l'extraction en
+   production répond « Assistant indisponible » : le chemin de code est validé
+   de bout en bout (fournisseur simulé en local — étape imposée, +32 normalisé,
+   incertitudes surlignées), c'est donc la configuration MiniMax côté Vercel
+   qui est absente ou invalide — invérifiable par le MCP (le connecteur ne
+   voit pas ce projet). Depuis vercel.com → Settings → Environment Variables :
+   contrôler `MINIMAX_API_KEY` / `MINIMAX_BASE_URL` / `MINIMAX_MODEL`, **ou**
+   activer Claude : `AGENT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`
+   (`ANTHROPIC_MODEL` optionnel, défaut `claude-opus-5`). Repasser sur MiniMax
+   = remettre `AGENT_PROVIDER=minimax`. Rappel : pas de résidence des données
+   en Europe chez Anthropic à ce jour — OK pour des coordonnées publiques, à
+   réexaminer avant d'analyser le contenu privé des réponses. La panne ne
+   bloque rien : le formulaire s'ouvre vide, saisie manuelle.
 4. **Renommer le projet Vercel** `celya-accounting-app` → `celya-crm`
    (vercel.com → Settings → General → Project Name), pour que l'URL corresponde
    au contenu. Attention : ce projet portait l'app comptable et le renommage

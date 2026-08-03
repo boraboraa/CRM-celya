@@ -2,8 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
-import { ProspectForm } from "@/components/ProspectForm";
-import { createProspectAction } from "@/app/actions";
+import { NewProspectAssist } from "@/components/NewProspectAssist";
 import type { Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +23,7 @@ export default async function NewProspectPage() {
     <>
       <PageHeader
         title="Nouveau prospect"
-        subtitle="Créez la fiche, puis notez chaque appel et planifiez le rappel."
+        subtitle="Collez ce que vous avez trouvé — la fiche se pré-remplit, vous validez."
         action={
           <Link href="/prospects" className="btn-ghost">
             Annuler
@@ -32,14 +31,7 @@ export default async function NewProspectPage() {
         }
       />
 
-      <div className="card max-w-3xl p-6">
-        <ProspectForm
-          members={members}
-          action={createProspectAction}
-          submitLabel="Créer la fiche"
-          currentUserId={session?.userId}
-        />
-      </div>
+      <NewProspectAssist members={members} currentUserId={session?.userId} />
     </>
   );
 }

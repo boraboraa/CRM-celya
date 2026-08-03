@@ -5,6 +5,7 @@ import {
   planifierRappelAction,
   archiverProspectAction,
 } from "@/app/actions";
+import { analyzeCallNoteAction } from "@/app/ai-actions";
 import {
   CALL_OUTCOMES,
   CALL_OUTCOME_ORDER,
@@ -42,6 +43,13 @@ export function CallActions({
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
 
+  // Proposition de l'IA (B2) — proposée, jamais appliquée sans clic.
+  const [resume, setResume] = useState("");
+  const [contactProposal, setContactProposal] = useState("");
+  const [applyContact, setApplyContact] = useState(true);
+  const [aiNote, setAiNote] = useState<string>();
+  const [analyzing, startAnalyze] = useTransition();
+
   const overCap =
     prospect.call_attempts >= MAX_CALL_ATTEMPTS &&
     (prospect.status === "sans_reponse" || prospect.status === "a_appeler") &&
@@ -64,7 +72,45 @@ export function CallActions({
     setDelay("");
     setDateLocale("");
     setMotif("");
+    setResume("");
+    setContactProposal("");
+    setAiNote(undefined);
     setError(undefined);
+  }
+
+  /** B2 — envoie la note au modèle, pré-remplit le formulaire. Rien n'est
+   *  enregistré : c'est le clic « Enregistrer » qui déclenche planifierRappel. */
+  function analyze() {
+    if (!note.trim()) return;
+    setAiNote(undefined);
+    setError(undefined);
+    startAnalyze(async () => {
+      const res = await analyzeCallNoteAction({ note });
+      if (res.error) {
+        setAiNote(res.error);
+        return;
+      }
+      if (res.unavailable || !res.proposal) {
+        setAiNote("Assistant indisponible — choisissez le résultat à la main.");
+        return;
+      }
+      const p = res.proposal;
+      if (p.resultat) {
+        pick(p.resultat);
+        if (p.dateLocale && CALL_OUTCOMES[p.resultat].needsDate) {
+          setDateLocale(
+            p.resultat === "rdv_fixe" && p.dateLocale.length === 10
+              ? `${p.dateLocale}T09:00`
+              : p.dateLocale
+          );
+        }
+      } else {
+        setAiNote("Résultat d'appel non reconnu — choisissez-le à la main.");
+      }
+      setResume(p.resume ?? "");
+      setContactProposal(p.contact_name ?? "");
+      setApplyContact(true);
+    });
   }
 
   function save() {
@@ -86,6 +132,8 @@ export function CallActions({
             ? Number(delay)
             : null,
         motif: motif || null,
+        resume: resume || null,
+        contactName: applyContact && contactProposal ? contactProposal : null,
       });
       if (res.error) setError(res.error);
       else reset();
@@ -164,9 +212,20 @@ export function CallActions({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           className="input min-w-[180px] flex-1 py-2 text-xs"
-          placeholder="Note d'appel (facultatif)…"
+          placeholder="Note d'appel (facultatif)… ex. « rappeler après les fêtes, le gérant c'est Marc »"
         />
+        <button
+          type="button"
+          onClick={analyze}
+          disabled={analyzing || !note.trim()}
+          title="Structurer la note avec l'assistant : résultat, date de rappel, contact"
+          className="btn-ghost shrink-0 px-3 py-2 text-xs"
+        >
+          {analyzing ? "Analyse…" : "✨ Analyser"}
+        </button>
       </div>
+
+      {aiNote && <p className="mt-1.5 text-[11px] text-slate-500">{aiNote}</p>}
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         {CALL_OUTCOME_ORDER.map((key) => (
@@ -186,7 +245,24 @@ export function CallActions({
       </div>
 
       {selected && config && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] p-2.5 ring-1 ring-white/[0.07]">
+        <div className="mt-2.5 space-y-2 rounded-xl bg-white/[0.03] p-2.5 ring-1 ring-white/[0.07]">
+          {resume && (
+            <p className="text-xs text-slate-300">
+              <span className="text-slate-500">Résumé proposé :</span> {resume}
+            </p>
+          )}
+          {contactProposal && (
+            <label className="flex items-center gap-2 text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={applyContact}
+                onChange={(e) => setApplyContact(e.target.checked)}
+                className="h-3.5 w-3.5 accent-cyan-400"
+              />
+              Mettre à jour le contact : {contactProposal}
+            </label>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
           {config.needsDate && selected === "rappeler_plus_tard" && (
             <label className="flex items-center gap-2 text-xs text-slate-300">
               Rappeler le
@@ -248,6 +324,7 @@ export function CallActions({
           >
             {pending ? "Enregistrement…" : "Enregistrer"}
           </button>
+          </div>
         </div>
       )}
 

@@ -7,16 +7,24 @@ export function ProspectForm({
   action,
   submitLabel = "Enregistrer",
   currentUserId,
+  aiFields,
 }: {
-  prospect?: Prospect;
+  prospect?: Partial<Prospect>;
   members: Pick<Profile, "id" | "full_name" | "email">[];
   action: (formData: FormData) => Promise<void>;
   submitLabel?: string;
   currentUserId?: string;
+  /** Champs pré-remplis par l'assistant — signalés visuellement. */
+  aiFields?: string[];
 }) {
+  // Classes complètes, jamais interpolées (le JIT doit les voir).
+  const cls = (name: string) =>
+    aiFields?.includes(name)
+      ? "input ring-2 ring-celya-cyan/50"
+      : "input";
   return (
     <form action={action} className="space-y-5">
-      {prospect && <input type="hidden" name="id" value={prospect.id} />}
+      {prospect?.id && <input type="hidden" name="id" value={prospect.id} />}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
@@ -28,7 +36,7 @@ export function ProspectForm({
             name="company_name"
             required
             defaultValue={prospect?.company_name ?? ""}
-            className="input"
+            className={cls("company_name")}
             placeholder="Boulangerie Dupont SRL"
           />
         </div>
@@ -41,7 +49,7 @@ export function ProspectForm({
             id="contact_name"
             name="contact_name"
             defaultValue={prospect?.contact_name ?? ""}
-            className="input"
+            className={cls("contact_name")}
             placeholder="Marie Dupont"
           />
         </div>
@@ -55,7 +63,7 @@ export function ProspectForm({
             name="phone"
             type="tel"
             defaultValue={prospect?.phone ?? ""}
-            className="input"
+            className={cls("phone")}
             placeholder="+32 470 00 00 00"
           />
         </div>
@@ -69,7 +77,7 @@ export function ProspectForm({
             name="email"
             type="email"
             defaultValue={prospect?.email ?? ""}
-            className="input"
+            className={cls("email")}
             placeholder="contact@societe.be"
           />
           <p className="mt-1 text-[11px] text-slate-500">
@@ -85,7 +93,7 @@ export function ProspectForm({
             id="website"
             name="website"
             defaultValue={prospect?.website ?? ""}
-            className="input"
+            className={cls("website")}
             placeholder="societe.be"
           />
         </div>
@@ -98,7 +106,7 @@ export function ProspectForm({
             id="sector"
             name="sector"
             defaultValue={prospect?.sector ?? ""}
-            className="input"
+            className={cls("sector")}
             placeholder="Horeca, garage, cabinet…"
           />
         </div>
@@ -111,7 +119,7 @@ export function ProspectForm({
             id="city"
             name="city"
             defaultValue={prospect?.city ?? ""}
-            className="input"
+            className={cls("city")}
             placeholder="Bruxelles"
           />
         </div>
@@ -142,7 +150,7 @@ export function ProspectForm({
             id="source"
             name="source"
             defaultValue={prospect?.source ?? ""}
-            className="input"
+            className={cls("source")}
           >
             <option value="">—</option>
             {SOURCES.map((s) => (

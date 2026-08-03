@@ -146,6 +146,10 @@ export type PlanifierRappelInput = {
   delaiJours?: number | null;
   /** Motif de perte — requis pour refus. */
   motif?: string | null;
+  /** Résumé court proposé (IA ou saisi), versé en sujet du journal. */
+  resume?: string | null;
+  /** Nom de contact à mettre à jour sur la fiche (validé par l'humain). */
+  contactName?: string | null;
 };
 
 /**
@@ -198,6 +202,9 @@ export async function planifierRappelAction(
       last_outcome: input.resultat,
       last_call_slot: slotOfISO(now),
       ...(lostReason ? { lost_reason: lostReason } : {}),
+      ...(input.contactName?.trim()
+        ? { contact_name: input.contactName.trim().slice(0, 120) }
+        : {}),
     })
     .eq("id", prospect.id);
   if (upErr) return { error: upErr.message };
@@ -207,7 +214,7 @@ export async function planifierRappelAction(
     prospect_id: prospect.id,
     author_id: userId,
     type: "appel",
-    subject: null,
+    subject: input.resume?.trim().slice(0, 300) || null,
     body: input.note?.trim() || null,
     outcome: config.label,
     duration_min: null,

@@ -90,7 +90,11 @@ function normalizeBelgianPhone(raw: unknown): string | null {
 }
 
 function formatInternational(digits: string): string | null {
-  if (digits.startsWith("32")) return formatBelgianNSN(digits.slice(2));
+  if (digits.startsWith("32")) {
+    // « +32 0470 12 34 56 » : le 0 national ne se garde pas après l'indicatif.
+    const nsn = digits.slice(2).replace(/^0/, "");
+    return formatBelgianNSN(nsn);
+  }
   // Numéro étranger : plausible entre 8 et 15 chiffres (E.164), sinon null.
   if (digits.length < 8 || digits.length > 15) return null;
   return `+${digits}`;
@@ -98,7 +102,10 @@ function formatInternational(digits: string): string | null {
 
 function formatBelgianNSN(nsn: string): string | null {
   if (nsn.length === 9) {
-    // Mobile (4XX XX XX XX)
+    // Mobile — toujours 4XX en Belgique. Tout autre préfixe (ex. un 06
+    // français collé en format national) n'est PAS transformé en +32 :
+    // on n'invente jamais un numéro.
+    if (nsn[0] !== "4") return null;
     return `+32 ${nsn.slice(0, 3)} ${nsn.slice(3, 5)} ${nsn.slice(5, 7)} ${nsn.slice(7)}`;
   }
   if (nsn.length === 8) {
@@ -300,9 +307,16 @@ export async function extractProspectAction(input: {
     return { unavailable: true };
   }
 
-  // Champs présents mais peu sûrs (confiance basse, ou numéro/email fourni
-  // par le modèle mais rejeté par la validation) → l'œil doit aller dessus.
+  // Champs présents mais peu sûrs (confiance basse), ou fournis par le
+  // modèle mais rejetés par la validation (le champ vide est alors surligné :
+  // l'assistant a vu quelque chose ici, à ressaisir à la main) → l'œil doit
+  // aller droit dessus.
   const uncertain: string[] = [];
+  const rejected: Partial<Record<string, unknown>> = {
+    phone: raw.phone,
+    email: raw.email,
+    website: raw.website,
+  };
   for (const key of [
     "company_name",
     "contact_name",
@@ -313,7 +327,12 @@ export async function extractProspectAction(input: {
     "city",
     "source",
   ] as const) {
-    if (fields[key] === null) continue;
+    if (fields[key] === null) {
+      if (key in rejected && cleanStr(rejected[key], 200) !== null) {
+        uncertain.push(key);
+      }
+      continue;
+    }
     const c = clamp01(confidence[key]);
     if (c !== null && c < CONFIDENCE_FLOOR) uncertain.push(key);
   }

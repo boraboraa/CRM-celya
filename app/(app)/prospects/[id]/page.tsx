@@ -94,7 +94,9 @@ export default async function ProspectDetailPage({
 
   const tasks = (tasksRes.data ?? []) as unknown as TaskWithProspect[];
   const openTasks = tasks.filter((t) => t.status === "a_faire");
-  const doneTasks = tasks.filter((t) => t.status !== "a_faire");
+  // Les tâches annulées ne sont pas affichées : TaskRow les rendrait comme
+  // des relances actives en retard.
+  const doneTasks = tasks.filter((t) => t.status === "fait");
 
   return (
     <>
@@ -207,7 +209,11 @@ export default async function ProspectDetailPage({
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Noter un échange
             </h2>
+            {/* key : remonte le composant quand l'étape change, pour que son
+                état local reparte de l'étape à jour (sinon un ancien état
+                pourrait rétrograder la fiche au prochain enregistrement). */}
             <QuickNote
+              key={`${prospect.id}-${status}`}
               prospectId={prospect.id}
               companyName={prospect.company_name}
               currentStatus={prospect.status}

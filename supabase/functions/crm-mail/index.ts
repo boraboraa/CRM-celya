@@ -387,19 +387,7 @@ async function syncAccount(admin: SupabaseClient, account: Account): Promise<num
         if (inserted?.id) {
           imported++;
           if (prospectId) {
-            // Une vraie réponse tient la fiche à jour dès l'arrivée ; une
-            // réponse automatique (absence…) ne compte pas comme une réponse.
-            if (!isAutoReply(parsed)) {
-              await handleRealReply(
-                admin,
-                prospectId,
-                (parsed.date ?? new Date()).toISOString()
-              );
-            }
-            await classifyAndHandle(admin, inserted.id, prospectId, {
-              subject: parsed.subject ?? "",
-              text: (parsed.text ?? "").slice(0, 4000),
-            });
+            await handleIncomingReply(admin, inserted.id, prospectId, parsed);
           }
         }
       }
@@ -471,8 +459,62 @@ async function matchProspect(
 }
 
 // ---------------------------------------------------------------------------
-// Arrivée d'une réponse — comportement déterministe, sans modèle.
+// Arrivée d'une réponse rattachée — la règle, dans l'ordre :
+//  1. classification d'abord (si un fournisseur IA est configuré) — elle
+//     seule sait reconnaître une absence écrite à la main ;
+//  2. absence classée → la relance est DÉCALÉE au lendemain du retour,
+//     jamais annulée, et le statut ne bouge pas ;
+//  3. réponse automatique (en-têtes) non classée absence → on ne touche à
+//     rien : un robot ne compte jamais comme une réponse ;
+//  4. vraie réponse (ni auto, ni absence, ni hors-sujet) → la fiche est
+//     tenue à jour : last_contact_at, a_appeler → contacte, relance
+//     annulée — la carte remonte dans « À faire » avec l'action proposée.
+// Les tâches « RDV … » ne sont jamais touchées.
 // ---------------------------------------------------------------------------
+
+async function handleIncomingReply(
+  admin: SupabaseClient,
+  emailId: string,
+  prospectId: string,
+  parsed: {
+    subject?: string | null;
+    text?: string | null;
+    date?: Date | null;
+    headers?: { get(name: string): unknown; has(name: string): boolean };
+  }
+) {
+  const proposal = await classifyReply(admin, emailId, {
+    subject: parsed.subject ?? "",
+    text: (parsed.text ?? "").slice(0, 4000),
+  });
+
+  if (proposal?.intent === "absence") {
+    const due = proposal.dueAtISO ?? new Date(Date.now() + 7 * 86400000).toISOString();
+    const targets = await openNonRdvTasks(admin, prospectId);
+    if (targets.length > 0) {
+      await admin.from("tasks").update({ due_at: due }).in("id", targets);
+    }
+    return;
+  }
+  if (isAutoReply(parsed)) return;
+  if (proposal?.intent === "hors_sujet") return;
+
+  await handleRealReply(admin, prospectId, (parsed.date ?? new Date()).toISOString());
+}
+
+async function openNonRdvTasks(
+  admin: SupabaseClient,
+  prospectId: string
+): Promise<string[]> {
+  const { data } = await admin
+    .from("tasks")
+    .select("id, title")
+    .eq("prospect_id", prospectId)
+    .eq("status", "a_faire");
+  return (data ?? [])
+    .filter((t: { title: string }) => !t.title.startsWith("RDV"))
+    .map((t: { id: string }) => t.id);
+}
 
 /** En-têtes standard des réponses automatiques (absence, robots, listes). */
 function isAutoReply(parsed: {
@@ -517,18 +559,39 @@ async function handleRealReply(
     await admin.from("prospects").update(patch).eq("id", prospect.id);
   }
 
-  const { data: openTasks } = await admin
-    .from("tasks")
-    .select("id, title")
-    .eq("prospect_id", prospectId)
-    .eq("status", "a_faire");
-  const targets = (openTasks ?? []).filter((t) => !t.title.startsWith("RDV"));
+  const targets = await openNonRdvTasks(admin, prospectId);
   if (targets.length > 0) {
-    await admin
-      .from("tasks")
-      .update({ status: "annule" })
-      .in("id", targets.map((t) => t.id));
+    await admin.from("tasks").update({ status: "annule" }).in("id", targets);
   }
+}
+
+/** 09:00 heure de Bruxelles pour un jour donné, en ISO UTC (DST correct). */
+function brusselsNineAM(date: string): string {
+  const guess = new Date(`${date}T09:00:00Z`);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Brussels",
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(guess)
+      .map((p) => [p.type, p.value])
+  ) as Record<string, string>;
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour === "24" ? "0" : parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  const offsetMs = asUTC - guess.getTime();
+  return new Date(guess.getTime() - offsetMs).toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -606,12 +669,17 @@ async function callClassifier(system: string, user: string): Promise<string | nu
   }
 }
 
-async function classifyAndHandle(
+/**
+ * Classe la réponse et remplit la carte « Réponses reçues » (intent, résumé,
+ * date proposée). Classification pure : elle ne touche NI au statut NI aux
+ * tâches — c'est handleIncomingReply qui applique la règle. null si le
+ * fournisseur est absent, en panne ou hors format (tri manuel).
+ */
+async function classifyReply(
   admin: SupabaseClient,
   emailId: string,
-  prospectId: string,
   mail: { subject: string; text: string }
-) {
+): Promise<{ intent: (typeof INTENTS)[number]; dueAtISO: string | null } | null> {
   const today = new Date().toISOString().slice(0, 10);
   const system = `Tu tries la réponse email d'un prospect belge à un email de prospection. Nous sommes le ${today}.
 Réponds UNIQUEMENT avec un objet JSON :
@@ -628,19 +696,20 @@ Réponds UNIQUEMENT avec un objet JSON :
       system,
       `Sujet : ${mail.subject}\n\n${mail.text}`
     );
-    if (!content) return; // pas configuré ou en panne : tri manuel
+    if (!content) return null; // pas configuré ou en panne : tri manuel
 
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
-    if (start === -1 || end <= start) return;
+    if (start === -1 || end <= start) return null;
     const parsed = JSON.parse(content.slice(start, end + 1));
 
     const intent = INTENTS.includes(parsed.intent) ? parsed.intent : null;
-    if (!intent) return;
+    if (!intent) return null;
     const dateOk =
       typeof parsed.date_rappel === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date_rappel)
         ? parsed.date_rappel
         : null;
+    const dueAtISO = dateOk ? brusselsNineAM(dateOk) : null;
     const confidence =
       typeof parsed.confidence === "number" && parsed.confidence >= 0 && parsed.confidence <= 1
         ? parsed.confidence
@@ -653,36 +722,13 @@ Réponds UNIQUEMENT avec un objet JSON :
         intent_confidence: confidence,
         intent_summary:
           [parsed.resume, parsed.action].filter((s) => typeof s === "string" && s).join(" — ").slice(0, 400) || null,
-        proposed_due_at: dateOk ? `${dateOk}T09:00:00+02:00` : null,
+        proposed_due_at: dueAtISO,
       })
       .eq("id", emailId);
 
-    // Règle de cadence : une vraie réponse annule le rappel automatique en
-    // cours. Exception explicite : une absence ne l'annule pas, elle le
-    // décale au lendemain du retour. Les tâches RDV ne sont jamais touchées.
-    const { data: openTasks } = await admin
-      .from("tasks")
-      .select("id, title")
-      .eq("prospect_id", prospectId)
-      .eq("status", "a_faire");
-    const targets = (openTasks ?? []).filter((t) => !t.title.startsWith("RDV"));
-    if (targets.length === 0) return;
-
-    if (intent === "absence") {
-      const due = dateOk
-        ? `${dateOk}T09:00:00+02:00`
-        : new Date(Date.now() + 7 * 86400000).toISOString();
-      await admin
-        .from("tasks")
-        .update({ due_at: due })
-        .in("id", targets.map((t) => t.id));
-    } else if (intent !== "hors_sujet") {
-      await admin
-        .from("tasks")
-        .update({ status: "annule" })
-        .in("id", targets.map((t) => t.id));
-    }
+    return { intent, dueAtISO };
   } catch {
     // classification optionnelle : jamais bloquante pour la relève
+    return null;
   }
 }

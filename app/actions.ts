@@ -216,33 +216,43 @@ export async function saveExchangeAction(
   //    surnuméraires annulées. Un prospect perdu n'a plus de relance.
   const { data: openTasks } = await supabase
     .from("tasks")
-    .select("id")
+    .select("id, title")
     .eq("prospect_id", prospect.id)
     .eq("status", "a_faire")
     .order("due_at", { ascending: true });
-  const openIds = (openTasks ?? []).map((t) => t.id);
+  const allOpen = openTasks ?? [];
 
   if (newStatus === "perdu") {
-    if (openIds.length > 0) {
-      await supabase.from("tasks").update({ status: "annule" }).in("id", openIds);
+    if (allOpen.length > 0) {
+      await supabase
+        .from("tasks")
+        .update({ status: "annule" })
+        .in("id", allOpen.map((t) => t.id));
     }
   } else if (dueAt) {
-    const effective = newStatus ?? normalizeStatus(prospect.status);
-    const title =
-      input.type === "rendez_vous" || effective === "rendez_vous"
-        ? `RDV avec ${prospect.company_name}`
-        : `Relancer ${prospect.company_name}`;
+    // « RDV avec … » uniquement quand l'échange enregistré EST un rendez-vous
+    // (le titre commande la protection côté email : une tâche « RDV » n'est
+    // jamais annulée ni re-datée par une réponse). Une simple relance ne
+    // touche pas aux tâches RDV existantes.
+    const planningRdv = input.type === "rendez_vous";
+    const title = planningRdv
+      ? `RDV avec ${prospect.company_name}`
+      : `Relancer ${prospect.company_name}`;
+    const reusable = planningRdv
+      ? allOpen
+      : allOpen.filter((t) => !t.title.startsWith("RDV"));
+    const reusableIds = reusable.map((t) => t.id);
 
-    if (openIds.length > 0) {
+    if (reusableIds.length > 0) {
       await supabase
         .from("tasks")
         .update({ title, due_at: dueAt, assignee_id: userId })
-        .eq("id", openIds[0]);
-      if (openIds.length > 1) {
+        .eq("id", reusableIds[0]);
+      if (reusableIds.length > 1) {
         await supabase
           .from("tasks")
           .update({ status: "annule" })
-          .in("id", openIds.slice(1));
+          .in("id", reusableIds.slice(1));
       }
     } else {
       await supabase.from("tasks").insert({

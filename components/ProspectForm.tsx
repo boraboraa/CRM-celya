@@ -220,7 +220,7 @@ export function ProspectForm({
             name="notes"
             rows={3}
             defaultValue={prospect?.notes ?? ""}
-            className="input resize-y"
+            className={`${cls("notes")} resize-y`}
             placeholder="Contexte, besoins, interlocuteurs, contraintes…"
           />
         </div>

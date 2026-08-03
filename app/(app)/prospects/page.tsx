@@ -40,6 +40,15 @@ export default async function ProspectsPage({
       `company_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like},city.ilike.${like}`
     );
   }
+  // Filtre d'étape poussé en SQL (sinon il s'appliquerait après .limit()
+  // et fausserait résultats et compteur au-delà de 500 fiches).
+  const statutFilter =
+    statut && statut !== "tous" && (STATUS_ORDER as string[]).includes(statut)
+      ? (statut as (typeof STATUS_ORDER)[number])
+      : null;
+  if (statutFilter) {
+    query = query.eq("status", statutFilter);
+  }
 
   const sort = tri ?? "recent";
   if (sort === "relance") {
@@ -67,9 +76,9 @@ export default async function ProspectsPage({
     crm_users: { full_name: string | null } | null;
   }[]).map((p) => ({ ...p, status: normalizeStatus(p.status) }));
 
-  // Filtre d'étape côté code : tolère d'anciennes valeurs encore en base.
-  if (statut && statut !== "tous") {
-    prospects = prospects.filter((p) => p.status === statut);
+  // Ceinture et bretelles : re-filtre après normalisation des statuts.
+  if (statutFilter) {
+    prospects = prospects.filter((p) => p.status === statutFilter);
   }
 
   const boardProspects: BoardProspect[] = prospects.map((p) => ({

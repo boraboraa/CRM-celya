@@ -113,25 +113,34 @@ async function anthropicChat(
       maxRetries: 1,
     });
 
-    const content: Anthropic.ContentBlockParam[] =
-      typeof opts.user === "string"
-        ? [{ type: "text", text: opts.user }]
-        : opts.user.map((part): Anthropic.ContentBlockParam => {
-            if (part.type === "text") return { type: "text", text: part.text };
-            // data URL « data:image/png;base64,… » → bloc image Anthropic
-            const match = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(
-              part.image_url.url
-            );
-            if (!match) return { type: "text", text: "" };
-            return {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: match[1] as "image/png" | "image/jpeg" | "image/webp",
-                data: match[2],
-              },
-            };
-          });
+    const content: Anthropic.ContentBlockParam[] = [];
+    if (typeof opts.user === "string") {
+      content.push({ type: "text", text: opts.user });
+    } else {
+      for (const part of opts.user) {
+        if (part.type === "text") {
+          // L'API rejette un bloc texte vide : on l'omet plutôt que d'envoyer
+          // une requête vouée au 400.
+          if (part.text.trim()) content.push({ type: "text", text: part.text });
+          continue;
+        }
+        // data URL « data:image/png;base64,… » → bloc image Anthropic ;
+        // un format non reconnu est ignoré (jamais un bloc vide).
+        const match = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(
+          part.image_url.url
+        );
+        if (!match) continue;
+        content.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: match[1] as "image/png" | "image/jpeg" | "image/webp",
+            data: match[2],
+          },
+        });
+      }
+    }
+    if (content.length === 0) return null;
 
     // Pas de temperature : le paramètre est retiré des modèles Claude
     // récents (erreur 400). Le déterminisme vient du prompt et de la

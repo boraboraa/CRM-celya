@@ -101,6 +101,17 @@ export type Task = {
   created_at: string;
 };
 
+/** Intention détectée dans une réponse email entrante. */
+export type EmailIntent =
+  | "interesse"
+  | "demande_info"
+  | "pas_interesse"
+  | "rappel_plus_tard"
+  | "absence"
+  | "hors_sujet";
+
+export type EmailTriage = "a_traiter" | "accepte" | "ignore";
+
 export type Email = {
   id: string;
   prospect_id: string | null;
@@ -114,4 +125,9 @@ export type Email = {
   mailbox: string | null;
   received_at: string;
   is_read: boolean;
+  triage: EmailTriage;
+  intent: EmailIntent | null;
+  intent_confidence: number | null;
+  intent_summary: string | null;
+  proposed_due_at: string | null;
 };

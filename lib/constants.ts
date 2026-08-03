@@ -2,6 +2,7 @@ import type {
   ActivityType,
   CallOutcome,
   CallSlot,
+  EmailIntent,
   ProspectStatus,
 } from "./types";
 
@@ -119,6 +120,19 @@ export const OTHER_SLOT: Record<CallSlot, CallSlot> = {
   midi: "matin",
   apres_midi: "matin",
   fin_journee: "midi",
+};
+
+// ---------------------------------------------------------------------------
+// Tri des réponses email (phase Zoho)
+// ---------------------------------------------------------------------------
+
+export const INTENT_LABEL: Record<EmailIntent, string> = {
+  interesse: "Intéressé",
+  demande_info: "Demande d'information",
+  pas_interesse: "Pas intéressé",
+  rappel_plus_tard: "Rappeler plus tard",
+  absence: "Absence (réponse automatique)",
+  hors_sujet: "Hors sujet",
 };
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import { StatusChip, Avatar } from "@/components/ui";
 import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
 import { CallActions } from "@/components/CallActions";
+import { EmailComposer } from "@/components/EmailComposer";
 import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
 import {
   updateProspectAction,
@@ -227,6 +228,24 @@ export default async function ProspectDetailPage({
             </h2>
             <QuickNote prospectId={prospect.id} />
           </section>
+
+          {prospect.email && (
+            <section>
+              <details className="card p-0">
+                <summary className="cursor-pointer px-6 py-4 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+                  Écrire un email
+                </summary>
+                <div className="px-1 pb-1">
+                  <EmailComposer
+                    prospectId={prospect.id}
+                    defaultTo={prospect.email}
+                    contactName={prospect.contact_name}
+                    companyName={prospect.company_name}
+                  />
+                </div>
+              </details>
+            </section>
+          )}
 
           <section>
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">

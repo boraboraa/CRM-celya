@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { todayBounds, slotOfISO } from "@/lib/time";
 import { PageHeader, StatusChip, EmptyState } from "@/components/ui";
 import { CallActions } from "@/components/CallActions";
+import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
 import {
   CALL_OUTCOMES,
   CALL_SLOT_LABEL,
@@ -45,7 +46,7 @@ export default async function DashboardPage() {
   const session = await getSession();
   const { start, end } = todayBounds();
 
-  const [overdueRes, todayRes, neverRes] = await Promise.all([
+  const [overdueRes, todayRes, neverRes, repliesRes] = await Promise.all([
     // 1. En retard — rappels dont la date est passée, les plus anciens d'abord.
     supabase
       .from("prospects")
@@ -72,6 +73,18 @@ export default async function DashboardPage() {
       .eq("status", "a_appeler")
       .order("created_at", { ascending: true })
       .limit(60),
+
+    // 4. Réponses reçues — emails entrants rattachés, en attente de tri.
+    supabase
+      .from("emails")
+      .select(
+        "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects(id, company_name)"
+      )
+      .eq("direction", "entrant")
+      .eq("triage", "a_traiter")
+      .not("prospect_id", "is", null)
+      .order("received_at", { ascending: false })
+      .limit(20),
   ]);
 
   const overdue = (overdueRes.data ?? []) as QueueProspect[];
@@ -112,6 +125,7 @@ export default async function DashboardPage() {
     }
   }
 
+  const replies = (repliesRes.data ?? []) as unknown as ReplyCardEmail[];
   const firstName = session?.me?.full_name?.split(" ")[0];
   const empty = overdue.length + today.length + never.length === 0;
 
@@ -155,15 +169,39 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* 4. Réponses reçues — alimenté par la boîte Zoho (phase C). */}
+      {/* 4. Réponses reçues — la boîte Zoho remonte ici, l'IA propose, Bora décide. */}
       <section className="mt-8">
-        <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+        <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
           Réponses reçues
+          {replies.length > 0 && (
+            <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[11px] text-cyan-300">
+              {replies.length}
+            </span>
+          )}
+          {session?.me?.role === "admin" && (
+            <span className="ml-auto flex gap-3 text-[11px] font-normal normal-case tracking-normal">
+              <Link href="/emails" className="text-slate-500 hover:text-slate-300">
+                Non rattachés
+              </Link>
+              <Link href="/reglages-email" className="text-slate-500 hover:text-slate-300">
+                Réglages boîte
+              </Link>
+            </span>
+          )}
         </h2>
-        <div className="card px-5 py-6 text-center text-sm text-slate-500">
-          Les réponses aux emails apparaîtront ici une fois la boîte Zoho
-          connectée.
-        </div>
+
+        {replies.length === 0 ? (
+          <div className="card px-5 py-6 text-center text-sm text-slate-500">
+            Aucune réponse en attente. Les réponses aux emails remontent ici
+            automatiquement (relève toutes les 5 minutes).
+          </div>
+        ) : (
+          <ul className="card divide-y divide-white/[0.05]">
+            {replies.map((e) => (
+              <ReplyCard key={e.id} email={e} />
+            ))}
+          </ul>
+        )}
       </section>
     </>
   );

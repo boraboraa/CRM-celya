@@ -1,4 +1,9 @@
-import { STATUS_ORDER, STATUS_LABEL, SOURCES } from "@/lib/constants";
+import {
+  STATUS_ORDER,
+  STATUS_LABEL,
+  SOURCES,
+  normalizeStatus,
+} from "@/lib/constants";
 import type { Prospect, Profile } from "@/lib/types";
 
 export function ProspectForm({
@@ -8,6 +13,7 @@ export function ProspectForm({
   submitLabel = "Enregistrer",
   currentUserId,
   aiFields,
+  uncertainFields,
 }: {
   prospect?: Partial<Prospect>;
   members: Pick<Profile, "id" | "full_name" | "email">[];
@@ -16,12 +22,23 @@ export function ProspectForm({
   currentUserId?: string;
   /** Champs pré-remplis par l'assistant — signalés visuellement. */
   aiFields?: string[];
+  /** Champs déduits à faible confiance — surlignés plus fort, à vérifier. */
+  uncertainFields?: string[];
 }) {
   // Classes complètes, jamais interpolées (le JIT doit les voir).
   const cls = (name: string) =>
-    aiFields?.includes(name)
-      ? "input ring-2 ring-celya-cyan/50"
-      : "input";
+    uncertainFields?.includes(name)
+      ? "input ring-2 ring-amber-400/70"
+      : aiFields?.includes(name)
+        ? "input ring-2 ring-celya-cyan/50"
+        : "input";
+  const status = normalizeStatus(prospect?.status);
+  // Une source héritée absente de la liste actuelle reste sélectionnable —
+  // sinon l'enregistrement l'effacerait silencieusement.
+  const sourceOptions =
+    prospect?.source && !SOURCES.includes(prospect.source)
+      ? [prospect.source, ...SOURCES]
+      : SOURCES;
   return (
     <form action={action} className="space-y-5">
       {prospect?.id && <input type="hidden" name="id" value={prospect.id} />}
@@ -126,13 +143,13 @@ export function ProspectForm({
 
         <div>
           <label className="label" htmlFor="status">
-            Statut
+            Étape
           </label>
           <select
             id="status"
             name="status"
-            defaultValue={prospect?.status ?? "a_appeler"}
-            className="input"
+            defaultValue={status}
+            className={cls("status")}
           >
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
@@ -153,7 +170,7 @@ export function ProspectForm({
             className={cls("source")}
           >
             <option value="">—</option>
-            {SOURCES.map((s) => (
+            {sourceOptions.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -208,7 +225,7 @@ export function ProspectForm({
           />
         </div>
 
-        {prospect?.status === "perdu" && (
+        {status === "perdu" && (
           <div className="sm:col-span-2">
             <label className="label" htmlFor="lost_reason">
               Raison de la perte

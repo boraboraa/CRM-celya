@@ -11,6 +11,7 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { ImapFlow } from "npm:imapflow@1.0.164";
 import { simpleParser } from "npm:mailparser@3.7.1";
 import nodemailer from "npm:nodemailer@6.9.16";
+import Anthropic from "npm:@anthropic-ai/sdk@0.115.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -386,6 +387,15 @@ async function syncAccount(admin: SupabaseClient, account: Account): Promise<num
         if (inserted?.id) {
           imported++;
           if (prospectId) {
+            // Une vraie réponse tient la fiche à jour dès l'arrivée ; une
+            // réponse automatique (absence…) ne compte pas comme une réponse.
+            if (!isAutoReply(parsed)) {
+              await handleRealReply(
+                admin,
+                prospectId,
+                (parsed.date ?? new Date()).toISOString()
+              );
+            }
             await classifyAndHandle(admin, inserted.id, prospectId, {
               subject: parsed.subject ?? "",
               text: (parsed.text ?? "").slice(0, 4000),
@@ -461,9 +471,71 @@ async function matchProspect(
 }
 
 // ---------------------------------------------------------------------------
-// Classification de la réponse — même contrat de fournisseur que la partie B :
-// AGENT_PROVIDER + <FOURNISSEUR>_API_KEY/_BASE_URL/_MODEL, en secrets de
-// l'edge function. Absents → on saisit rien, le tri manuel reste possible.
+// Arrivée d'une réponse — comportement déterministe, sans modèle.
+// ---------------------------------------------------------------------------
+
+/** En-têtes standard des réponses automatiques (absence, robots, listes). */
+function isAutoReply(parsed: {
+  headers?: { get(name: string): unknown; has(name: string): boolean };
+}): boolean {
+  const h = parsed.headers;
+  if (!h || typeof h.get !== "function") return false;
+  const auto = String(h.get("auto-submitted") ?? "").toLowerCase();
+  if (auto && auto !== "no") return true;
+  if (h.has("x-autoreply") || h.has("x-autorespond")) return true;
+  const prec = String(h.get("precedence") ?? "").toLowerCase();
+  return prec.includes("auto_reply") || prec.includes("bulk") || prec.includes("junk");
+}
+
+/**
+ * Une vraie réponse d'un prospect : last_contact_at mis à jour, un prospect
+ * « À appeler » passe « Contacté », et la relance en attente est annulée —
+ * la carte « Réponses reçues » remonte dans À faire avec l'action suivante
+ * proposée. Les tâches « RDV … » ne sont jamais touchées.
+ */
+async function handleRealReply(
+  admin: SupabaseClient,
+  prospectId: string,
+  receivedAt: string
+) {
+  const { data: prospect } = await admin
+    .from("prospects")
+    .select("id, status, last_contact_at")
+    .eq("id", prospectId)
+    .maybeSingle();
+  if (!prospect) return;
+
+  const patch: Record<string, unknown> = {};
+  if (
+    !prospect.last_contact_at ||
+    new Date(receivedAt).getTime() > new Date(prospect.last_contact_at).getTime()
+  ) {
+    patch.last_contact_at = receivedAt;
+  }
+  if (prospect.status === "a_appeler") patch.status = "contacte";
+  if (Object.keys(patch).length > 0) {
+    await admin.from("prospects").update(patch).eq("id", prospect.id);
+  }
+
+  const { data: openTasks } = await admin
+    .from("tasks")
+    .select("id, title")
+    .eq("prospect_id", prospectId)
+    .eq("status", "a_faire");
+  const targets = (openTasks ?? []).filter((t) => !t.title.startsWith("RDV"));
+  if (targets.length > 0) {
+    await admin
+      .from("tasks")
+      .update({ status: "annule" })
+      .in("id", targets.map((t) => t.id));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Classification de la réponse — même contrat de fournisseur que le reste :
+// AGENT_PROVIDER=anthropic + ANTHROPIC_API_KEY/_MODEL (API Messages, SDK
+// officiel), ou <FOURNISSEUR>_API_KEY/_BASE_URL/_MODEL au format OpenAI, en
+// secrets de l'edge function. Absents → on ne saisit rien, tri manuel.
 // ---------------------------------------------------------------------------
 
 const INTENTS = [
@@ -475,28 +547,37 @@ const INTENTS = [
   "hors_sujet",
 ] as const;
 
-async function classifyAndHandle(
-  admin: SupabaseClient,
-  emailId: string,
-  prospectId: string,
-  mail: { subject: string; text: string }
-) {
-  const provider = (Deno.env.get("AGENT_PROVIDER") ?? "minimax").toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const apiKey = Deno.env.get(`${provider}_API_KEY`);
-  const baseUrl = Deno.env.get(`${provider}_BASE_URL`)?.replace(/\/+$/, "");
-  const model = Deno.env.get(`${provider}_MODEL`);
-  if (!apiKey || !baseUrl || !model) return; // pas configuré ici : tri manuel
+/** Appelle le fournisseur configuré. null si absent, en panne ou hors format. */
+async function callClassifier(system: string, user: string): Promise<string | null> {
+  const name = (Deno.env.get("AGENT_PROVIDER") ?? "minimax").trim();
 
-  const today = new Date().toISOString().slice(0, 10);
-  const system = `Tu tries la réponse email d'un prospect belge à un email de prospection. Nous sommes le ${today}.
-Réponds UNIQUEMENT avec un objet JSON :
-{
-  "intent": une valeur parmi ${JSON.stringify(INTENTS)},
-  "date_rappel": date d'action déduite au format "YYYY-MM-DD", sinon null — pour une absence ("je suis en congé jusqu'au 20"), le LENDEMAIN du retour,
-  "action": la prochaine action proposée, en une courte phrase française,
-  "resume": résumé de la réponse en une phrase,
-  "confidence": nombre entre 0 et 1
-}`;
+  if (name.toLowerCase() === "anthropic") {
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!apiKey) return null;
+    try {
+      const client = new Anthropic({ apiKey, timeout: 25000, maxRetries: 1 });
+      const response = await client.messages.create({
+        model: Deno.env.get("ANTHROPIC_MODEL") ?? "claude-opus-5",
+        max_tokens: 300,
+        system,
+        messages: [{ role: "user", content: user }],
+      });
+      if (response.stop_reason === "refusal") return null;
+      const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      return text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const apiKey = Deno.env.get(`${prefix}_API_KEY`);
+  const baseUrl = Deno.env.get(`${prefix}_BASE_URL`)?.replace(/\/+$/, "");
+  const model = Deno.env.get(`${prefix}_MODEL`);
+  if (!apiKey || !baseUrl || !model) return null;
 
   try {
     const controller = new AbortController();
@@ -510,16 +591,45 @@ Réponds UNIQUEMENT avec un objet JSON :
         max_tokens: 300,
         messages: [
           { role: "system", content: system },
-          { role: "user", content: `Sujet : ${mail.subject}\n\n${mail.text}` },
+          { role: "user", content: user },
         ],
       }),
       signal: controller.signal,
     });
     clearTimeout(timer);
-    if (!res.ok) return;
-
+    if (!res.ok) return null;
     const data = await res.json();
-    const content: string = data?.choices?.[0]?.message?.content ?? "";
+    const content = data?.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content : null;
+  } catch {
+    return null;
+  }
+}
+
+async function classifyAndHandle(
+  admin: SupabaseClient,
+  emailId: string,
+  prospectId: string,
+  mail: { subject: string; text: string }
+) {
+  const today = new Date().toISOString().slice(0, 10);
+  const system = `Tu tries la réponse email d'un prospect belge à un email de prospection. Nous sommes le ${today}.
+Réponds UNIQUEMENT avec un objet JSON :
+{
+  "intent": une valeur parmi ${JSON.stringify(INTENTS)},
+  "date_rappel": date d'action déduite au format "YYYY-MM-DD", sinon null — pour une absence ("je suis en congé jusqu'au 20"), le LENDEMAIN du retour,
+  "action": la prochaine action proposée, en une courte phrase française,
+  "resume": résumé de la réponse en une phrase,
+  "confidence": nombre entre 0 et 1
+}`;
+
+  try {
+    const content = await callClassifier(
+      system,
+      `Sujet : ${mail.subject}\n\n${mail.text}`
+    );
+    if (!content) return; // pas configuré ou en panne : tri manuel
+
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
     if (start === -1 || end <= start) return;

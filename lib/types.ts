@@ -1,37 +1,19 @@
 export type UserRole = "admin" | "commercial";
 
-/** Trajet d'un démarchage téléphonique, de la liste brute au client signé. */
+/** Les six étapes d'un prospect, du panier d'entrée au client signé.
+ *  « À appeler » est une colonne (la liste des entreprises à démarcher),
+ *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape. */
 export type ProspectStatus =
   | "a_appeler"
-  | "sans_reponse"
-  | "contact_etabli"
-  | "rappel_programme"
-  | "rdv"
+  | "contacte"
+  | "rendez_vous"
   | "proposition"
   | "gagne"
   | "perdu";
 
-/** Résultats possibles d'une tentative d'appel (voir CALL_OUTCOMES). */
-export type CallOutcome =
-  | "pas_repondu"
-  | "repondeur"
-  | "barrage_secretaire"
-  | "mauvais_numero"
-  | "refus"
-  | "rappeler_plus_tard"
-  | "interesse"
-  | "rdv_fixe";
-
-/** Créneau horaire d'un appel, heure de Bruxelles. */
-export type CallSlot = "matin" | "midi" | "apres_midi" | "fin_journee";
-
-export type ActivityType =
-  | "appel"
-  | "email"
-  | "note"
-  | "reunion"
-  | "whatsapp"
-  | "linkedin";
+/** Trois types d'échange : ce que Bora retient d'un appel s'écrit dans une
+ *  note, comme le reste. */
+export type ActivityType = "note" | "email" | "rendez_vous";
 
 export type TaskStatus = "a_faire" | "fait" | "annule";
 
@@ -66,9 +48,6 @@ export type Prospect = {
   next_action_at: string | null;
   last_contact_at: string | null;
   lost_reason: string | null;
-  call_attempts: number;
-  last_outcome: CallOutcome | null;
-  last_call_slot: CallSlot | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

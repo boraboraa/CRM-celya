@@ -5,8 +5,8 @@ import { getSession } from "@/lib/auth";
 import { StatusChip, Avatar } from "@/components/ui";
 import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
-import { CallActions } from "@/components/CallActions";
 import { EmailComposer } from "@/components/EmailComposer";
+import { DateField } from "@/components/DateField";
 import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
 import {
   updateProspectAction,
@@ -18,6 +18,7 @@ import {
   ACTIVITY_LABEL,
   STATUS_ORDER,
   STATUS_LABEL,
+  normalizeStatus,
   fmtDateTime,
   fmtMoney,
   relative,
@@ -69,6 +70,8 @@ export default async function ProspectDetailPage({
 
   const prospect = prospectRes.data as Prospect | null;
   if (!prospect) notFound();
+
+  const status = normalizeStatus(prospect.status);
 
   const members = (membersRes.data ?? []) as Pick<
     Profile,
@@ -132,12 +135,12 @@ export default async function ProspectDetailPage({
           </div>
 
           <div className="flex items-center gap-3">
-            <StatusChip status={prospect.status} />
+            <StatusChip status={status} />
             <form action={setProspectStatusAction} className="flex items-center gap-2">
               <input type="hidden" name="id" value={prospect.id} />
               <select
                 name="status"
-                defaultValue={prospect.status}
+                defaultValue={status}
                 className="input py-2 text-xs"
               >
                 {STATUS_ORDER.map((s) => (
@@ -166,17 +169,11 @@ export default async function ProspectDetailPage({
             </p>
             <p className="mt-0.5 text-sm font-medium text-slate-100">
               {prospect.last_contact_at ? relative(prospect.last_contact_at) : "Jamais"}
-              {prospect.call_attempts > 0 && (
-                <span className="text-xs text-slate-500">
-                  {" "}
-                  · {prospect.call_attempts} appel{prospect.call_attempts > 1 ? "s" : ""}
-                </span>
-              )}
             </p>
           </div>
           <div className="card px-4 py-3">
             <p className="text-[11px] uppercase tracking-wider text-slate-500">
-              Prochain rappel
+              Prochaine action
             </p>
             <p
               className={`mt-0.5 text-sm font-medium ${
@@ -208,25 +205,13 @@ export default async function ProspectDetailPage({
         <div className="space-y-6 lg:col-span-2">
           <section>
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Résultat d&apos;appel
-            </h2>
-            <div className="card p-5">
-              <CallActions
-                prospect={{
-                  id: prospect.id,
-                  company_name: prospect.company_name,
-                  status: prospect.status,
-                  call_attempts: prospect.call_attempts,
-                }}
-              />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Noter un échange
             </h2>
-            <QuickNote prospectId={prospect.id} />
+            <QuickNote
+              prospectId={prospect.id}
+              companyName={prospect.company_name}
+              currentStatus={prospect.status}
+            />
           </section>
 
           {prospect.email && (
@@ -254,8 +239,8 @@ export default async function ProspectDetailPage({
 
             {timeline.length === 0 ? (
               <div className="card px-5 py-10 text-center text-sm text-slate-500">
-                Rien d&apos;enregistré pour l&apos;instant. Après votre premier appel,
-                notez ce qui s&apos;est dit ci-dessus.
+                Rien d&apos;enregistré pour l&apos;instant. Notez votre premier
+                échange ci-dessus.
               </div>
             ) : (
               <ol className="card divide-y divide-white/[0.05]">
@@ -264,18 +249,15 @@ export default async function ProspectDetailPage({
                     <li key={`a-${item.data.id}`} className="px-5 py-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="chip bg-white/[0.05] text-slate-300 ring-white/10">
-                          {ACTIVITY_LABEL[item.data.type]}
+                          {ACTIVITY_LABEL[item.data.type] ?? "Note"}
                         </span>
-                        {item.data.outcome && (
+                        {item.data.subject && (
                           <span className="chip bg-celya-blue/15 text-blue-300 ring-blue-400/25">
-                            {item.data.outcome}
+                            {item.data.subject}
                           </span>
                         )}
                         <span className="text-xs text-slate-500">
                           {fmtDateTime(item.data.occurred_at)}
-                          {item.data.duration_min
-                            ? ` · ${item.data.duration_min} min`
-                            : ""}
                         </span>
                         <span className="ml-auto text-xs text-slate-500">
                           {item.data.crm_users?.full_name ?? ""}
@@ -335,7 +317,7 @@ export default async function ProspectDetailPage({
                 <input type="hidden" name="id" value={prospect.id} />
                 <button className="btn-danger">Supprimer ce prospect</button>
                 <p className="mt-2 text-[11px] text-slate-500">
-                  Supprime aussi son historique et ses rappels. Action définitive.
+                  Supprime aussi son historique et ses relances. Action définitive.
                 </p>
               </form>
             </details>
@@ -360,40 +342,29 @@ export default async function ProspectDetailPage({
                   name="title"
                   required
                   className="input"
-                  placeholder="Rappeler pour le devis"
+                  placeholder="Relancer pour le devis"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label" htmlFor="due_days">
-                    Quand
-                  </label>
-                  <select id="due_days" name="due_days" defaultValue="3" className="input">
-                    <option value="1">Demain</option>
-                    <option value="2">Dans 2 jours</option>
-                    <option value="3">Dans 3 jours</option>
-                    <option value="7">Dans 1 semaine</option>
-                    <option value="14">Dans 2 semaines</option>
-                    <option value="30">Dans 1 mois</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label" htmlFor="priority">
-                    Priorité
-                  </label>
-                  <select id="priority" name="priority" defaultValue="2" className="input">
-                    <option value="1">Haute</option>
-                    <option value="2">Normale</option>
-                    <option value="3">Basse</option>
-                  </select>
-                </div>
+              <div>
+                <span className="label">Quand</span>
+                <DateField name="due_local" required compact />
+              </div>
+              <div>
+                <label className="label" htmlFor="priority">
+                  Priorité
+                </label>
+                <select id="priority" name="priority" defaultValue="2" className="input">
+                  <option value="1">Haute</option>
+                  <option value="2">Normale</option>
+                  <option value="3">Basse</option>
+                </select>
               </div>
               <button className="btn-primary w-full">Planifier</button>
             </form>
 
             {openTasks.length === 0 ? (
               <p className="card px-5 py-6 text-center text-sm text-slate-500">
-                Aucun rappel planifié.
+                Aucune relance planifiée.
               </p>
             ) : (
               <ul className="card divide-y divide-white/[0.05]">

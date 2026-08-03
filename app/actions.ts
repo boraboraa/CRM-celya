@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
-import { localInputToISO, inDaysAt9, slotOfISO } from "@/lib/time";
-import { CALL_OUTCOMES } from "@/lib/constants";
-import type { ActivityType, CallOutcome, ProspectStatus } from "@/lib/types";
+import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
+import { normalizeStatus, STATUS_ORDER } from "@/lib/constants";
+import type { ActivityType, ProspectStatus } from "@/lib/types";
 
 export type ActionState = { error?: string; success?: string };
 
@@ -36,9 +36,7 @@ async function currentUserId() {
 function revalidateProspect(id?: string | null) {
   if (id) revalidatePath(`/prospects/${id}`);
   revalidatePath("/prospects");
-  revalidatePath("/pipeline");
   revalidatePath("/dashboard");
-  revalidatePath("/taches");
 }
 
 // =====================================================================
@@ -59,7 +57,7 @@ export async function createProspectAction(fd: FormData) {
       website: str(fd, "website"),
       sector: str(fd, "sector"),
       city: str(fd, "city"),
-      status: (str(fd, "status") as ProspectStatus) ?? "a_appeler",
+      status: normalizeStatus(str(fd, "status")),
       source: str(fd, "source"),
       value_estimate: num(fd, "value_estimate"),
       owner_id: assign === "none" ? null : (assign ?? userId),
@@ -72,7 +70,6 @@ export async function createProspectAction(fd: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath("/prospects");
-  revalidatePath("/pipeline");
   redirect(`/prospects/${data.id}`);
 }
 
@@ -92,7 +89,7 @@ export async function updateProspectAction(fd: FormData) {
       website: str(fd, "website"),
       sector: str(fd, "sector"),
       city: str(fd, "city"),
-      status: (str(fd, "status") as ProspectStatus) ?? "a_appeler",
+      status: normalizeStatus(str(fd, "status")),
       source: str(fd, "source"),
       value_estimate: num(fd, "value_estimate"),
       owner_id: assign === "none" ? null : assign,
@@ -109,10 +106,13 @@ export async function updateProspectAction(fd: FormData) {
 export async function setProspectStatusAction(fd: FormData) {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  const status = str(fd, "status") as ProspectStatus | null;
+  const status = str(fd, "status");
   if (!id || !status) return;
 
-  await supabase.from("prospects").update({ status }).eq("id", id);
+  await supabase
+    .from("prospects")
+    .update({ status: normalizeStatus(status) })
+    .eq("id", id);
 
   revalidateProspect(id);
 }
@@ -126,117 +126,113 @@ export async function deleteProspectAction(fd: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath("/prospects");
-  revalidatePath("/pipeline");
   redirect("/prospects");
 }
 
 // =====================================================================
-// Résultat d'appel → cadence de rappel (le cœur du poste d'appels)
+// Noter un échange — le geste central : note + étape + prochaine action.
+// Remplace l'ancienne mécanique de résultats d'appel : plus de cadence,
+// c'est la date qui décide de tout.
 // =====================================================================
 
-export type PlanifierRappelInput = {
+export type SaveExchangeInput = {
   prospectId: string;
-  resultat: CallOutcome;
-  /** Note d'appel libre, versée au journal. */
+  /** Type d'échange versé au journal : note, email, rendez_vous. */
+  type: ActivityType;
+  /** Texte libre de l'échange. */
   note?: string | null;
-  /** « YYYY-MM-DDTHH:mm » heure de Bruxelles — requis pour rappeler_plus_tard
-   *  et rdv_fixe. */
-  dateLocale?: string | null;
-  /** Remplace le délai par défaut du résultat (en jours). */
-  delaiJours?: number | null;
-  /** Motif de perte — requis pour refus. */
-  motif?: string | null;
-  /** Résumé court proposé (IA ou saisi), versé en sujet du journal. */
+  /** Résumé court (proposé par l'assistant ou saisi), versé en sujet. */
   resume?: string | null;
   /** Nom de contact à mettre à jour sur la fiche (validé par l'humain). */
   contactName?: string | null;
+  /** Nouvelle étape — null : inchangée. */
+  statut?: ProspectStatus | null;
+  /** Raison de la perte — utilisée quand statut = perdu. */
+  motif?: string | null;
+  /** Prochaine action : « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles).
+   *  null : aucune relance créée ni re-datée. */
+  dateLocale?: string | null;
 };
 
-/**
- * Enregistre le résultat d'un appel : statut, compteur de tentatives,
- * journal d'activité, et tâche de rappel (jamais de doublon si une tâche
- * ouverte existe déjà — elle est re-datée).
- */
-export async function planifierRappelAction(
-  input: PlanifierRappelInput
+export async function saveExchangeAction(
+  input: SaveExchangeInput
 ): Promise<ActionState> {
-  const config = CALL_OUTCOMES[input.resultat];
-  if (!config) return { error: "Résultat d'appel inconnu." };
-
   const { supabase, userId } = await currentUserId();
 
   const { data: prospect } = await supabase
     .from("prospects")
-    .select("id, company_name, call_attempts")
+    .select("id, company_name, status")
     .eq("id", input.prospectId)
     .maybeSingle();
   if (!prospect) return { error: "Prospect introuvable." };
 
-  // Échéance du rappel
-  let dueAt: string | null = null;
-  if (config.needsDate) {
-    dueAt = localInputToISO(input.dateLocale ?? null);
-    if (!dueAt) return { error: "Choisissez une date." };
-  } else if (config.delayDays !== null) {
-    const days = input.delaiJours ?? config.delayDays;
-    if (!Number.isFinite(days) || days < 0 || days > 365) {
-      return { error: "Délai de rappel invalide." };
-    }
-    dueAt = inDaysAt9(days);
+  const note = input.note?.trim() || null;
+  const resume = input.resume?.trim().slice(0, 300) || null;
+  const newStatus =
+    input.statut && (STATUS_ORDER as string[]).includes(input.statut)
+      ? input.statut
+      : null;
+  const statusChanged = newStatus !== null && newStatus !== prospect.status;
+
+  const dueAt = dateInputToISO(input.dateLocale ?? null);
+  if (input.dateLocale && !dueAt) return { error: "Date invalide." };
+
+  if (!note && !resume && !statusChanged && !dueAt && !input.contactName?.trim()) {
+    return { error: "Rien à enregistrer." };
   }
 
-  const lostReason =
-    input.resultat === "mauvais_numero"
-      ? "Numéro invalide"
-      : input.resultat === "refus"
-        ? (input.motif?.trim() || "Refus")
-        : null;
+  // 1. Fiche : étape, contact, raison de perte.
+  const patch: Record<string, unknown> = {};
+  if (statusChanged) {
+    patch.status = newStatus;
+    if (newStatus === "perdu") {
+      patch.lost_reason = input.motif?.trim() || "Sans précision";
+    }
+  }
+  if (input.contactName?.trim()) {
+    patch.contact_name = input.contactName.trim().slice(0, 120);
+  }
+  if (Object.keys(patch).length > 0) {
+    const { error } = await supabase
+      .from("prospects")
+      .update(patch)
+      .eq("id", prospect.id);
+    if (error) return { error: error.message };
+  }
 
-  const now = new Date().toISOString();
+  // 2. Journal — met aussi à jour last_contact_at via trigger.
+  if (note || resume) {
+    await supabase.from("activities").insert({
+      prospect_id: prospect.id,
+      author_id: userId,
+      type: input.type,
+      subject: resume,
+      body: note,
+      occurred_at: new Date().toISOString(),
+    });
+  }
 
-  const { error: upErr } = await supabase
-    .from("prospects")
-    .update({
-      status: config.nextStatus,
-      call_attempts: prospect.call_attempts + 1,
-      last_outcome: input.resultat,
-      last_call_slot: slotOfISO(now),
-      ...(lostReason ? { lost_reason: lostReason } : {}),
-      ...(input.contactName?.trim()
-        ? { contact_name: input.contactName.trim().slice(0, 120) }
-        : {}),
-    })
-    .eq("id", prospect.id);
-  if (upErr) return { error: upErr.message };
-
-  // Journal — met aussi à jour last_contact_at via trigger.
-  await supabase.from("activities").insert({
-    prospect_id: prospect.id,
-    author_id: userId,
-    type: "appel",
-    subject: input.resume?.trim().slice(0, 300) || null,
-    body: input.note?.trim() || null,
-    outcome: config.label,
-    duration_min: null,
-    occurred_at: now,
-  });
-
-  // Tâche de rappel — on réutilise la tâche ouverte s'il y en a une.
+  // 3. Relance — jamais de doublon : la tâche ouverte est re-datée, les
+  //    surnuméraires annulées. Un prospect perdu n'a plus de relance.
   const { data: openTasks } = await supabase
     .from("tasks")
     .select("id")
     .eq("prospect_id", prospect.id)
     .eq("status", "a_faire")
     .order("due_at", { ascending: true });
-
   const openIds = (openTasks ?? []).map((t) => t.id);
 
-  if (config.nextStatus === "perdu") {
+  if (newStatus === "perdu") {
     if (openIds.length > 0) {
       await supabase.from("tasks").update({ status: "annule" }).in("id", openIds);
     }
   } else if (dueAt) {
-    const title = taskTitleFor(input.resultat, prospect.company_name);
+    const effective = newStatus ?? normalizeStatus(prospect.status);
+    const title =
+      input.type === "rendez_vous" || effective === "rendez_vous"
+        ? `RDV avec ${prospect.company_name}`
+        : `Relancer ${prospect.company_name}`;
+
     if (openIds.length > 0) {
       await supabase
         .from("tasks")
@@ -264,111 +260,9 @@ export async function planifierRappelAction(
   return {};
 }
 
-function taskTitleFor(outcome: CallOutcome, company: string): string {
-  switch (outcome) {
-    case "rdv_fixe":
-      return `RDV avec ${company}`;
-    case "interesse":
-      return `Relancer ${company} — intéressé`;
-    case "rappeler_plus_tard":
-      return `Rappeler ${company} (à sa demande)`;
-    default:
-      return `Rappeler ${company}`;
-  }
-}
-
-/**
- * Archivage proposé après MAX_CALL_ATTEMPTS tentatives sans réponse.
- * Toujours déclenché par un clic humain — jamais automatique.
- */
-export async function archiverProspectAction(input: {
-  prospectId: string;
-  motif?: string | null;
-}): Promise<ActionState> {
-  const { supabase, userId } = await currentUserId();
-
-  const { data: prospect } = await supabase
-    .from("prospects")
-    .select("id, call_attempts")
-    .eq("id", input.prospectId)
-    .maybeSingle();
-  if (!prospect) return { error: "Prospect introuvable." };
-
-  const motif =
-    input.motif?.trim() ||
-    `Injoignable après ${prospect.call_attempts} tentatives`;
-
-  const { error } = await supabase
-    .from("prospects")
-    .update({ status: "perdu", lost_reason: motif })
-    .eq("id", prospect.id);
-  if (error) return { error: error.message };
-
-  await supabase.from("activities").insert({
-    prospect_id: prospect.id,
-    author_id: userId,
-    type: "note",
-    subject: null,
-    body: `Archivé : ${motif}`,
-    outcome: null,
-    duration_min: null,
-    occurred_at: new Date().toISOString(),
-  });
-
-  const { data: openTasks } = await supabase
-    .from("tasks")
-    .select("id")
-    .eq("prospect_id", prospect.id)
-    .eq("status", "a_faire");
-  const openIds = (openTasks ?? []).map((t) => t.id);
-  if (openIds.length > 0) {
-    await supabase.from("tasks").update({ status: "annule" }).in("id", openIds);
-  }
-
-  revalidateProspect(prospect.id);
-  return {};
-}
-
 // =====================================================================
-// Activités (notes, emails, réunions…)
+// Activités
 // =====================================================================
-
-export async function addActivityAction(fd: FormData) {
-  const { supabase, userId } = await currentUserId();
-  const prospectId = str(fd, "prospect_id");
-  if (!prospectId) throw new Error("Prospect introuvable");
-
-  const occurred = localInputToISO(str(fd, "occurred_at")) ?? new Date().toISOString();
-
-  const { error } = await supabase.from("activities").insert({
-    prospect_id: prospectId,
-    author_id: userId,
-    type: (str(fd, "type") as ActivityType) ?? "note",
-    subject: str(fd, "subject"),
-    body: str(fd, "body"),
-    outcome: str(fd, "outcome"),
-    duration_min: num(fd, "duration_min"),
-    occurred_at: occurred,
-  });
-  if (error) throw new Error(error.message);
-
-  // Relance planifiée dans la foulée de la note ?
-  const followUp = str(fd, "follow_up_days");
-  if (followUp && followUp !== "none") {
-    await supabase.from("tasks").insert({
-      prospect_id: prospectId,
-      title: str(fd, "follow_up_title") ?? "Relancer le prospect",
-      due_at: inDaysAt9(Number(followUp)),
-      assignee_id: userId,
-      created_by: userId,
-      priority: 2,
-    });
-  }
-
-  revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/dashboard");
-  revalidatePath("/taches");
-}
 
 export async function deleteActivityAction(fd: FormData) {
   const { supabase } = await currentUserId();
@@ -387,12 +281,10 @@ export async function deleteActivityAction(fd: FormData) {
 export async function createTaskAction(fd: FormData) {
   const { supabase, userId } = await currentUserId();
 
-  const dueRaw = str(fd, "due_at");
-  const dueDays = str(fd, "due_days");
   const due =
-    dueDays && dueDays !== "custom"
-      ? inDaysAt9(Number(dueDays))
-      : (localInputToISO(dueRaw) ?? inDaysAt9(1));
+    dateInputToISO(str(fd, "due_local")) ??
+    localInputToISO(str(fd, "due_at")) ??
+    inDaysAt9(1);
 
   const assignee = str(fd, "assignee_id");
 
@@ -409,7 +301,6 @@ export async function createTaskAction(fd: FormData) {
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/taches");
   revalidatePath("/dashboard");
 }
 
@@ -426,21 +317,20 @@ export async function completeTaskAction(fd: FormData) {
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/taches");
   revalidatePath("/dashboard");
 }
 
-export async function snoozeTaskAction(fd: FormData) {
+/** Reprogramme une relance à une date précise (champ de date de TaskRow). */
+export async function rescheduleTaskAction(fd: FormData) {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  const days = Number(str(fd, "days") ?? 1);
-  if (!id) return;
+  const due = dateInputToISO(str(fd, "due_local"));
+  if (!id || !due) return;
 
-  await supabase.from("tasks").update({ due_at: inDaysAt9(days) }).eq("id", id);
+  await supabase.from("tasks").update({ due_at: due }).eq("id", id);
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/taches");
   revalidatePath("/dashboard");
 }
 
@@ -453,7 +343,6 @@ export async function deleteTaskAction(fd: FormData) {
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/taches");
   revalidatePath("/dashboard");
 }
 
@@ -602,13 +491,16 @@ export async function adminResetPasswordAction(
 }
 
 // =====================================================================
-// Pipeline — glisser-déposer
+// Vue en colonnes — glisser-déposer
 // =====================================================================
 
 export async function moveProspectAction(id: string, status: ProspectStatus) {
   const { supabase } = await currentUserId();
 
-  const { error } = await supabase.from("prospects").update({ status }).eq("id", id);
+  const { error } = await supabase
+    .from("prospects")
+    .update({ status: normalizeStatus(status) })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 
   revalidateProspect(id);
@@ -648,24 +540,28 @@ const STATUS_ALIASES: Record<string, ProspectStatus> = {
   "a appeler": "a_appeler",
   nouveau: "a_appeler",
   new: "a_appeler",
-  sans_reponse: "sans_reponse",
-  "sans réponse": "sans_reponse",
-  "sans reponse": "sans_reponse",
-  contact_etabli: "contact_etabli",
-  "contact établi": "contact_etabli",
-  "contact etabli": "contact_etabli",
-  contacte: "contact_etabli",
-  contacté: "contact_etabli",
-  contacted: "contact_etabli",
-  rappel_programme: "rappel_programme",
-  "rappel programmé": "rappel_programme",
-  "rappel programme": "rappel_programme",
-  rdv: "rdv",
-  "rdv fixé": "rdv",
-  "rdv fixe": "rdv",
-  qualifie: "rdv",
-  qualifié: "rdv",
-  qualified: "rdv",
+  contacte: "contacte",
+  contacté: "contacte",
+  contacted: "contacte",
+  contact_etabli: "contacte",
+  "contact établi": "contacte",
+  "contact etabli": "contacte",
+  sans_reponse: "contacte",
+  "sans réponse": "contacte",
+  "sans reponse": "contacte",
+  rappel_programme: "contacte",
+  "rappel programmé": "contacte",
+  "rappel programme": "contacte",
+  rendez_vous: "rendez_vous",
+  "rendez-vous": "rendez_vous",
+  "rendez vous": "rendez_vous",
+  rdv: "rendez_vous",
+  "rdv fixé": "rendez_vous",
+  "rdv fixe": "rendez_vous",
+  qualifie: "rendez_vous",
+  qualifié: "rendez_vous",
+  qualified: "rendez_vous",
+  meeting: "rendez_vous",
   proposition: "proposition",
   devis: "proposition",
   proposal: "proposition",
@@ -791,7 +687,6 @@ export async function importProspectsAction(
   }
 
   revalidatePath("/prospects");
-  revalidatePath("/pipeline");
   revalidatePath("/dashboard");
 
   return { inserted, skipped, reasons };

@@ -1,80 +1,49 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { todayBounds, slotOfISO } from "@/lib/time";
-import { PageHeader, StatusChip, EmptyState } from "@/components/ui";
-import { CallActions } from "@/components/CallActions";
+import { todayBounds } from "@/lib/time";
+import { PageHeader, EmptyState } from "@/components/ui";
+import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
-import {
-  CALL_OUTCOMES,
-  CALL_SLOT_LABEL,
-  OTHER_SLOT,
-  relative,
-} from "@/lib/constants";
-import type { CallOutcome, CallSlot, ProspectStatus } from "@/lib/types";
+import { DateField } from "@/components/DateField";
+import { createTaskAction } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
-/** Statuts qui peuvent porter un rappel dû (tout sauf gagné/perdu). */
-const RAPPEL_STATUSES: ProspectStatus[] = [
-  "a_appeler",
-  "sans_reponse",
-  "contact_etabli",
-  "rappel_programme",
-  "rdv",
-  "proposition",
-];
-
-type QueueProspect = {
-  id: string;
-  company_name: string;
-  contact_name: string | null;
-  phone: string | null;
-  city: string | null;
-  status: ProspectStatus;
-  call_attempts: number;
-  last_outcome: CallOutcome | null;
-  last_contact_at: string | null;
-  next_action_at: string | null;
-};
-
-const QUEUE_SELECT =
-  "id, company_name, contact_name, phone, city, status, call_attempts, last_outcome, last_contact_at, next_action_at";
-
-export default async function DashboardPage() {
+/**
+ * À faire — ce qui échoit aujourd'hui et ce qui est en retard, tous prospects
+ * confondus. C'est la date qui décide : une relance posée au 14 octobre ne
+ * remonte ici que le 14 octobre. S'y ajoutent les réponses email reçues.
+ */
+export default async function TodoPage() {
   const supabase = await createClient();
   const session = await getSession();
   const { start, end } = todayBounds();
 
-  const [overdueRes, todayRes, neverRes, repliesRes] = await Promise.all([
-    // 1. En retard — rappels dont la date est passée, les plus anciens d'abord.
-    supabase
-      .from("prospects")
-      .select(QUEUE_SELECT)
-      .in("status", RAPPEL_STATUSES)
-      .lt("next_action_at", start)
-      .order("next_action_at", { ascending: true })
-      .limit(60),
+  const TASK_SELECT =
+    "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name, phone)";
 
-    // 2. Aujourd'hui — rappels du jour (un rappel programmé y remonte seul).
+  const [overdueRes, todayRes, repliesRes] = await Promise.all([
+    // En retard — les plus anciennes d'abord.
     supabase
-      .from("prospects")
-      .select(QUEUE_SELECT)
-      .in("status", RAPPEL_STATUSES)
-      .gte("next_action_at", start)
-      .lte("next_action_at", end)
-      .order("next_action_at", { ascending: true })
-      .limit(60),
+      .from("tasks")
+      .select(TASK_SELECT)
+      .eq("status", "a_faire")
+      .lt("due_at", start)
+      .order("due_at", { ascending: true })
+      .limit(100),
 
-    // 3. Jamais appelés.
+    // Aujourd'hui.
     supabase
-      .from("prospects")
-      .select(QUEUE_SELECT)
-      .eq("status", "a_appeler")
-      .order("created_at", { ascending: true })
-      .limit(60),
+      .from("tasks")
+      .select(TASK_SELECT)
+      .eq("status", "a_faire")
+      .gte("due_at", start)
+      .lte("due_at", end)
+      .order("due_at", { ascending: true })
+      .limit(100),
 
-    // 4. Réponses reçues — emails entrants rattachés, en attente de tri.
+    // Réponses reçues — emails entrants rattachés, en attente de tri.
     supabase
       .from("emails")
       .select(
@@ -87,53 +56,18 @@ export default async function DashboardPage() {
       .limit(20),
   ]);
 
-  const overdue = (overdueRes.data ?? []) as QueueProspect[];
-  const today = (todayRes.data ?? []) as QueueProspect[];
-  const scheduled = new Set([...overdue, ...today].map((p) => p.id));
-  const never = ((neverRes.data ?? []) as QueueProspect[]).filter(
-    (p) => !scheduled.has(p.id)
-  );
-
-  // Variation d'horaire : si les 3 derniers appels d'un prospect ont eu lieu
-  // dans le même créneau, on en propose un autre.
-  const calledIds = [...overdue, ...today].map((p) => p.id);
-  const slotHints = new Map<string, string>();
-  if (calledIds.length > 0) {
-    const { data: calls } = await supabase
-      .from("activities")
-      .select("prospect_id, occurred_at")
-      .in("prospect_id", calledIds)
-      .eq("type", "appel")
-      .order("occurred_at", { ascending: false })
-      .limit(400);
-
-    const byProspect = new Map<string, CallSlot[]>();
-    for (const c of calls ?? []) {
-      const list = byProspect.get(c.prospect_id) ?? [];
-      if (list.length < 3) {
-        list.push(slotOfISO(c.occurred_at));
-        byProspect.set(c.prospect_id, list);
-      }
-    }
-    for (const [id, slots] of byProspect) {
-      if (slots.length === 3 && slots.every((s) => s === slots[0])) {
-        slotHints.set(
-          id,
-          `3 derniers appels ${CALL_SLOT_LABEL[slots[0]]} — essayez ${CALL_SLOT_LABEL[OTHER_SLOT[slots[0]]]}.`
-        );
-      }
-    }
-  }
-
+  const overdue = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
+  const today = (todayRes.data ?? []) as unknown as TaskWithProspect[];
   const replies = (repliesRes.data ?? []) as unknown as ReplyCardEmail[];
+
   const firstName = session?.me?.full_name?.split(" ")[0];
-  const empty = overdue.length + today.length + never.length === 0;
+  const empty = overdue.length + today.length === 0;
 
   return (
     <>
       <PageHeader
-        title={firstName ? `Bonjour ${firstName}` : "File d'appels"}
-        subtitle="Qui j'appelle maintenant — en retard d'abord, puis le jour, puis les jamais appelés."
+        title={firstName ? `Bonjour ${firstName}` : "À faire"}
+        subtitle="Ce qui échoit aujourd'hui et ce qui est en retard — tous prospects confondus."
         action={
           <Link href="/prospects/nouveau" className="btn-primary">
             + Nouveau prospect
@@ -143,33 +77,41 @@ export default async function DashboardPage() {
 
       {empty ? (
         <EmptyState
-          title="Rien à appeler pour l'instant"
-          hint="Ajoutez des prospects ou importez une liste : ils apparaîtront ici, dans l'ordre où il faut les appeler."
-          href="/prospects/nouveau"
-          cta="Créer un prospect"
+          title="Rien à faire aujourd'hui"
+          hint="Posez une relance ou un rendez-vous sur une fiche prospect : il remontera ici à sa date."
+          href="/prospects"
+          cta="Voir les prospects"
         />
       ) : (
         <div className="space-y-8">
-          <QueueSection
-            title="En retard"
-            tone="late"
-            prospects={overdue}
-            slotHints={slotHints}
-          />
-          <QueueSection
-            title="Aujourd'hui"
-            prospects={today}
-            slotHints={slotHints}
-          />
-          <QueueSection
-            title="Jamais appelés"
-            prospects={never}
-            slotHints={slotHints}
-          />
+          <TaskSection title="En retard" tone="late" tasks={overdue} />
+          <TaskSection title="Aujourd'hui" tasks={today} />
         </div>
       )}
 
-      {/* 4. Réponses reçues — la boîte Zoho remonte ici, l'IA propose, Bora décide. */}
+      {/* Nouvelle relance libre (avec ou sans prospect) */}
+      <form action={createTaskAction} className="card mt-8 flex flex-wrap items-end gap-4 p-4">
+        <div className="min-w-[240px] flex-1">
+          <label className="label" htmlFor="title">
+            Nouvelle relance
+          </label>
+          <input
+            id="title"
+            name="title"
+            required
+            className="input"
+            placeholder="Préparer la proposition pour lundi"
+          />
+        </div>
+        <div>
+          <span className="label">Échéance</span>
+          <DateField name="due_local" compact />
+        </div>
+        <input type="hidden" name="assignee_id" value={session?.userId ?? "none"} />
+        <button className="btn-ghost">Ajouter</button>
+      </form>
+
+      {/* Réponses reçues — la boîte Zoho remonte ici, l'IA propose, Bora décide. */}
       <section className="mt-8">
         <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
           Réponses reçues
@@ -179,12 +121,9 @@ export default async function DashboardPage() {
             </span>
           )}
           {session?.me?.role === "admin" && (
-            <span className="ml-auto flex gap-3 text-[11px] font-normal normal-case tracking-normal">
+            <span className="ml-auto text-[11px] font-normal normal-case tracking-normal">
               <Link href="/emails" className="text-slate-500 hover:text-slate-300">
                 Non rattachés
-              </Link>
-              <Link href="/reglages-email" className="text-slate-500 hover:text-slate-300">
-                Réglages boîte
               </Link>
             </span>
           )}
@@ -207,18 +146,16 @@ export default async function DashboardPage() {
   );
 }
 
-function QueueSection({
+function TaskSection({
   title,
-  prospects,
-  slotHints,
+  tasks,
   tone,
 }: {
   title: string;
-  prospects: QueueProspect[];
-  slotHints: Map<string, string>;
+  tasks: TaskWithProspect[];
   tone?: "late";
 }) {
-  if (prospects.length === 0) return null;
+  if (tasks.length === 0) return null;
 
   return (
     <section>
@@ -231,63 +168,13 @@ function QueueSection({
               : "bg-white/[0.06] text-slate-400"
           }`}
         >
-          {prospects.length}
+          {tasks.length}
         </span>
       </h2>
 
       <ul className="card divide-y divide-white/[0.05]">
-        {prospects.map((p) => (
-          <li key={p.id} className="px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              {p.phone ? (
-                <a
-                  href={`tel:${p.phone.replace(/\s/g, "")}`}
-                  className="btn-primary shrink-0 px-3.5 py-2 text-xs"
-                >
-                  📞 {p.phone}
-                </a>
-              ) : (
-                <span className="chip bg-rose-500/10 text-rose-300 ring-rose-400/20">
-                  Pas de numéro
-                </span>
-              )}
-
-              <Link
-                href={`/prospects/${p.id}`}
-                className="min-w-0 font-medium text-slate-100 hover:text-celya-cyan"
-              >
-                {p.company_name}
-              </Link>
-
-              {p.contact_name && (
-                <span className="text-xs text-slate-400">{p.contact_name}</span>
-              )}
-              {p.city && <span className="text-xs text-slate-500">{p.city}</span>}
-
-              <span className="ml-auto flex items-center gap-2">
-                <StatusChip status={p.status} />
-              </span>
-            </div>
-
-            <p className="mt-1.5 text-xs text-slate-500">
-              {p.last_outcome
-                ? `Dernier appel : ${CALL_OUTCOMES[p.last_outcome]?.label ?? p.last_outcome} · ${relative(p.last_contact_at)} · ${p.call_attempts} tentative${p.call_attempts > 1 ? "s" : ""}`
-                : "Jamais appelé"}
-              {p.next_action_at && ` · rappel prévu ${relative(p.next_action_at)}`}
-            </p>
-
-            <div className="mt-2.5">
-              <CallActions
-                prospect={{
-                  id: p.id,
-                  company_name: p.company_name,
-                  status: p.status,
-                  call_attempts: p.call_attempts,
-                }}
-                slotHint={slotHints.get(p.id)}
-              />
-            </div>
-          </li>
+        {tasks.map((t) => (
+          <TaskRow key={t.id} task={t} />
         ))}
       </ul>
     </section>

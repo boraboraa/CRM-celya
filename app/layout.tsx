@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Celya CRM",
-  description: "Prospection téléphonique, notes d'appel et rappels — Celya",
+  description: "Suivi des prospects et des relances — Celya",
 };
 
 export const viewport: Viewport = {

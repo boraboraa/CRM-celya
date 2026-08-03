@@ -1,5 +1,3 @@
-import type { CallSlot } from "./types";
-
 const TZ = "Europe/Brussels";
 
 /** Décalage (en minutes) de Bruxelles par rapport à UTC à l'instant donné. */
@@ -70,13 +68,16 @@ export function inDaysAt9(days: number): string {
   return localInputToISO(`${localDate}T09:00`) ?? target.toISOString();
 }
 
-/** Créneau d'appel (heure de Bruxelles) d'un instant donné. */
-export function slotOfISO(iso: string): CallSlot {
-  const hour = Number(isoToLocalInput(iso).slice(11, 13));
-  if (hour < 12) return "matin";
-  if (hour < 14) return "midi";
-  if (hour < 17) return "apres_midi";
-  return "fin_journee";
+/**
+ * Convertit une saisie de date locale — « YYYY-MM-DD » (échéance à 09:00) ou
+ * « YYYY-MM-DDTHH:mm » (heure précise, ex. rendez-vous) — vers un ISO UTC.
+ */
+export function dateInputToISO(value?: string | null): string | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return localInputToISO(`${v}T09:00`);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return localInputToISO(v.slice(0, 16));
+  return null;
 }
 
 /** Bornes du jour courant (heure de Bruxelles) exprimées en ISO UTC. */

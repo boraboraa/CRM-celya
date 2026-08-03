@@ -1,20 +1,32 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, StatusChip, EmptyState, Avatar } from "@/components/ui";
-import { STATUS_ORDER, STATUS_LABEL, fmtMoney, relative } from "@/lib/constants";
-import type { ProspectStatus } from "@/lib/types";
+import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
+import {
+  STATUS_ORDER,
+  STATUS_LABEL,
+  normalizeStatus,
+  fmtMoney,
+  relative,
+} from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; statut?: string; tri?: string };
+type Search = { q?: string; statut?: string; tri?: string; vue?: string };
 
+/**
+ * Une seule liste de prospects, deux affichages : liste (tableau filtrable)
+ * ou colonnes par étape (glisser-déposer). Même jeu de données, mêmes
+ * filtres — la vue en colonnes n'est qu'un mode d'affichage.
+ */
 export default async function ProspectsPage({
   searchParams,
 }: {
   searchParams: Promise<Search>;
 }) {
-  const { q, statut, tri } = await searchParams;
+  const { q, statut, tri, vue } = await searchParams;
   const supabase = await createClient();
+  const view = vue === "colonnes" ? "colonnes" : "liste";
 
   let query = supabase
     .from("prospects")
@@ -28,9 +40,6 @@ export default async function ProspectsPage({
       `company_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like},city.ilike.${like}`
     );
   }
-  if (statut && statut !== "tous") {
-    query = query.eq("status", statut);
-  }
 
   const sort = tri ?? "recent";
   if (sort === "relance") {
@@ -43,20 +52,45 @@ export default async function ProspectsPage({
     query = query.order("updated_at", { ascending: false });
   }
 
-  const { data, error } = await query.limit(300);
-  const prospects = (data ?? []) as unknown as {
+  const { data, error } = await query.limit(500);
+  let prospects = ((data ?? []) as unknown as {
     id: string;
     company_name: string;
     contact_name: string | null;
     email: string | null;
     phone: string | null;
     city: string | null;
-    status: ProspectStatus;
+    status: string;
     value_estimate: number | null;
     next_action_at: string | null;
     last_contact_at: string | null;
     crm_users: { full_name: string | null } | null;
-  }[];
+  }[]).map((p) => ({ ...p, status: normalizeStatus(p.status) }));
+
+  // Filtre d'étape côté code : tolère d'anciennes valeurs encore en base.
+  if (statut && statut !== "tous") {
+    prospects = prospects.filter((p) => p.status === statut);
+  }
+
+  const boardProspects: BoardProspect[] = prospects.map((p) => ({
+    id: p.id,
+    company_name: p.company_name,
+    contact_name: p.contact_name,
+    status: p.status,
+    value_estimate: p.value_estimate,
+    next_action_at: p.next_action_at,
+  }));
+
+  /** URL d'une vue en conservant filtres et tri. */
+  const viewHref = (v: "liste" | "colonnes") => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (statut && statut !== "tous") params.set("statut", statut);
+    if (tri) params.set("tri", tri);
+    if (v === "colonnes") params.set("vue", "colonnes");
+    const qs = params.toString();
+    return `/prospects${qs ? `?${qs}` : ""}`;
+  };
 
   return (
     <>
@@ -75,48 +109,75 @@ export default async function ProspectsPage({
         }
       />
 
-      <form className="card mb-5 flex flex-wrap items-end gap-3 p-4">
-        <div className="min-w-[220px] flex-1">
-          <label className="label" htmlFor="q">
-            Rechercher
-          </label>
-          <input
-            id="q"
-            name="q"
-            defaultValue={q ?? ""}
-            className="input"
-            placeholder="Nom, contact, email, ville…"
-          />
+      <div className="mb-5 flex flex-wrap items-end gap-3">
+        {/* Bascule liste ↔ colonnes — même jeu de données. */}
+        <div className="flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
+          {(
+            [
+              ["liste", "☰ Liste"],
+              ["colonnes", "▤ Colonnes"],
+            ] as const
+          ).map(([v, label]) => (
+            <Link
+              key={v}
+              href={viewHref(v)}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                view === v
+                  ? "bg-white/[0.09] text-slate-100 ring-1 ring-white/15"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {label}
+            </Link>
+          ))}
         </div>
 
-        <div>
-          <label className="label" htmlFor="statut">
-            Statut
-          </label>
-          <select id="statut" name="statut" defaultValue={statut ?? "tous"} className="input">
-            <option value="tous">Tous</option>
-            {STATUS_ORDER.map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABEL[s]}
-              </option>
-            ))}
-          </select>
-        </div>
+        <form className="flex flex-1 flex-wrap items-end gap-3">
+          {view === "colonnes" && <input type="hidden" name="vue" value="colonnes" />}
+          <div className="min-w-[200px] flex-1">
+            <label className="label" htmlFor="q">
+              Rechercher
+            </label>
+            <input
+              id="q"
+              name="q"
+              defaultValue={q ?? ""}
+              className="input"
+              placeholder="Nom, contact, email, ville…"
+            />
+          </div>
 
-        <div>
-          <label className="label" htmlFor="tri">
-            Trier par
-          </label>
-          <select id="tri" name="tri" defaultValue={sort} className="input">
-            <option value="recent">Activité récente</option>
-            <option value="relance">Prochain rappel</option>
-            <option value="valeur">Valeur estimée</option>
-            <option value="nom">Nom</option>
-          </select>
-        </div>
+          <div>
+            <label className="label" htmlFor="statut">
+              Étape
+            </label>
+            <select id="statut" name="statut" defaultValue={statut ?? "tous"} className="input">
+              <option value="tous">Toutes</option>
+              {STATUS_ORDER.map((s) => (
+                <option key={s} value={s}>
+                  {STATUS_LABEL[s]}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <button className="btn-ghost">Filtrer</button>
-      </form>
+          {view === "liste" && (
+            <div>
+              <label className="label" htmlFor="tri">
+                Trier par
+              </label>
+              <select id="tri" name="tri" defaultValue={sort} className="input">
+                <option value="recent">Activité récente</option>
+                <option value="relance">Prochaine action</option>
+                <option value="valeur">Valeur estimée</option>
+                <option value="nom">Nom</option>
+              </select>
+            </div>
+          )}
+
+          <button className="btn-ghost">Filtrer</button>
+        </form>
+      </div>
 
       {error && (
         <p className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
@@ -129,21 +190,23 @@ export default async function ProspectsPage({
           title={q || statut ? "Aucun résultat" : "Aucun prospect pour l'instant"}
           hint={
             q || statut
-              ? "Essayez d'élargir la recherche ou de retirer le filtre de statut."
-              : "Créez votre première fiche : après chaque appel vous pourrez y noter ce qui s'est dit et planifier le rappel."
+              ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
+              : "Créez votre première fiche, ou importez une liste depuis un fichier CSV."
           }
           href="/prospects/nouveau"
           cta="Créer un prospect"
         />
+      ) : view === "colonnes" ? (
+        <PipelineBoard prospects={boardProspects} />
       ) : (
         <div className="card overflow-x-auto">
           <table className="w-full min-w-[820px]">
             <thead className="border-b border-white/[0.06]">
               <tr>
                 <th className="th">Prospect</th>
-                <th className="th">Statut</th>
+                <th className="th">Étape</th>
                 <th className="th">Valeur</th>
-                <th className="th">Prochain rappel</th>
+                <th className="th">Prochaine action</th>
                 <th className="th">Dernier contact</th>
                 <th className="th">Responsable</th>
               </tr>

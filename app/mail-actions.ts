@@ -162,7 +162,6 @@ export async function sendProspectEmailAction(
 
   revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
-  revalidatePath("/taches");
   return { success: "Email envoyé. Relance planifiée à 3 jours si aucune n'existait." };
 }
 
@@ -268,11 +267,11 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
 
   switch (intent) {
     case "interesse":
-      await supabase.from("prospects").update({ status: "contact_etabli" }).eq("id", prospectId);
+      await supabase.from("prospects").update({ status: "contacte" }).eq("id", prospectId);
       await upsertTask(`Relancer ${company} — intéressé (réponse email)`, proposedDue ?? inDaysAt9(1));
       break;
     case "demande_info":
-      await supabase.from("prospects").update({ status: "contact_etabli" }).eq("id", prospectId);
+      await supabase.from("prospects").update({ status: "contacte" }).eq("id", prospectId);
       await upsertTask(`Envoyer les informations à ${company}`, proposedDue ?? inDaysAt9(1));
       break;
     case "pas_interesse":
@@ -288,8 +287,10 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
       }
       break;
     case "rappel_plus_tard":
-      await supabase.from("prospects").update({ status: "rappel_programme" }).eq("id", prospectId);
-      await upsertTask(`Rappeler ${company} (à sa demande)`, proposedDue ?? inDaysAt9(30));
+      // La mise en sommeil ne passe plus par un statut : c'est la date de la
+      // relance qui sort la fiche de « À faire » jusqu'à l'échéance.
+      await supabase.from("prospects").update({ status: "contacte" }).eq("id", prospectId);
+      await upsertTask(`Recontacter ${company} (à sa demande)`, proposedDue ?? inDaysAt9(30));
       break;
     case "absence": {
       // « Je suis en congé jusqu'au 20 » n'est pas une réponse : on décale,
@@ -301,7 +302,7 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
           .update({ due_at: due })
           .in("id", openTasks.map((t) => t.id));
       } else {
-        await upsertTask(`Rappeler ${company}`, due);
+        await upsertTask(`Relancer ${company}`, due);
       }
       break;
     }
@@ -316,8 +317,6 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
 
   revalidatePath("/dashboard");
   revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/taches");
-  revalidatePath("/pipeline");
   return {};
 }
 

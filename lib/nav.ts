@@ -5,10 +5,8 @@
 export type NavItem = { href: string; label: string; icon: string };
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Appels", icon: "◉" },
-  { href: "/pipeline", label: "Pipeline", icon: "▤" },
+  { href: "/dashboard", label: "À faire", icon: "◉" },
   { href: "/prospects", label: "Prospects", icon: "◇" },
-  { href: "/taches", label: "Relances", icon: "◷" },
 ];
 
 export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "◍" };

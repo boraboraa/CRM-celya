@@ -9,9 +9,9 @@ type Template = { key: string; label: string; subject: string; body: string };
 
 const TEMPLATES: Template[] = [
   {
-    key: "suite_appel",
-    label: "Suite à notre appel",
-    subject: "Suite à notre échange téléphonique",
+    key: "suite_echange",
+    label: "Suite à notre échange",
+    subject: "Suite à notre échange",
     body: `Bonjour {contact},
 
 Merci pour notre échange de ce jour. Comme convenu, voici un récapitulatif de ce que Celya peut mettre en place pour {societe}.

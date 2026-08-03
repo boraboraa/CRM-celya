@@ -9,17 +9,19 @@ import {
   type ExtractedProspect,
   type DuplicateHit,
 } from "@/app/ai-actions";
-import { STATUS_LABEL } from "@/lib/constants";
-import type { Profile, Prospect, ProspectStatus } from "@/lib/types";
+import { STATUS_LABEL, normalizeStatus } from "@/lib/constants";
+import type { Profile, Prospect } from "@/lib/types";
 
 type Members = Pick<Profile, "id" | "full_name" | "email">[];
 
 /**
- * B1 — Coller → fiche. Bora colle ce qu'il trouve (Google Maps, signature,
- * annuaire, LinkedIn, capture d'écran) ; le modèle en déduit les champs, le
- * formulaire arrive pré-rempli et signalé. Rien ne s'enregistre sans le clic
- * « Créer la fiche ». Si l'assistant est indisponible, le formulaire reste
- * vide et la saisie manuelle fonctionne comme avant.
+ * Coller → fiche. Bora colle ce qu'il trouve (fiche Google Maps, signature
+ * d'email, ligne d'annuaire, capture d'écran) ; le modèle extrait, le code
+ * valide et normalise, le formulaire arrive pré-rempli. Les champs déduits
+ * sont signalés, ceux à faible confiance surlignés en orange — l'œil va
+ * droit dessus. Rien ne s'enregistre sans le clic « Créer la fiche ».
+ * Si l'assistant est indisponible ou répond hors format, le formulaire
+ * s'ouvre vide et la saisie manuelle fonctionne comme avant.
  */
 export function NewProspectAssist({
   members,
@@ -32,6 +34,7 @@ export function NewProspectAssist({
   const [image, setImage] = useState<{ base64: string; mime: string }>();
   const [draft, setDraft] = useState<Partial<Prospect>>();
   const [aiFields, setAiFields] = useState<string[]>([]);
+  const [uncertain, setUncertain] = useState<string[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateHit[]>([]);
   const [notice, setNotice] = useState<string>();
   const [formKey, setFormKey] = useState(0);
@@ -71,6 +74,7 @@ export function NewProspectAssist({
         return;
       }
       if (res.unavailable || !res.fields) {
+        // Panne ou sortie hors format : le formulaire reste vide.
         setNotice(
           "Assistant indisponible pour le moment — remplissez la fiche à la main."
         );
@@ -79,7 +83,7 @@ export function NewProspectAssist({
 
       const f: ExtractedProspect = res.fields;
       const filled = Object.entries(f)
-        .filter(([, v]) => v !== null)
+        .filter(([k, v]) => k !== "status" && v !== null)
         .map(([k]) => k);
 
       setDraft({
@@ -91,14 +95,23 @@ export function NewProspectAssist({
         sector: f.sector,
         city: f.city,
         source: f.source,
+        status: f.status,
+        notes: f.notes,
       });
       setAiFields(filled);
+      setUncertain(res.uncertain ?? []);
       setDuplicates(res.duplicates ?? []);
       setFormKey((k) => k + 1); // remonte le formulaire avec les nouvelles valeurs
       setNotice(
-        filled.length > 0
-          ? `${filled.length} champ${filled.length > 1 ? "s" : ""} déduit${filled.length > 1 ? "s" : ""} — vérifiez avant d'enregistrer.`
-          : undefined
+        [
+          `${filled.length} champ${filled.length > 1 ? "s" : ""} déduit${filled.length > 1 ? "s" : ""}`,
+          `étape proposée : ${STATUS_LABEL[f.status]}`,
+          (res.uncertain?.length ?? 0) > 0
+            ? `${res.uncertain!.length} à vérifier (surligné${res.uncertain!.length > 1 ? "s" : ""} en orange)`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") + " — vérifiez avant d'enregistrer."
       );
     });
   }
@@ -115,7 +128,7 @@ export function NewProspectAssist({
           rows={4}
           className="input resize-y font-mono text-xs"
           placeholder={
-            "Résultat Google Maps, signature d'email, ligne d'annuaire, extrait LinkedIn… ou collez directement une capture d'écran (Ctrl+V)."
+            "Fiche Google Maps, signature d'email, ligne d'annuaire, extrait LinkedIn… ou collez directement une capture d'écran (Ctrl+V)."
           }
         />
 
@@ -169,7 +182,7 @@ export function NewProspectAssist({
                   {d.company_name}
                 </Link>{" "}
                 <span className="text-slate-500">
-                  ({d.reason} · {STATUS_LABEL[d.status as ProspectStatus] ?? d.status})
+                  ({d.reason} · {STATUS_LABEL[normalizeStatus(d.status)]})
                 </span>
               </li>
             ))}
@@ -191,6 +204,7 @@ export function NewProspectAssist({
           submitLabel="Créer la fiche"
           currentUserId={currentUserId}
           aiFields={aiFields}
+          uncertainFields={uncertain}
         />
       </div>
     </div>

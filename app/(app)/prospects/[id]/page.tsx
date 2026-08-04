@@ -379,7 +379,7 @@ export default async function ProspectDetailPage({
             ) : (
               <ul className="card divide-y divide-white/[0.05]">
                 {openTasks.map((t) => (
-                  <TaskRow key={t.id} task={t} />
+                  <TaskRow key={t.id} task={t} compact />
                 ))}
               </ul>
             )}
@@ -428,7 +428,7 @@ export default async function ProspectDetailPage({
                 </summary>
                 <ul className="card mt-2 divide-y divide-white/[0.05]">
                   {doneTasks.map((t) => (
-                    <TaskRow key={t.id} task={t} />
+                    <TaskRow key={t.id} task={t} compact />
                   ))}
                 </ul>
               </details>

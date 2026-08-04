@@ -90,14 +90,19 @@ export function NextActionCard({
           <p className="mt-2 font-display text-lg font-semibold leading-snug text-slate-50">
             {task.title}
           </p>
-          <p className="mt-1.5 text-sm leading-relaxed text-slate-300">
-            {context}{" "}
-            {when && (
-              <span className={overdue ? "text-rose-300" : "text-slate-200"}>
-                — {when} ({relative(task.due_at)}).
-              </span>
-            )}
-          </p>
+          {when && (
+            <p
+              className={`mt-1.5 text-sm font-medium ${
+                overdue ? "text-rose-300" : "text-slate-200"
+              }`}
+            >
+              {/* Majuscule initiale : « relance prévue le … » ouvre la phrase. */}
+              {when.charAt(0).toUpperCase()}
+              {when.slice(1)} ({relative(task.due_at)}).
+            </p>
+          )}
+          {/* Où on en est — dérivé du dernier événement du journal. */}
+          <p className="mt-1 text-sm leading-relaxed text-slate-400">{context}</p>
         </>
       ) : (
         <>

@@ -191,6 +191,10 @@ function register(server: McpServer) {
         etape: STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status,
         source: p.source,
         valeur_estimee: p.value_estimate,
+        probabilite: p.probability,
+        valeur_ponderee: p.weighted_value,
+        etape_verrouillee: p.status_locked,
+        etape_motif_auto: p.status_auto_reason,
         prochaine_action: p.next_action_at,
         dernier_contact: p.last_contact_at,
         notes: p.notes,
@@ -260,6 +264,13 @@ function register(server: McpServer) {
       statut: z.enum(STATUS_ENUM).optional().describe("Étape (défaut « a_appeler »)."),
       source: z.string().optional(),
       valeur_estimee: z.number().optional().describe("Valeur estimée en euros."),
+      probabilite: z
+        .number()
+        .int()
+        .min(0)
+        .max(100)
+        .optional()
+        .describe("Probabilité de conclure, en % (0–100). Laisser vide si inconnue — ne la devinez pas."),
       notes: z.string().optional(),
       forcer: z.boolean().optional().describe("Créer même si un doublon est détecté."),
     },
@@ -282,6 +293,7 @@ function register(server: McpServer) {
           status: args.statut,
           source: args.source,
           value_estimate: args.valeur_estimee,
+          probability: args.probabilite,
           notes: args.notes,
         },
         { checkDuplicates: true, normalizePhone: true, force: args.forcer }

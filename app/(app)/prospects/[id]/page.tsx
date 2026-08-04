@@ -20,6 +20,7 @@ import {
   normalizeStatus,
   fmtDateTime,
   fmtMoney,
+  fmtProbability,
   relative,
 } from "@/lib/constants";
 import type { Activity, Prospect, Email, Profile } from "@/lib/types";
@@ -159,8 +160,24 @@ export default async function ProspectDetailPage({
             <p className="text-[11px] uppercase tracking-wider text-slate-500">
               Valeur estimée
             </p>
-            <p className="mt-0.5 text-sm font-medium text-slate-100">
+            <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-slate-100">
               {fmtMoney(prospect.value_estimate, prospect.currency)}
+              <span className="text-xs font-normal text-slate-500">
+                × {fmtProbability(prospect.probability)}
+              </span>
+            </p>
+            {/* La valeur pondérée : l'indicateur de priorisation. */}
+            <p className="mt-1 text-xs">
+              {prospect.weighted_value !== null &&
+              prospect.weighted_value !== undefined ? (
+                <span className="text-celya-cyan">
+                  = {fmtMoney(prospect.weighted_value, prospect.currency)} pondérés
+                </span>
+              ) : (
+                <span className="text-slate-600">
+                  Pondérée : renseignez une probabilité
+                </span>
+              )}
             </p>
           </div>
           <div className="card px-4 py-3">

@@ -20,10 +20,18 @@ export type NewProspectInput = {
   status?: string | null;
   source?: string | null;
   value_estimate?: number | null;
+  /** Probabilité de conclure en % (0–100). null = non renseignée. */
+  probability?: number | null;
   /** « none » → vivier non assigné · absent/null → assigné à l'auteur. */
   owner_id?: string | null;
   notes?: string | null;
 };
+
+/** Ramène une probabilité à un entier 0–100, ou null. */
+export function cleanProbability(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
 
 export type CreateProspectResult = {
   error?: string;
@@ -86,6 +94,7 @@ export async function createProspectCore(
         typeof input.value_estimate === "number" && Number.isFinite(input.value_estimate)
           ? input.value_estimate
           : null,
+      probability: cleanProbability(input.probability),
       owner_id: owner === "none" ? null : (trimOrNull(owner) ?? userId),
       notes: trimOrNull(input.notes, 4000),
       created_by: userId,

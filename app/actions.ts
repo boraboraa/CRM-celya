@@ -79,6 +79,7 @@ export async function createProspectAction(fd: FormData) {
       status: str(fd, "status"),
       source: str(fd, "source"),
       value_estimate: num(fd, "value_estimate"),
+      probability: num(fd, "probability"),
       owner_id: str(fd, "owner_id"),
       notes: str(fd, "notes"),
     }

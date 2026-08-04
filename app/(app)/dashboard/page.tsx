@@ -135,7 +135,7 @@ export default async function TodoPage() {
             automatiquement (relève toutes les 5 minutes).
           </div>
         ) : (
-          <ul className="card divide-y divide-white/[0.05]">
+          <ul className="card animate-rise divide-y divide-white/[0.05]">
             {replies.map((e) => (
               <ReplyCard key={e.id} email={e} />
             ))}
@@ -172,7 +172,7 @@ function TaskSection({
         </span>
       </h2>
 
-      <ul className="card divide-y divide-white/[0.05]">
+      <ul className="card animate-rise divide-y divide-white/[0.05]">
         {tasks.map((t) => (
           <TaskRow key={t.id} task={t} />
         ))}

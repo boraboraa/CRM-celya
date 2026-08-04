@@ -59,11 +59,24 @@ export type Prospect = {
   status_auto_at: string | null;
   /** Signal explicite d'une proposition envoyée (jamais deviné). */
   proposal_sent_at: string | null;
-  /** Probabilité de conclure, en % (0–100). null = non renseignée. */
+  /**
+   * Probabilité de conclure, en % (0–100). Colonne conservée en base mais
+   * plus saisie ni affichée depuis le passage à la confiance IA (011).
+   */
   probability: number | null;
-  /** Colonne générée : value_estimate × probability / 100. */
+  /** Colonne générée : value_estimate × probability / 100. Conservée aussi. */
   weighted_value: number | null;
+  /** Confiance estimée par l'IA. null = « à évaluer » — jamais un faux niveau. */
+  confidence_level: ConfidenceLevel | null;
+  /** La raison courte du niveau (« réponse positive reçue »). */
+  confidence_reason: string | null;
+  /** Niveau corrigé à la main : l'IA ne le réécrit plus (cf. status_locked). */
+  confidence_locked: boolean;
+  confidence_at: string | null;
 };
+
+/** Confiance commerciale estimée par l'IA — trois niveaux, null = à évaluer. */
+export type ConfidenceLevel = "chaud" | "tiede" | "froid";
 
 export type Activity = {
   id: string;

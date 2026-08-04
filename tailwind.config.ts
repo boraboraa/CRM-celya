@@ -32,6 +32,7 @@ const config: Config = {
       },
       boxShadow: {
         glow: "0 0 40px -12px rgba(79,123,255,0.55)",
+        lift: "0 10px 28px -14px rgba(0,0,0,0.6)",
       },
     },
   },

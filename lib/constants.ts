@@ -1,4 +1,9 @@
-import type { ActivityType, EmailIntent, ProspectStatus } from "./types";
+import type {
+  ActivityType,
+  ConfidenceLevel,
+  EmailIntent,
+  ProspectStatus,
+} from "./types";
 
 export const STATUS_ORDER: ProspectStatus[] = [
   "a_appeler",
@@ -18,12 +23,17 @@ export const STATUS_LABEL: Record<ProspectStatus, string> = {
   perdu: "Perdu",
 };
 
-/** Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir). */
+/**
+ * Une couleur franche par étape, la même partout où l'étape apparaît (badge,
+ * bandeau de colonne, liseré de carte). Progression froid → chaud à mesure que
+ * l'affaire avance — ardoise, cyan, bleu, ambre — puis le vert/rouge sémantique.
+ * Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir).
+ */
 export const STATUS_CHIP: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-500/15 text-slate-300 ring-slate-400/25",
   contacte: "bg-cyan-500/15 text-cyan-300 ring-cyan-400/25",
   rendez_vous: "bg-blue-500/15 text-blue-300 ring-blue-400/25",
-  proposition: "bg-indigo-500/15 text-indigo-300 ring-indigo-400/25",
+  proposition: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
   gagne: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/25",
   perdu: "bg-rose-500/15 text-rose-300 ring-rose-400/25",
 };
@@ -32,9 +42,29 @@ export const STATUS_DOT: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-400",
   contacte: "bg-cyan-400",
   rendez_vous: "bg-blue-400",
-  proposition: "bg-indigo-400",
+  proposition: "bg-amber-400",
   gagne: "bg-emerald-400",
   perdu: "bg-rose-400",
+};
+
+/** Pictogramme d'étape — la couleur ne porte jamais seule (daltonisme). */
+export const STATUS_ICON: Record<ProspectStatus, string> = {
+  a_appeler: "☎",
+  contacte: "✎",
+  rendez_vous: "◆",
+  proposition: "✉",
+  gagne: "✓",
+  perdu: "✕",
+};
+
+/** Liseré gauche des cartes du pipeline, dans la couleur de l'étape. */
+export const STATUS_EDGE: Record<ProspectStatus, string> = {
+  a_appeler: "border-l-slate-400/70",
+  contacte: "border-l-cyan-400/80",
+  rendez_vous: "border-l-blue-400/80",
+  proposition: "border-l-amber-400/80",
+  gagne: "border-l-emerald-400/80",
+  perdu: "border-l-rose-400/70",
 };
 
 /**
@@ -129,33 +159,39 @@ export function fmtMoney(value?: number | null, currency = "EUR"): string {
 }
 
 // ---------------------------------------------------------------------------
-// Probabilité de conclure & valeur pondérée
+// Confiance commerciale (Chaud / Tiède / Froid) — estimée par l'IA
 // ---------------------------------------------------------------------------
 
-/** Raccourcis de saisie — la saisie libre reste possible (0 à 100). */
-export const PROBABILITY_PRESETS = [10, 25, 50, 75, 90] as const;
+export const CONFIDENCE_ORDER: ConfidenceLevel[] = ["chaud", "tiede", "froid"];
+
+export const CONFIDENCE_LABEL: Record<ConfidenceLevel, string> = {
+  chaud: "Chaud",
+  tiede: "Tiède",
+  froid: "Froid",
+};
 
 /**
- * Valeur pondérée = valeur estimée × probabilité (4 000 € à 50 % = 2 000 €).
- * C'est l'indicateur de priorisation. Sans probabilité renseignée, il n'y a
- * pas de valeur pondérée : le CRM n'invente pas un pressentiment.
- *
- * Miroir exact de la colonne générée `prospects.weighted_value` — utilisée
- * pour l'aperçu en direct des formulaires, la base restant la référence.
+ * Chaud = orange/rouge (« ça brûle »), tiède = ambre, froid = bleu/ardoise.
+ * La couleur ne porte jamais seule : libellé + pictogramme l'accompagnent.
+ * Classes complètes, jamais interpolées (règle JIT).
  */
-export function weightedValue(
-  value?: number | null,
-  probability?: number | null
-): number | null {
-  if (value === null || value === undefined) return null;
-  if (probability === null || probability === undefined) return null;
-  if (!Number.isFinite(value) || !Number.isFinite(probability)) return null;
-  return Math.round(value * probability) / 100;
-}
+export const CONFIDENCE_CHIP: Record<ConfidenceLevel, string> = {
+  chaud: "bg-orange-500/15 text-orange-300 ring-orange-400/30",
+  tiede: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
+  froid: "bg-sky-500/15 text-sky-300 ring-sky-400/25",
+};
 
-export function fmtProbability(probability?: number | null): string {
-  return probability === null || probability === undefined ? "—" : `${probability} %`;
-}
+export const CONFIDENCE_ICON: Record<ConfidenceLevel, string> = {
+  chaud: "♨",
+  tiede: "◐",
+  froid: "❄",
+};
+
+/** L'état honnête quand rien n'a (encore) pu être estimé. */
+export const CONFIDENCE_PENDING_LABEL = "À évaluer";
+export const CONFIDENCE_PENDING_CHIP =
+  "bg-white/[0.04] text-slate-400 ring-white/10";
+export const CONFIDENCE_PENDING_ICON = "…";
 
 /** « il y a 3 jours » / « dans 2 h » */
 export function relative(value?: string | null): string {

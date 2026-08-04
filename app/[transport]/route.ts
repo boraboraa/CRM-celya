@@ -25,6 +25,7 @@ import { SCOPE } from "@/lib/mcp/oauth";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { saveExchangeCore } from "@/lib/crm/exchange";
 import { manualStatusPatch } from "@/lib/crm/status";
+import { recalcConfidence } from "@/lib/crm/confidence";
 import { STATUS_LABEL, ACTIVITY_LABEL, STATUS_ORDER, fmtDateTime } from "@/lib/constants";
 import { todayBounds } from "@/lib/time";
 import type { ProspectStatus } from "@/lib/types";
@@ -347,6 +348,10 @@ function register(server: McpServer) {
         .update(manualStatusPatch(args.statut as ProspectStatus))
         .eq("id", resolved.id);
       if (error) return fail(`Erreur : ${error.message}`);
+
+      // Un changement d'étape est un événement : la confiance se recalcule
+      // (jamais bloquant, et jamais par-dessus un niveau fixé à la main).
+      await recalcConfidence(admin, resolved.id);
 
       return text(
         `✅ ${resolved.company_name} : étape passée à « ${STATUS_LABEL[args.statut as keyof typeof STATUS_LABEL]} » et verrouillée (plus de déduction automatique — déverrouillable depuis la fiche).`

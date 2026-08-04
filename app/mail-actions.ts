@@ -14,6 +14,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { classifyReply } from "@/lib/ai/triage";
 import { isoToLocalInput, localInputToISO, inDaysAt9 } from "@/lib/time";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
+import { recalcConfidence } from "@/lib/crm/confidence";
 import type { ActionState } from "@/app/actions";
 import type { Email, EmailIntent } from "@/lib/types";
 
@@ -175,6 +176,8 @@ export async function sendProspectEmailAction(
   // (« À appeler » → « Contacté », ou « Proposition » si la case est cochée).
   // applyAutoStatus n'avance jamais à rebours et respecte le verrou.
   const auto = await applyAutoStatus(supabase, prospectId);
+  // Et c'est un événement : la confiance se recalcule (jamais bloquant).
+  await recalcConfidence(supabase, prospectId);
 
   revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
@@ -344,6 +347,9 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
   if (intent !== "pas_interesse") {
     await applyAutoStatus(supabase, prospectId);
   }
+  // La réponse vient d'être traitée : la confiance se recalcule sur ce
+  // nouvel élément (l'objection, l'intérêt ou l'absence pèsent dans le niveau).
+  await recalcConfidence(supabase, prospectId);
 
   revalidatePath("/dashboard");
   revalidatePath(`/prospects/${prospectId}`);

@@ -4,7 +4,6 @@ import {
   SOURCES,
   normalizeStatus,
 } from "@/lib/constants";
-import { ValueFields } from "@/components/ValueFields";
 import type { Prospect, Profile } from "@/lib/types";
 
 export function ProspectForm({
@@ -179,11 +178,21 @@ export function ProspectForm({
           </select>
         </div>
 
-        <ValueFields
-          defaultValue={prospect?.value_estimate ?? ""}
-          defaultProbability={prospect?.probability ?? null}
-          currency={prospect?.currency ?? "EUR"}
-        />
+        {/* Plus de probabilité à saisir : la confiance est estimée par
+            l'assistant (et se corrige en tête de fiche). */}
+        <div>
+          <label className="label" htmlFor="value_estimate">
+            Valeur estimée (€)
+          </label>
+          <input
+            id="value_estimate"
+            name="value_estimate"
+            inputMode="decimal"
+            defaultValue={prospect?.value_estimate ?? ""}
+            className="input"
+            placeholder="4800"
+          />
+        </div>
 
         <div>
           <label className="label" htmlFor="owner_id">

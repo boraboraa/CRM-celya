@@ -60,8 +60,8 @@ export function StatusControl({
               title={active ? `Étape actuelle : ${STATUS_LABEL[s]}` : `Passer en « ${STATUS_LABEL[s]} »`}
               className={`chip transition duration-200 ${
                 active
-                  ? `${STATUS_CHIP[s]} scale-[1.03]`
-                  : "bg-white/[0.03] text-slate-500 ring-white/[0.08] hover:bg-white/[0.07] hover:text-slate-200 hover:ring-white/20"
+                  ? `${STATUS_CHIP[s]} scale-[1.03] animate-pop`
+                  : "bg-white/[0.03] text-slate-400 ring-white/[0.08] hover:bg-white/[0.07] hover:text-slate-200 hover:ring-white/20"
               } disabled:cursor-default`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${active ? STATUS_DOT[s] : "bg-slate-600"}`} />

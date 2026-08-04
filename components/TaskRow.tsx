@@ -103,7 +103,7 @@ export function TaskRow({
           {task.title}
         </p>
 
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
           {task.prospects && (
             <>
               <Link

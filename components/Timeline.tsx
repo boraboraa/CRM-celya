@@ -79,7 +79,7 @@ export function Timeline({
   }
 
   return (
-    <ol className="relative space-y-3 pl-6">
+    <ol className="relative animate-rise space-y-3 pl-6">
       {/* Le fil. */}
       <span
         aria-hidden
@@ -102,27 +102,27 @@ export function Timeline({
                   <span aria-hidden>{style.icon}</span>
                   {style.label}
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-400">
                   {fmtDateTime(entry.at)}
                 </span>
-                <span className="text-[11px] text-slate-600">
+                <span className="text-[11px] text-slate-500">
                   {relative(entry.at)}
                 </span>
                 <span className="ml-auto flex items-center gap-2">
                   {entry.by && (
-                    <span className="truncate text-xs text-slate-500">{entry.by}</span>
+                    <span className="truncate text-xs text-slate-400">{entry.by}</span>
                   )}
                   {renderAction?.(entry)}
                 </span>
               </div>
 
               {entry.title && (
-                <p className="mt-2 text-sm font-medium text-slate-200">
+                <p className="mt-2 text-sm font-medium text-slate-100">
                   {entry.title}
                 </p>
               )}
               {entry.body && (
-                <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-400">
+                <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
                   {entry.body.slice(0, 1200)}
                   {entry.body.length > 1200 && "…"}
                 </p>

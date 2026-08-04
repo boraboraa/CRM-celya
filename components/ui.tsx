@@ -1,12 +1,53 @@
 import Link from "next/link";
 import type { ProspectStatus } from "@/lib/types";
-import { STATUS_CHIP, STATUS_LABEL, STATUS_DOT, initials } from "@/lib/constants";
+import {
+  STATUS_CHIP,
+  STATUS_LABEL,
+  STATUS_ICON,
+  initials,
+  probabilityHeat,
+} from "@/lib/constants";
 
 export function StatusChip({ status }: { status: ProspectStatus }) {
   return (
     <span className={`chip ${STATUS_CHIP[status]}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
+      <span aria-hidden className="text-[10px] leading-none">
+        {STATUS_ICON[status]}
+      </span>
       {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+/**
+ * Jauge « chaleur » de la probabilité de conclure : froid (bleu) sous 40 %,
+ * ambre autour de 50 %, orange puis rouge au-delà. Le pourcentage reste écrit
+ * à côté — la couleur ne porte jamais l'information seule.
+ */
+export function ProbabilityGauge({
+  probability,
+  size = "md",
+}: {
+  probability?: number | null;
+  size?: "sm" | "md";
+}) {
+  if (probability === null || probability === undefined) return null;
+  const heat = probabilityHeat(probability);
+  const track = size === "sm" ? "h-1 w-10" : "h-1.5 w-16";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 align-middle"
+      title={`Probabilité de conclure : ${probability} %`}
+    >
+      <span className={`${track} overflow-hidden rounded-full bg-white/[0.09]`}>
+        <span
+          className={`block h-full rounded-full ${heat.bar} transition-all duration-300`}
+          style={{ width: `${Math.min(100, Math.max(4, probability))}%` }}
+        />
+      </span>
+      <span className={`text-[11px] font-medium tabular-nums ${heat.text}`}>
+        {probability} %
+      </span>
     </span>
   );
 }

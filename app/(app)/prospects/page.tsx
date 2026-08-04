@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { PageHeader, StatusChip, EmptyState, Avatar } from "@/components/ui";
+import {
+  PageHeader,
+  StatusChip,
+  EmptyState,
+  Avatar,
+  ProbabilityGauge,
+} from "@/components/ui";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import {
   STATUS_ORDER,
@@ -216,7 +222,7 @@ export default async function ProspectsPage({
       ) : view === "colonnes" ? (
         <PipelineBoard prospects={boardProspects} />
       ) : (
-        <div className="card overflow-x-auto">
+        <div className="card animate-rise overflow-x-auto">
           <table className="w-full min-w-[820px]">
             <thead className="border-b border-white/[0.06]">
               <tr>
@@ -236,15 +242,15 @@ export default async function ProspectsPage({
                 const overdue =
                   p.next_action_at && new Date(p.next_action_at).getTime() < Date.now();
                 return (
-                  <tr key={p.id} className="transition hover:bg-white/[0.03]">
+                  <tr key={p.id} className="transition duration-200 hover:bg-white/[0.04]">
                     <td className="td">
                       <Link href={`/prospects/${p.id}`} className="flex items-center gap-3">
                         <Avatar name={p.contact_name ?? p.company_name} />
                         <span className="min-w-0">
-                          <span className="block truncate font-medium text-slate-100">
+                          <span className="block truncate font-semibold text-slate-50">
                             {p.company_name}
                           </span>
-                          <span className="block truncate text-xs text-slate-500">
+                          <span className="block truncate text-xs text-slate-400">
                             {p.phone ?? p.contact_name ?? p.email ?? p.city ?? "—"}
                           </span>
                         </span>
@@ -256,8 +262,8 @@ export default async function ProspectsPage({
                     <td className="td whitespace-nowrap">
                       {fmtMoney(p.value_estimate)}
                       {p.probability !== null && (
-                        <span className="ml-1.5 text-xs text-slate-500">
-                          {p.probability} %
+                        <span className="ml-2">
+                          <ProbabilityGauge probability={p.probability} size="sm" />
                         </span>
                       )}
                     </td>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { Avatar } from "@/components/ui";
+import { Avatar, ProbabilityGauge } from "@/components/ui";
 import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
 import { StatusControl } from "@/components/StatusControl";
@@ -302,14 +302,18 @@ export default async function ProspectDetailPage({
           {/* Chiffres de l'affaire */}
           <section className="card space-y-3 p-5">
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-slate-500">
+              <p className="text-[11px] uppercase tracking-wider text-slate-400">
                 Valeur estimée
               </p>
-              <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-slate-100">
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-slate-100">
                 {fmtMoney(prospect.value_estimate, prospect.currency)}
-                <span className="text-xs font-normal text-slate-500">
-                  × {fmtProbability(prospect.probability)}
-                </span>
+                {prospect.probability !== null && prospect.probability !== undefined ? (
+                  <ProbabilityGauge probability={prospect.probability} />
+                ) : (
+                  <span className="text-xs font-normal text-slate-500">
+                    × {fmtProbability(prospect.probability)}
+                  </span>
+                )}
               </p>
               <p className="mt-1 text-xs">
                 {prospect.weighted_value !== null &&
@@ -327,7 +331,7 @@ export default async function ProspectDetailPage({
 
             <div className="grid grid-cols-2 gap-3 border-t border-white/[0.06] pt-3">
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                <p className="text-[11px] uppercase tracking-wider text-slate-400">
                   Dernier contact
                 </p>
                 <p className="mt-0.5 text-sm font-medium text-slate-100">
@@ -337,7 +341,7 @@ export default async function ProspectDetailPage({
                 </p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                <p className="text-[11px] uppercase tracking-wider text-slate-400">
                   Prochaine action
                 </p>
                 <p
@@ -356,7 +360,7 @@ export default async function ProspectDetailPage({
             <div className="flex items-center gap-3 border-t border-white/[0.06] pt-3">
               <Avatar name={owner?.full_name ?? null} size="md" />
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                <p className="text-[11px] uppercase tracking-wider text-slate-400">
                   Responsable
                 </p>
                 <p className="mt-0.5 text-sm font-medium text-slate-100">

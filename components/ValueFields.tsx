@@ -6,6 +6,7 @@ import {
   fmtMoney,
   weightedValue,
 } from "@/lib/constants";
+import { ProbabilityGauge } from "@/components/ui";
 
 /** « 4 800 » / « 4.800,50 » / « 4800 € » → 4800.5 */
 function toNumber(raw: string): number | null {
@@ -139,9 +140,10 @@ export function ValueFields({
               <span className="font-display text-base font-semibold text-slate-50">
                 {fmtMoney(weighted, currency)}
               </span>
-              <span className="text-xs text-slate-500">
-                {fmtMoney(numericValue, currency)} × {numericProbability} %
+              <span className="text-xs text-slate-400">
+                {fmtMoney(numericValue, currency)} ×
               </span>
+              <ProbabilityGauge probability={numericProbability} size="sm" />
             </>
           ) : (
             <span className="text-xs">

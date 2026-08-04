@@ -6,6 +6,8 @@ import { Avatar } from "@/components/ui";
 import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
 import { StatusControl } from "@/components/StatusControl";
+import { NextActionCard } from "@/components/NextActionCard";
+import { Timeline, type TimelineEntry } from "@/components/Timeline";
 import { EmailComposer } from "@/components/EmailComposer";
 import { DateField } from "@/components/DateField";
 import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
@@ -15,8 +17,8 @@ import {
   createTaskAction,
 } from "@/app/actions";
 import { readProspectFacts, evaluateStatus } from "@/lib/crm/status";
+import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
 import {
-  ACTIVITY_LABEL,
   normalizeStatus,
   fmtDateTime,
   fmtMoney,
@@ -27,10 +29,17 @@ import type { Activity, Prospect, Email, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type TimelineItem =
-  | { kind: "activity"; at: string; data: Activity & { crm_users: { full_name: string | null } | null } }
-  | { kind: "email"; at: string; data: Email };
+type ActivityRow = Activity & { crm_users: { full_name: string | null } | null };
 
+/**
+ * La fiche prospect, lue de haut en bas :
+ *   1. qui c'est, où on en est (étape) ;
+ *   2. PROCHAINE ACTION — quoi faire, pour quand, et les gestes rapides ;
+ *   3. CHRONOLOGIE — les échanges, du plus récent au plus ancien ;
+ *   4. seulement ensuite les formulaires (noter, écrire, planifier, modifier).
+ *
+ * La fiche se lit d'abord ; elle ne s'ouvre pas sur des formulaires.
+ */
 export default async function ProspectDetailPage({
   params,
 }: {
@@ -87,28 +96,69 @@ export default async function ProspectDetailPage({
   >[];
   const owner = members.find((m) => m.id === prospect.owner_id);
 
-  const timeline: TimelineItem[] = [
-    ...((activitiesRes.data ?? []) as never[]).map((a: never) => ({
-      kind: "activity" as const,
-      at: (a as Activity).occurred_at,
-      data: a as Activity & { crm_users: { full_name: string | null } | null },
-    })),
-    ...((emailsRes.data ?? []) as Email[]).map((e) => ({
-      kind: "email" as const,
+  // ---------------------------------------------------------------------
+  // Chronologie — les vrais échanges seulement. Les brouillons sont écartés
+  // ici et regroupés dans leur propre espace, plus bas.
+  // ---------------------------------------------------------------------
+  const activities = (activitiesRes.data ?? []) as unknown as ActivityRow[];
+  const emails = (emailsRes.data ?? []) as Email[];
+
+  const drafts = activities.filter((a) => a.is_draft);
+
+  const timeline: TimelineEntry[] = [
+    ...activities
+      .filter((a) => !a.is_draft)
+      .map((a) => ({
+        key: `a-${a.id}`,
+        id: a.id,
+        source: "activity" as const,
+        kind:
+          a.type === "rendez_vous"
+            ? ("rendez_vous" as const)
+            : a.type === "email"
+              ? ("email_sortant" as const)
+              : a.is_exchange === false
+                ? ("note_interne" as const)
+                : ("note" as const),
+        at: a.occurred_at,
+        title: a.subject,
+        body: a.body,
+        by: a.crm_users?.full_name ?? null,
+      })),
+    ...emails.map((e) => ({
+      key: `e-${e.id}`,
+      id: e.id,
+      source: "email" as const,
+      kind:
+        e.direction === "entrant"
+          ? ("email_entrant" as const)
+          : ("email_sortant" as const),
       at: e.received_at,
-      data: e,
+      title: e.subject,
+      body: e.body_text,
+      by: e.from_email,
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   const tasks = (tasksRes.data ?? []) as unknown as TaskWithProspect[];
-  const openTasks = tasks.filter((t) => t.status === "a_faire");
   // Les tâches annulées ne sont pas affichées : TaskRow les rendrait comme
   // des relances actives en retard.
+  const openTasks = tasks.filter((t) => t.status === "a_faire");
   const doneTasks = tasks.filter((t) => t.status === "fait");
+
+  // « Prochaine action » — dérivée sans le moindre appel à un modèle.
+  const lastEvent: LastEvent = timeline[0]
+    ? { kind: timeline[0].kind, at: timeline[0].at }
+    : null;
+  const nextAction = deriveNextAction(
+    openTasks as unknown as OpenTask[],
+    lastEvent,
+    prospect.contact_name
+  );
 
   return (
     <>
-      {/* ---------- En-tête ---------- */}
+      {/* ---------- En-tête : qui, et où on en est ---------- */}
       <div className="mb-6">
         <Link
           href="/prospects"
@@ -154,78 +204,31 @@ export default async function ProspectDetailPage({
             />
           </div>
         </div>
+      </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="card px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wider text-slate-500">
-              Valeur estimée
-            </p>
-            <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-slate-100">
-              {fmtMoney(prospect.value_estimate, prospect.currency)}
-              <span className="text-xs font-normal text-slate-500">
-                × {fmtProbability(prospect.probability)}
-              </span>
-            </p>
-            {/* La valeur pondérée : l'indicateur de priorisation. */}
-            <p className="mt-1 text-xs">
-              {prospect.weighted_value !== null &&
-              prospect.weighted_value !== undefined ? (
-                <span className="text-celya-cyan">
-                  = {fmtMoney(prospect.weighted_value, prospect.currency)} pondérés
-                </span>
-              ) : (
-                <span className="text-slate-600">
-                  Pondérée : renseignez une probabilité
-                </span>
-              )}
-            </p>
-          </div>
-          <div className="card px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wider text-slate-500">
-              Dernier contact
-            </p>
-            <p className="mt-0.5 text-sm font-medium text-slate-100">
-              {prospect.last_contact_at ? relative(prospect.last_contact_at) : "Jamais"}
-            </p>
-          </div>
-          <div className="card px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wider text-slate-500">
-              Prochaine action
-            </p>
-            <p
-              className={`mt-0.5 text-sm font-medium ${
-                prospect.next_action_at &&
-                new Date(prospect.next_action_at).getTime() < Date.now()
-                  ? "text-rose-400"
-                  : "text-slate-100"
-              }`}
-            >
-              {prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—"}
-            </p>
-          </div>
-          <div className="card flex items-center gap-3 px-4 py-3">
-            <Avatar name={owner?.full_name ?? null} size="md" />
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-slate-500">
-                Responsable
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-100">
-                {owner?.full_name ?? owner?.email ?? "Non assigné"}
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* ---------- 1. PROCHAINE ACTION, tout en tête ---------- */}
+      <div className="mb-6">
+        <NextActionCard action={nextAction} prospectId={prospect.id} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ---------- Colonne principale ---------- */}
-        <div className="space-y-6 lg:col-span-2">
+        <div className="space-y-8 lg:col-span-2">
+          {/* ---------- 2. CHRONOLOGIE ---------- */}
           <section>
+            <h2 className="mb-4 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Chronologie
+            </h2>
+            <Timeline entries={timeline} />
+          </section>
+
+          {/* ---------- 3. Puis seulement les formulaires ---------- */}
+          <section id="noter-un-echange" className="scroll-mt-6">
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Noter un échange
             </h2>
-            {/* Le sélecteur d'étape part désormais sur « ne pas changer » :
-                aucun état local ne peut plus rétrograder la fiche. */}
+            {/* Le sélecteur d'étape part sur « ne pas changer » : aucun état
+                local ne peut plus rétrograder la fiche. */}
             <QuickNote
               prospectId={prospect.id}
               companyName={prospect.company_name}
@@ -252,73 +255,6 @@ export default async function ProspectDetailPage({
           )}
 
           <section>
-            <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Historique
-            </h2>
-
-            {timeline.length === 0 ? (
-              <div className="card px-5 py-10 text-center text-sm text-slate-500">
-                Rien d&apos;enregistré pour l&apos;instant. Notez votre premier
-                échange ci-dessus.
-              </div>
-            ) : (
-              <ol className="card divide-y divide-white/[0.05]">
-                {timeline.map((item) =>
-                  item.kind === "activity" ? (
-                    <li key={`a-${item.data.id}`} className="px-5 py-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="chip bg-white/[0.05] text-slate-300 ring-white/10">
-                          {ACTIVITY_LABEL[item.data.type] ?? "Note"}
-                        </span>
-                        {item.data.subject && (
-                          <span className="chip bg-celya-blue/15 text-blue-300 ring-blue-400/25">
-                            {item.data.subject}
-                          </span>
-                        )}
-                        <span className="text-xs text-slate-500">
-                          {fmtDateTime(item.data.occurred_at)}
-                        </span>
-                        <span className="ml-auto text-xs text-slate-500">
-                          {item.data.crm_users?.full_name ?? ""}
-                        </span>
-                      </div>
-                      {item.data.body && (
-                        <p className="mt-2.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
-                          {item.data.body}
-                        </p>
-                      )}
-                    </li>
-                  ) : (
-                    <li key={`e-${item.data.id}`} className="px-5 py-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="chip bg-violet-500/15 text-violet-300 ring-violet-400/25">
-                          Email {item.data.direction === "entrant" ? "reçu" : "envoyé"}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          {fmtDateTime(item.data.received_at)}
-                        </span>
-                        <span className="ml-auto truncate text-xs text-slate-500">
-                          {item.data.from_email}
-                        </span>
-                      </div>
-                      {item.data.subject && (
-                        <p className="mt-2 text-sm font-medium text-slate-200">
-                          {item.data.subject}
-                        </p>
-                      )}
-                      {item.data.body_text && (
-                        <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-400">
-                          {item.data.body_text.slice(0, 1200)}
-                        </p>
-                      )}
-                    </li>
-                  )
-                )}
-              </ol>
-            )}
-          </section>
-
-          <section>
             <details className="card p-6">
               <summary className="cursor-pointer font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
                 Modifier la fiche
@@ -343,43 +279,80 @@ export default async function ProspectDetailPage({
           </section>
         </div>
 
-        {/* ---------- Colonne relances ---------- */}
+        {/* ---------- Colonne latérale ---------- */}
         <div className="space-y-6">
+          {/* Chiffres de l'affaire */}
+          <section className="card space-y-3 p-5">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                Valeur estimée
+              </p>
+              <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-sm font-medium text-slate-100">
+                {fmtMoney(prospect.value_estimate, prospect.currency)}
+                <span className="text-xs font-normal text-slate-500">
+                  × {fmtProbability(prospect.probability)}
+                </span>
+              </p>
+              <p className="mt-1 text-xs">
+                {prospect.weighted_value !== null &&
+                prospect.weighted_value !== undefined ? (
+                  <span className="font-medium text-celya-cyan">
+                    = {fmtMoney(prospect.weighted_value, prospect.currency)} pondérés
+                  </span>
+                ) : (
+                  <span className="text-slate-600">
+                    Pondérée : renseignez une probabilité
+                  </span>
+                )}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 border-t border-white/[0.06] pt-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                  Dernier contact
+                </p>
+                <p className="mt-0.5 text-sm font-medium text-slate-100">
+                  {prospect.last_contact_at
+                    ? relative(prospect.last_contact_at)
+                    : "Jamais"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                  Prochaine action
+                </p>
+                <p
+                  className={`mt-0.5 text-sm font-medium ${
+                    prospect.next_action_at &&
+                    new Date(prospect.next_action_at).getTime() < Date.now()
+                      ? "text-rose-400"
+                      : "text-slate-100"
+                  }`}
+                >
+                  {prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 border-t border-white/[0.06] pt-3">
+              <Avatar name={owner?.full_name ?? null} size="md" />
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                  Responsable
+                </p>
+                <p className="mt-0.5 text-sm font-medium text-slate-100">
+                  {owner?.full_name ?? owner?.email ?? "Non assigné"}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Relances */}
           <section>
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Relances
             </h2>
-
-            <form action={createTaskAction} className="card mb-4 space-y-3 p-5">
-              <input type="hidden" name="prospect_id" value={prospect.id} />
-              <div>
-                <label className="label" htmlFor="title">
-                  Quoi faire
-                </label>
-                <input
-                  id="title"
-                  name="title"
-                  required
-                  className="input"
-                  placeholder="Relancer pour le devis"
-                />
-              </div>
-              <div>
-                <span className="label">Quand</span>
-                <DateField name="due_local" required compact />
-              </div>
-              <div>
-                <label className="label" htmlFor="priority">
-                  Priorité
-                </label>
-                <select id="priority" name="priority" defaultValue="2" className="input">
-                  <option value="1">Haute</option>
-                  <option value="2">Normale</option>
-                  <option value="3">Basse</option>
-                </select>
-              </div>
-              <button className="btn-primary w-full">Planifier</button>
-            </form>
 
             {openTasks.length === 0 ? (
               <p className="card px-5 py-6 text-center text-sm text-slate-500">
@@ -393,9 +366,45 @@ export default async function ProspectDetailPage({
               </ul>
             )}
 
+            <details className="mt-3">
+              <summary className="cursor-pointer px-1 text-xs text-slate-500 transition hover:text-slate-300">
+                Planifier une relance
+              </summary>
+              <form action={createTaskAction} className="card mt-2 space-y-3 p-5">
+                <input type="hidden" name="prospect_id" value={prospect.id} />
+                <div>
+                  <label className="label" htmlFor="title">
+                    Quoi faire
+                  </label>
+                  <input
+                    id="title"
+                    name="title"
+                    required
+                    className="input"
+                    placeholder="Relancer pour le devis"
+                  />
+                </div>
+                <div>
+                  <span className="label">Quand</span>
+                  <DateField name="due_local" required compact />
+                </div>
+                <div>
+                  <label className="label" htmlFor="priority">
+                    Priorité
+                  </label>
+                  <select id="priority" name="priority" defaultValue="2" className="input">
+                    <option value="1">Haute</option>
+                    <option value="2">Normale</option>
+                    <option value="3">Basse</option>
+                  </select>
+                </div>
+                <button className="btn-primary w-full">Planifier</button>
+              </form>
+            </details>
+
             {doneTasks.length > 0 && (
-              <details className="mt-4">
-                <summary className="cursor-pointer px-1 text-xs text-slate-500 hover:text-slate-300">
+              <details className="mt-3">
+                <summary className="cursor-pointer px-1 text-xs text-slate-500 transition hover:text-slate-300">
                   {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} passée
                   {doneTasks.length > 1 ? "s" : ""}
                 </summary>
@@ -407,6 +416,27 @@ export default async function ProspectDetailPage({
               </details>
             )}
           </section>
+
+          {/* Brouillons — hors chronologie, clairement séparés (chantier 4). */}
+          {drafts.length > 0 && (
+            <section>
+              <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+                Brouillons
+              </h2>
+              <ul className="card divide-y divide-white/[0.05]">
+                {drafts.map((d) => (
+                  <li key={d.id} className="px-4 py-3">
+                    <p className="text-xs font-medium text-slate-300">
+                      {d.subject ?? "Brouillon"}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-600">
+                      {fmtDateTime(d.occurred_at)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {prospect.notes && (
             <section>

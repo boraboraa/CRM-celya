@@ -22,6 +22,7 @@ const esc = (s: string) =>
 type AuthParams = {
   client_id: string;
   redirect_uri: string;
+  response_type: string;
   state: string;
   code_challenge: string;
   code_challenge_method: string;
@@ -118,6 +119,7 @@ async function validate(
     params: {
       client_id,
       redirect_uri,
+      response_type: "code",
       state: get("state") ?? "",
       code_challenge,
       code_challenge_method,

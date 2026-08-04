@@ -8,6 +8,7 @@ import { QuickNote } from "@/components/QuickNote";
 import { StatusControl } from "@/components/StatusControl";
 import { NextActionCard } from "@/components/NextActionCard";
 import { Timeline, type TimelineEntry } from "@/components/Timeline";
+import { DeleteEntryButton } from "@/components/DeleteEntryButton";
 import { EmailComposer } from "@/components/EmailComposer";
 import { DateField } from "@/components/DateField";
 import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
@@ -95,6 +96,8 @@ export default async function ProspectDetailPage({
     "id" | "full_name" | "email"
   >[];
   const owner = members.find((m) => m.id === prospect.owner_id);
+  // Effacer une trace du journal est réservé à l'admin (revérifié côté serveur).
+  const isAdmin = session?.me?.role === "admin" && session.me.is_active;
 
   // ---------------------------------------------------------------------
   // Chronologie — les vrais échanges seulement. Les brouillons sont écartés
@@ -219,7 +222,22 @@ export default async function ProspectDetailPage({
             <h2 className="mb-4 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Chronologie
             </h2>
-            <Timeline entries={timeline} />
+            <Timeline
+              entries={timeline}
+              renderAction={
+                isAdmin
+                  ? (entry) => (
+                      <DeleteEntryButton
+                        id={entry.id}
+                        prospectId={prospect.id}
+                        source={entry.source}
+                        isRealEmail={entry.source === "email"}
+                        label="cette entrée du journal"
+                      />
+                    )
+                  : undefined
+              }
+            />
           </section>
 
           {/* ---------- 3. Puis seulement les formulaires ---------- */}
@@ -417,21 +435,49 @@ export default async function ProspectDetailPage({
             )}
           </section>
 
-          {/* Brouillons — hors chronologie, clairement séparés (chantier 4). */}
+          {/* Brouillons — hors chronologie, clairement séparés. Un texte
+              jamais envoyé n'est pas un échange : il ne compte pour aucun
+              fait, ne touche pas au dernier contact, et se supprime d'un clic. */}
           {drafts.length > 0 && (
             <section>
-              <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
                 Brouillons
+                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] font-normal normal-case tracking-normal text-slate-400">
+                  {drafts.length}
+                </span>
               </h2>
+              <p className="mb-2 text-[11px] text-slate-600">
+                Textes non envoyés — hors chronologie.
+              </p>
               <ul className="card divide-y divide-white/[0.05]">
                 {drafts.map((d) => (
                   <li key={d.id} className="px-4 py-3">
-                    <p className="text-xs font-medium text-slate-300">
-                      {d.subject ?? "Brouillon"}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 text-xs font-medium text-slate-300">
+                        {d.subject ?? "Brouillon"}
+                      </p>
+                      {isAdmin && (
+                        <DeleteEntryButton
+                          id={d.id}
+                          prospectId={prospect.id}
+                          source="activity"
+                          label="ce brouillon"
+                        />
+                      )}
+                    </div>
                     <p className="mt-1 text-[11px] text-slate-600">
                       {fmtDateTime(d.occurred_at)}
                     </p>
+                    {d.body && (
+                      <details className="mt-1.5">
+                        <summary className="cursor-pointer text-[11px] text-slate-500 transition hover:text-slate-300">
+                          Voir le texte
+                        </summary>
+                        <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-500">
+                          {d.body.slice(0, 2000)}
+                        </p>
+                      </details>
+                    )}
                   </li>
                 ))}
               </ul>

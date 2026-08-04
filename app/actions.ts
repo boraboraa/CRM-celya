@@ -231,14 +231,66 @@ export async function saveExchangeAction(
 // Activités
 // =====================================================================
 
-export async function deleteActivityAction(fd: FormData) {
-  const { supabase } = await currentUserId();
+/**
+ * Suppression d'une entrée du journal — réservée à l'admin.
+ *
+ * La RLS reste l'unique garde-fou de sécurité (un commercial n'atteint de
+ * toute façon que ses fiches) ; ce contrôle-ci est la règle métier demandée :
+ * l'historique d'un échange ne s'efface pas d'un doigt qui glisse. La
+ * confirmation est exigée explicitement (`confirm=1`), et le composant
+ * client la demande en deux temps.
+ */
+async function requireAdmin(): Promise<
+  { supabase: Awaited<ReturnType<typeof createClient>>; userId: string } | null
+> {
+  const { supabase, userId } = await currentUserId();
+  const { data: me } = await supabase
+    .from("crm_users")
+    .select("role, is_active")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!me || me.role !== "admin" || !me.is_active) return null;
+  return { supabase, userId };
+}
+
+export async function deleteActivityAction(fd: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Suppression réservée à l'administrateur." };
+
   const id = str(fd, "id");
   const prospectId = str(fd, "prospect_id");
-  if (!id) return;
+  if (!id) return { error: "Entrée introuvable." };
+  if (str(fd, "confirm") !== "1") return { error: "Confirmation requise." };
 
-  await supabase.from("activities").delete().eq("id", id);
+  const { error } = await admin.supabase.from("activities").delete().eq("id", id);
+  if (error) return { error: error.message };
+
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/dashboard");
+  return { success: "Entrée supprimée." };
+}
+
+/**
+ * Suppression d'un email du journal — même règle. Un message réellement
+ * envoyé ou reçu reste une trace : le composant client prévient plus
+ * fermement avant de laisser cliquer.
+ */
+export async function deleteEmailAction(fd: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Suppression réservée à l'administrateur." };
+
+  const id = str(fd, "id");
+  const prospectId = str(fd, "prospect_id");
+  if (!id) return { error: "Message introuvable." };
+  if (str(fd, "confirm") !== "1") return { error: "Confirmation requise." };
+
+  const { error } = await admin.supabase.from("emails").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/emails");
+  return { success: "Message supprimé." };
 }
 
 // =====================================================================

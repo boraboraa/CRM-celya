@@ -142,6 +142,23 @@ export function EmailComposer({
         />
       </div>
 
+      {/* Le signal explicite : « proposition » ne se devine jamais dans le
+          texte du message, c'est cette case qui fait foi. */}
+      <label className="flex items-start gap-2 rounded-xl bg-white/[0.02] px-3.5 py-2.5 text-xs text-slate-300 ring-1 ring-white/[0.06]">
+        <input
+          type="checkbox"
+          name="is_proposal"
+          value="1"
+          className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
+        />
+        <span>
+          Ce message est une proposition / un devis
+          <span className="block text-[11px] text-slate-500">
+            Fait passer la fiche en « Proposition » à l&apos;envoi.
+          </span>
+        </span>
+      </label>
+
       <FormError message={state.error} />
       {state.success && (
         <p className="rounded-xl bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-300 ring-1 ring-emerald-400/20">

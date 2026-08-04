@@ -475,6 +475,101 @@ function register(server: McpServer) {
     }
   );
 
+  // --- supprimer_activite ---------------------------------------------------
+  server.tool(
+    "supprimer_activite",
+    "Supprime définitivement une entrée du journal d'un prospect (note, email consigné, brouillon). Sert au nettoyage — par exemple retirer des brouillons qui polluent l'historique. Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION : la liste de ce qui serait supprimé, sans rien effacer. Repassez avec « confirmer: true » pour exécuter. Le jeton du connecteur n'étant délivré qu'au compte administrateur, cet outil lui est de fait réservé.",
+    {
+      id: z.string().optional().describe("Identifiant de l'activité à supprimer."),
+      prospect_id: z
+        .string()
+        .optional()
+        .describe("Prospect ciblé (avec « brouillons: true » pour un nettoyage groupé)."),
+      nom: z.string().optional().describe("Nom de société si prospect_id n'est pas fourni."),
+      brouillons: z
+        .boolean()
+        .optional()
+        .describe("true : cible TOUS les brouillons du prospect au lieu d'une entrée précise."),
+      confirmer: z.boolean().optional().describe("false/absent → simulation ; true → suppression réelle."),
+    },
+    async (args, extra) => {
+      if (!userIdFrom(extra)) return fail("Non authentifié.");
+      const admin = createAdminClient();
+
+      // --- Cas 1 : une entrée précise.
+      if (args.id && !args.brouillons) {
+        const { data } = await admin
+          .from("activities")
+          .select("id, prospect_id, type, subject, body, occurred_at, is_draft")
+          .eq("id", args.id)
+          .maybeSingle();
+        if (!data) return fail(`Aucune activité avec l'identifiant ${args.id}.`);
+
+        const apercu = {
+          id: data.id,
+          type: ACTIVITY_LABEL[data.type as keyof typeof ACTIVITY_LABEL] ?? data.type,
+          brouillon: data.is_draft,
+          resume: data.subject,
+          extrait: (data.body ?? "").slice(0, 160),
+          date: data.occurred_at,
+        };
+
+        if (!args.confirmer) {
+          return json(
+            "SIMULATION (rien supprimé). Cette entrée serait effacée définitivement. Repassez avec « confirmer: true ».",
+            apercu
+          );
+        }
+        const { error } = await admin.from("activities").delete().eq("id", args.id);
+        if (error) return fail(`Erreur : ${error.message}`);
+        return json("✅ Entrée supprimée définitivement.", apercu);
+      }
+
+      // --- Cas 2 : tous les brouillons d'un prospect.
+      if (!args.brouillons) {
+        return fail(
+          "Fournissez « id » (une entrée précise), ou « brouillons: true » avec « prospect_id »/« nom »."
+        );
+      }
+
+      const resolved = await resolveProspect(admin, { id: args.prospect_id, nom: args.nom });
+      if ("error" in resolved) return fail(resolved.error);
+
+      const { data: rows } = await admin
+        .from("activities")
+        .select("id, subject, occurred_at")
+        .eq("prospect_id", resolved.id)
+        .eq("is_draft", true)
+        .order("occurred_at", { ascending: false });
+      const drafts = (rows ?? []) as { id: string; subject: string | null; occurred_at: string }[];
+
+      if (drafts.length === 0) {
+        return text(`Aucun brouillon sur ${resolved.company_name}.`);
+      }
+      const apercu = drafts.map((d) => ({
+        id: d.id,
+        resume: d.subject,
+        date: d.occurred_at,
+      }));
+
+      if (!args.confirmer) {
+        return json(
+          `SIMULATION (rien supprimé). ${drafts.length} brouillon(s) de ${resolved.company_name} seraient effacés. Repassez avec « confirmer: true ».`,
+          apercu
+        );
+      }
+      const { error } = await admin
+        .from("activities")
+        .delete()
+        .in("id", drafts.map((d) => d.id));
+      if (error) return fail(`Erreur : ${error.message}`);
+      return json(
+        `✅ ${drafts.length} brouillon(s) supprimé(s) sur ${resolved.company_name}.`,
+        apercu
+      );
+    }
+  );
+
   // --- importer_prospects ---------------------------------------------------
   server.tool(
     "importer_prospects",

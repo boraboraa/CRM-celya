@@ -128,6 +128,35 @@ export function fmtMoney(value?: number | null, currency = "EUR"): string {
   }).format(value);
 }
 
+// ---------------------------------------------------------------------------
+// Probabilité de conclure & valeur pondérée
+// ---------------------------------------------------------------------------
+
+/** Raccourcis de saisie — la saisie libre reste possible (0 à 100). */
+export const PROBABILITY_PRESETS = [10, 25, 50, 75, 90] as const;
+
+/**
+ * Valeur pondérée = valeur estimée × probabilité (4 000 € à 50 % = 2 000 €).
+ * C'est l'indicateur de priorisation. Sans probabilité renseignée, il n'y a
+ * pas de valeur pondérée : le CRM n'invente pas un pressentiment.
+ *
+ * Miroir exact de la colonne générée `prospects.weighted_value` — utilisée
+ * pour l'aperçu en direct des formulaires, la base restant la référence.
+ */
+export function weightedValue(
+  value?: number | null,
+  probability?: number | null
+): number | null {
+  if (value === null || value === undefined) return null;
+  if (probability === null || probability === undefined) return null;
+  if (!Number.isFinite(value) || !Number.isFinite(probability)) return null;
+  return Math.round(value * probability) / 100;
+}
+
+export function fmtProbability(probability?: number | null): string {
+  return probability === null || probability === undefined ? "—" : `${probability} %`;
+}
+
 /** « il y a 3 jours » / « dans 2 h » */
 export function relative(value?: string | null): string {
   if (!value) return "—";

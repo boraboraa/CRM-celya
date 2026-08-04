@@ -24,6 +24,7 @@ import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { saveExchangeCore } from "@/lib/crm/exchange";
+import { manualStatusPatch } from "@/lib/crm/status";
 import { STATUS_LABEL, ACTIVITY_LABEL, STATUS_ORDER, fmtDateTime } from "@/lib/constants";
 import { todayBounds } from "@/lib/time";
 import type { ProspectStatus } from "@/lib/types";
@@ -190,6 +191,10 @@ function register(server: McpServer) {
         etape: STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status,
         source: p.source,
         valeur_estimee: p.value_estimate,
+        probabilite: p.probability,
+        valeur_ponderee: p.weighted_value,
+        etape_verrouillee: p.status_locked,
+        etape_motif_auto: p.status_auto_reason,
         prochaine_action: p.next_action_at,
         dernier_contact: p.last_contact_at,
         notes: p.notes,
@@ -259,6 +264,13 @@ function register(server: McpServer) {
       statut: z.enum(STATUS_ENUM).optional().describe("Étape (défaut « a_appeler »)."),
       source: z.string().optional(),
       valeur_estimee: z.number().optional().describe("Valeur estimée en euros."),
+      probabilite: z
+        .number()
+        .int()
+        .min(0)
+        .max(100)
+        .optional()
+        .describe("Probabilité de conclure, en % (0–100). Laisser vide si inconnue — ne la devinez pas."),
       notes: z.string().optional(),
       forcer: z.boolean().optional().describe("Créer même si un doublon est détecté."),
     },
@@ -281,6 +293,7 @@ function register(server: McpServer) {
           status: args.statut,
           source: args.source,
           value_estimate: args.valeur_estimee,
+          probability: args.probabilite,
           notes: args.notes,
         },
         { checkDuplicates: true, normalizePhone: true, force: args.forcer }
@@ -317,7 +330,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ».",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -331,12 +344,12 @@ function register(server: McpServer) {
 
       const { error } = await admin
         .from("prospects")
-        .update({ status: args.statut })
+        .update(manualStatusPatch(args.statut as ProspectStatus))
         .eq("id", resolved.id);
       if (error) return fail(`Erreur : ${error.message}`);
 
       return text(
-        `✅ ${resolved.company_name} : étape passée à « ${STATUS_LABEL[args.statut as keyof typeof STATUS_LABEL]} ».`
+        `✅ ${resolved.company_name} : étape passée à « ${STATUS_LABEL[args.statut as keyof typeof STATUS_LABEL]} » et verrouillée (plus de déduction automatique — déverrouillable depuis la fiche).`
       );
     }
   );
@@ -344,7 +357,7 @@ function register(server: McpServer) {
   // --- ajouter_note ---------------------------------------------------------
   server.tool(
     "ajouter_note",
-    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). Peut aussi changer l'étape. N'impose pas de date de relance — pour poser une relance, utilisez « planifier_relance ».",
+    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. N'impose pas de date de relance — pour poser une relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -352,7 +365,26 @@ function register(server: McpServer) {
       note: z.string().describe("Texte de l'échange."),
       resume: z.string().optional().describe("Résumé court (versé en sujet)."),
       contact: z.string().optional().describe("Nom du contact à mettre à jour sur la fiche."),
-      statut: z.enum(STATUS_ENUM).optional().describe("Nouvelle étape, si l'échange l'implique."),
+      echange: z
+        .boolean()
+        .optional()
+        .describe(
+          "true UNIQUEMENT si un échange a réellement eu lieu avec le prospect (appel passé, visite). Défaut false : une note de repérage ou de préparation ne fait pas passer la fiche en « Contacté »."
+        ),
+      brouillon: z
+        .boolean()
+        .optional()
+        .describe(
+          "true pour un texte non envoyé (brouillon d'email) : rangé dans « Brouillons », hors chronologie, et ne compte pour aucun fait."
+        ),
+      proposition_envoyee: z
+        .boolean()
+        .optional()
+        .describe("true si une proposition / un devis vient d'être ENVOYÉ (fait passer en « Proposition »)."),
+      statut: z
+        .enum(STATUS_ENUM)
+        .optional()
+        .describe("Étape imposée. VERROUILLE la fiche — à n'utiliser que sur demande explicite."),
       motif: z.string().optional().describe("Raison de la perte (si statut = perdu)."),
     },
     async (args, extra) => {
@@ -371,11 +403,29 @@ function register(server: McpServer) {
         statut: args.statut as ProspectStatus | undefined,
         motif: args.motif,
         dateLocale: null,
+        // Défaut prudent côté connecteur : sans déclaration explicite, une
+        // note écrite par Claude n'atteste pas d'un échange (l'interface, elle,
+        // coche la case par défaut — la saisie y est humaine).
+        isExchange: args.echange === true,
+        isDraft: args.brouillon === true,
+        proposalSent: args.proposition_envoyee === true,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
-      const bits = [`✅ Note ajoutée sur ${resolved.company_name}.`];
-      if (r.statusChanged) bits.push(`Étape → « ${STATUS_LABEL[r.newStatus as keyof typeof STATUS_LABEL]} ».`);
+      const bits = [
+        args.brouillon
+          ? `✅ Brouillon rangé sur ${resolved.company_name} (hors chronologie).`
+          : `✅ Note ajoutée sur ${resolved.company_name}.`,
+      ];
+      if (r.statusChanged) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.newStatus as keyof typeof STATUS_LABEL]} » (fixée à la main, donc verrouillée).`
+        );
+      } else if (r.autoStatus) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
+        );
+      }
       return text(bits.join(" "));
     }
   );
@@ -406,11 +456,116 @@ function register(server: McpServer) {
         type: args.type ?? "note",
         note: args.note ?? null,
         dateLocale: args.date,
+        // Planifier n'est pas échanger : poser une relance ne fait pas passer
+        // la fiche en « Contacté ». Un rendez-vous daté, lui, est un fait —
+        // il passe par la tâche « RDV avec … » que crée le cœur partagé.
+        isExchange: false,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
-      return text(
-        `✅ Relance posée sur ${resolved.company_name} : « ${r.taskTitle} » pour le ${fmtDateTime(r.scheduledAt)}.`
+      const bits = [
+        `✅ Relance posée sur ${resolved.company_name} : « ${r.taskTitle} » pour le ${fmtDateTime(r.scheduledAt)}.`,
+      ];
+      if (r.autoStatus) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
+        );
+      }
+      return text(bits.join(" "));
+    }
+  );
+
+  // --- supprimer_activite ---------------------------------------------------
+  server.tool(
+    "supprimer_activite",
+    "Supprime définitivement une entrée du journal d'un prospect (note, email consigné, brouillon). Sert au nettoyage — par exemple retirer des brouillons qui polluent l'historique. Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION : la liste de ce qui serait supprimé, sans rien effacer. Repassez avec « confirmer: true » pour exécuter. Le jeton du connecteur n'étant délivré qu'au compte administrateur, cet outil lui est de fait réservé.",
+    {
+      id: z.string().optional().describe("Identifiant de l'activité à supprimer."),
+      prospect_id: z
+        .string()
+        .optional()
+        .describe("Prospect ciblé (avec « brouillons: true » pour un nettoyage groupé)."),
+      nom: z.string().optional().describe("Nom de société si prospect_id n'est pas fourni."),
+      brouillons: z
+        .boolean()
+        .optional()
+        .describe("true : cible TOUS les brouillons du prospect au lieu d'une entrée précise."),
+      confirmer: z.boolean().optional().describe("false/absent → simulation ; true → suppression réelle."),
+    },
+    async (args, extra) => {
+      if (!userIdFrom(extra)) return fail("Non authentifié.");
+      const admin = createAdminClient();
+
+      // --- Cas 1 : une entrée précise.
+      if (args.id && !args.brouillons) {
+        const { data } = await admin
+          .from("activities")
+          .select("id, prospect_id, type, subject, body, occurred_at, is_draft")
+          .eq("id", args.id)
+          .maybeSingle();
+        if (!data) return fail(`Aucune activité avec l'identifiant ${args.id}.`);
+
+        const apercu = {
+          id: data.id,
+          type: ACTIVITY_LABEL[data.type as keyof typeof ACTIVITY_LABEL] ?? data.type,
+          brouillon: data.is_draft,
+          resume: data.subject,
+          extrait: (data.body ?? "").slice(0, 160),
+          date: data.occurred_at,
+        };
+
+        if (!args.confirmer) {
+          return json(
+            "SIMULATION (rien supprimé). Cette entrée serait effacée définitivement. Repassez avec « confirmer: true ».",
+            apercu
+          );
+        }
+        const { error } = await admin.from("activities").delete().eq("id", args.id);
+        if (error) return fail(`Erreur : ${error.message}`);
+        return json("✅ Entrée supprimée définitivement.", apercu);
+      }
+
+      // --- Cas 2 : tous les brouillons d'un prospect.
+      if (!args.brouillons) {
+        return fail(
+          "Fournissez « id » (une entrée précise), ou « brouillons: true » avec « prospect_id »/« nom »."
+        );
+      }
+
+      const resolved = await resolveProspect(admin, { id: args.prospect_id, nom: args.nom });
+      if ("error" in resolved) return fail(resolved.error);
+
+      const { data: rows } = await admin
+        .from("activities")
+        .select("id, subject, occurred_at")
+        .eq("prospect_id", resolved.id)
+        .eq("is_draft", true)
+        .order("occurred_at", { ascending: false });
+      const drafts = (rows ?? []) as { id: string; subject: string | null; occurred_at: string }[];
+
+      if (drafts.length === 0) {
+        return text(`Aucun brouillon sur ${resolved.company_name}.`);
+      }
+      const apercu = drafts.map((d) => ({
+        id: d.id,
+        resume: d.subject,
+        date: d.occurred_at,
+      }));
+
+      if (!args.confirmer) {
+        return json(
+          `SIMULATION (rien supprimé). ${drafts.length} brouillon(s) de ${resolved.company_name} seraient effacés. Repassez avec « confirmer: true ».`,
+          apercu
+        );
+      }
+      const { error } = await admin
+        .from("activities")
+        .delete()
+        .in("id", drafts.map((d) => d.id));
+      if (error) return fail(`Erreur : ${error.message}`);
+      return json(
+        `✅ ${drafts.length} brouillon(s) supprimé(s) sur ${resolved.company_name}.`,
+        apercu
       );
     }
   );

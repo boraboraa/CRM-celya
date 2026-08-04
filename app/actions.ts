@@ -7,6 +7,11 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
 import { normalizeStatus } from "@/lib/constants";
 import type { ProspectStatus } from "@/lib/types";
+import {
+  manualStatusPatch,
+  unlockStatusPatch,
+  applyAutoStatus,
+} from "@/lib/crm/status";
 import { createProspectCore } from "@/lib/crm/prospects";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
@@ -74,6 +79,7 @@ export async function createProspectAction(fd: FormData) {
       status: str(fd, "status"),
       source: str(fd, "source"),
       value_estimate: num(fd, "value_estimate"),
+      probability: num(fd, "probability"),
       owner_id: str(fd, "owner_id"),
       notes: str(fd, "notes"),
     }
@@ -90,31 +96,53 @@ export async function updateProspectAction(fd: FormData) {
   const id = str(fd, "id");
   if (!id) throw new Error("Prospect introuvable");
 
-  const assign = str(fd, "owner_id");
-  const { error } = await supabase
+  const { data: before } = await supabase
     .from("prospects")
-    .update({
-      company_name: str(fd, "company_name") ?? "Sans nom",
-      contact_name: str(fd, "contact_name"),
-      email: str(fd, "email")?.toLowerCase() ?? null,
-      phone: str(fd, "phone"),
-      website: str(fd, "website"),
-      sector: str(fd, "sector"),
-      city: str(fd, "city"),
-      status: normalizeStatus(str(fd, "status")),
-      source: str(fd, "source"),
-      value_estimate: num(fd, "value_estimate"),
-      owner_id: assign === "none" ? null : assign,
-      notes: str(fd, "notes"),
-      lost_reason: str(fd, "lost_reason"),
-    })
-    .eq("id", id);
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
 
+  const status = normalizeStatus(str(fd, "status"));
+  const assign = str(fd, "owner_id");
+  const probability = num(fd, "probability");
+
+  const patch: Record<string, unknown> = {
+    company_name: str(fd, "company_name") ?? "Sans nom",
+    contact_name: str(fd, "contact_name"),
+    email: str(fd, "email")?.toLowerCase() ?? null,
+    phone: str(fd, "phone"),
+    website: str(fd, "website"),
+    sector: str(fd, "sector"),
+    city: str(fd, "city"),
+    source: str(fd, "source"),
+    value_estimate: num(fd, "value_estimate"),
+    probability:
+      probability === null
+        ? null
+        : Math.min(100, Math.max(0, Math.round(probability))),
+    owner_id: assign === "none" ? null : assign,
+    notes: str(fd, "notes"),
+    lost_reason: str(fd, "lost_reason"),
+  };
+
+  // Changer l'étape depuis le formulaire est une décision humaine : elle
+  // verrouille. La laisser telle quelle ne verrouille rien.
+  if (before && normalizeStatus(before.status as string) !== status) {
+    Object.assign(patch, manualStatusPatch(status));
+  } else {
+    patch.status = status;
+  }
+
+  const { error } = await supabase.from("prospects").update(patch).eq("id", id);
   if (error) throw new Error(error.message);
 
   revalidateProspect(id);
 }
 
+/**
+ * Fixer l'étape à la main — depuis la fiche. Verrouille : à partir de là,
+ * l'auto-classification ne réécrit plus rien, elle peut seulement suggérer.
+ */
 export async function setProspectStatusAction(fd: FormData) {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
@@ -123,7 +151,41 @@ export async function setProspectStatusAction(fd: FormData) {
 
   await supabase
     .from("prospects")
-    .update({ status: normalizeStatus(status) })
+    .update(manualStatusPatch(normalizeStatus(status)))
+    .eq("id", id);
+
+  revalidateProspect(id);
+}
+
+/**
+ * Rendre la main à l'IA : l'étape redevient déductible des faits, et on la
+ * ré-évalue tout de suite pour que l'effet soit visible immédiatement.
+ */
+export async function unlockProspectStatusAction(fd: FormData) {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) return;
+
+  await supabase.from("prospects").update(unlockStatusPatch()).eq("id", id);
+  await applyAutoStatus(supabase, id);
+
+  revalidateProspect(id);
+}
+
+/**
+ * Accepter la suggestion affichée sur une fiche verrouillée (« un RDV a été
+ * posé — passer en Rendez-vous ? »). C'est un clic humain : la fiche reste
+ * verrouillée sur ce nouveau choix.
+ */
+export async function acceptStatusSuggestionAction(fd: FormData) {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  const status = str(fd, "status");
+  if (!id || !status) return;
+
+  await supabase
+    .from("prospects")
+    .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
 
   revalidateProspect(id);
@@ -147,30 +209,88 @@ export async function deleteProspectAction(fd: FormData) {
 // c'est la date qui décide de tout.
 // =====================================================================
 
+export type SaveExchangeState = ActionState & {
+  /** Étape avancée automatiquement par les faits, et son motif. */
+  autoStatus?: ProspectStatus | null;
+  autoReason?: string | null;
+};
+
 export async function saveExchangeAction(
   input: SaveExchangeInput
-): Promise<ActionState> {
+): Promise<SaveExchangeState> {
   const { supabase, userId } = await currentUserId();
 
   const result = await saveExchangeCore(supabase, userId, input);
   if (result.error) return { error: result.error };
 
   revalidateProspect(input.prospectId);
-  return {};
+  return { autoStatus: result.autoStatus, autoReason: result.autoReason };
 }
 
 // =====================================================================
 // Activités
 // =====================================================================
 
-export async function deleteActivityAction(fd: FormData) {
-  const { supabase } = await currentUserId();
+/**
+ * Suppression d'une entrée du journal — réservée à l'admin.
+ *
+ * La RLS reste l'unique garde-fou de sécurité (un commercial n'atteint de
+ * toute façon que ses fiches) ; ce contrôle-ci est la règle métier demandée :
+ * l'historique d'un échange ne s'efface pas d'un doigt qui glisse. La
+ * confirmation est exigée explicitement (`confirm=1`), et le composant
+ * client la demande en deux temps.
+ */
+async function requireAdmin(): Promise<
+  { supabase: Awaited<ReturnType<typeof createClient>>; userId: string } | null
+> {
+  const { supabase, userId } = await currentUserId();
+  const { data: me } = await supabase
+    .from("crm_users")
+    .select("role, is_active")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!me || me.role !== "admin" || !me.is_active) return null;
+  return { supabase, userId };
+}
+
+export async function deleteActivityAction(fd: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Suppression réservée à l'administrateur." };
+
   const id = str(fd, "id");
   const prospectId = str(fd, "prospect_id");
-  if (!id) return;
+  if (!id) return { error: "Entrée introuvable." };
+  if (str(fd, "confirm") !== "1") return { error: "Confirmation requise." };
 
-  await supabase.from("activities").delete().eq("id", id);
+  const { error } = await admin.supabase.from("activities").delete().eq("id", id);
+  if (error) return { error: error.message };
+
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/dashboard");
+  return { success: "Entrée supprimée." };
+}
+
+/**
+ * Suppression d'un email du journal — même règle. Un message réellement
+ * envoyé ou reçu reste une trace : le composant client prévient plus
+ * fermement avant de laisser cliquer.
+ */
+export async function deleteEmailAction(fd: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Suppression réservée à l'administrateur." };
+
+  const id = str(fd, "id");
+  const prospectId = str(fd, "prospect_id");
+  if (!id) return { error: "Message introuvable." };
+  if (str(fd, "confirm") !== "1") return { error: "Confirmation requise." };
+
+  const { error } = await admin.supabase.from("emails").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/emails");
+  return { success: "Message supprimé." };
 }
 
 // =====================================================================
@@ -199,7 +319,12 @@ export async function createTaskAction(fd: FormData) {
   if (error) throw new Error(error.message);
 
   const prospectId = str(fd, "prospect_id");
-  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  // Une relance « RDV avec … » posée à la main est un fait : l'étape peut
+  // avancer vers « Rendez-vous ». applyAutoStatus respecte le verrou.
+  if (prospectId) {
+    await applyAutoStatus(supabase, prospectId);
+    revalidatePath(`/prospects/${prospectId}`);
+  }
   revalidatePath("/dashboard");
 }
 
@@ -393,12 +518,16 @@ export async function adminResetPasswordAction(
 // Vue en colonnes — glisser-déposer
 // =====================================================================
 
+/**
+ * Glisser-déposer d'une colonne à l'autre : c'est une correction humaine,
+ * au même titre que le sélecteur de la fiche. Elle verrouille l'étape.
+ */
 export async function moveProspectAction(id: string, status: ProspectStatus) {
   const { supabase } = await currentUserId();
 
   const { error } = await supabase
     .from("prospects")
-    .update({ status: normalizeStatus(status) })
+    .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
   if (error) throw new Error(error.message);
 

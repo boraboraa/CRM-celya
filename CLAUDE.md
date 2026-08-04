@@ -106,8 +106,8 @@ d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 | Table | Rôle |
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password` |
-| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `value_estimate`, `owner_id`, `next_action_at`, `last_contact_at` |
-| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) |
+| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability`, `weighted_value` (**colonne générée**), `owner_id`, `next_action_at`, `last_contact_at` |
+| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie) et `is_exchange` (la note atteste-t-elle d'un échange réel) |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
@@ -136,6 +136,47 @@ entreprises à démarcher. **La mise en sommeil ne passe plus par un statut** :
 un prospect dont la prochaine action tombe dans trois mois n'apparaît pas dans
 « À faire » avant sa date. C'est la date qui décide, jamais l'étape.
 
+### L'étape suit les FAITS, jamais le texte (migration `009`, 4 août)
+
+L'étape était déduite en lisant des mots dans les notes — c'est ainsi qu'un
+prospect s'est retrouvé en « Rendez-vous » sans qu'aucun rendez-vous ne soit
+posé. **La règle vit désormais dans `lib/crm/status.ts`, écrite une seule fois**
+et partagée par les server actions, le connecteur MCP et l'affichage de la
+fiche :
+
+| Étape | Le fait qui la justifie — et rien d'autre |
+|---|---|
+| `a_appeler` | défaut : aucun échange enregistré |
+| `contacte` | un email envoyé/reçu, un rendez-vous, ou une note **attestée** |
+| `rendez_vous` | une activité `rendez_vous` datée, **ou** une relance « RDV avec … » ouverte. Jamais un « RDV » lu en texte libre |
+| `proposition` | le geste explicite « j'ai envoyé une proposition » (`proposal_sent_at`). En cas de doute, rien ne bouge |
+| `gagne` / `perdu` | **jamais automatiques** — décisions humaines irréversibles |
+
+Trois invariants, à ne pas casser : l'auto-classification **n'avance que sur un
+fait non ambigu**, **ne recule jamais** une étape toute seule, et **ne passe
+jamais par-dessus un choix humain**. Chaque avancement automatique inscrit son
+événement déclencheur (`status_auto_reason`), affiché sur la fiche.
+
+**Le verrou — le point critique.** Dès que Bora fixe une étape à la main
+(glisser-déposer dans le pipeline, clic sur une étape de la fiche, formulaire,
+ou `mettre_a_jour_statut` du connecteur), `status_locked` passe à vrai et
+l'auto-classification ne réécrit plus rien : au mieux elle affiche une
+suggestion discrète (« un RDV a été posé — passer en Rendez-vous ? »), que Bora
+accepte ou ignore. Sans ce verrou, le système se bat contre l'utilisateur : il
+corrige, l'IA remet l'erreur au tour suivant. « Rendre la main à l'assistant »
+déverrouille, en petit, sous l'étape.
+
+**Une note atteste-t-elle d'un échange ?** Un email et un rendez-vous daté sont
+des faits lisibles sans interprétation ; une note peut être un compte rendu
+d'appel autant qu'un simple repérage. D'où `activities.is_exchange`, et la
+répartition des défauts — **à conserver** :
+
+- **interface** (« Noter un échange ») : case **cochée** par défaut, la saisie
+  y est humaine et intentionnelle ;
+- **connecteur MCP** (`ajouter_note`) : **`echange: false`** par défaut, à
+  déclarer explicitement. C'est ainsi qu'une note de repérage écrite par Claude
+  ne fait plus passer une fiche en « Contacté ».
+
 Le geste central est `saveExchangeAction` (`app/actions.ts`) : note au journal,
 étape si elle change, et relance à une date précise — **jamais de doublon** :
 la tâche ouverte existante est re-datée, les surnuméraires annulées ; un
@@ -149,6 +190,22 @@ garde-fou permanent, à ne pas retirer.
 champ** au lieu de s'y substituer. Toujours modifiable à la main — c'était le
 défaut le plus gênant de la V1 (préréglages seuls, impossible de saisir « le
 14 octobre »).
+
+### Probabilité de conclure et valeur pondérée (migration `010`, 4 août)
+
+`prospects.probability` (0–100, contrainte en base ; `null` = non renseignée) et
+`weighted_value`, **colonne générée** `value_estimate × probability / 100`.
+Générée pour deux raisons : jamais désynchronisée de ses termes, et **triable
+directement en SQL** — PostgREST ne sait pas trier sur une expression.
+
+La valeur pondérée est l'indicateur de priorisation (4 000 € à 50 % passent
+après 3 000 € à 90 %) : affichée sur la fiche, en colonne « Pondérée » dans la
+liste (triable), sur chaque carte du pipeline et **en total par colonne**.
+Saisie par presets 10 / 25 / 50 / 75 / 90 % qui **remplissent** le champ — même
+principe que `DateField` — la saisie libre restant toujours possible.
+
+**Sans probabilité, pas de valeur pondérée** (« — ») : décision de Bora, le CRM
+n'invente pas un pressentiment qu'il n'a pas exprimé. Pas de défaut par étape.
 
 ### Choix de modélisation assumé
 
@@ -196,9 +253,42 @@ et en périphérie : `/compte` (avec les liens admin vers `/reglages-email` et
   mode d'affichage de la même liste, plus une page distincte.
 - **Équipe** — inchangé.
 
-Sur la fiche : « Noter un échange » (note + type note/email/rendez_vous +
-étape + prochaine action datée, bouton ✨ qui propose), historique, relances,
-composeur email. Toute l'interface est en **français**, vouvoiement.
+**La fiche se lit d'abord — elle ne s'ouvre pas sur des formulaires** (refonte
+du 4 août). De haut en bas :
+
+1. **qui c'est**, et l'étape (les six pastilles cliquables, l'état du verrou,
+   la suggestion éventuelle) ;
+2. **PROCHAINE ACTION**, bien visible : l'action concrète en attente et sa date
+   (« RDV avec … · Rendez-vous le 20 août, 14:00 (dans 16 jours) · En attente
+   de réponse de Sébastien — email envoyé le 4 août »), avec ses gestes
+   rapides — consigner un échange, marquer fait, reporter (+1j / +3j / +1sem,
+   et champ de date pour « le 14 octobre ». Le bloc vire au rouge s'il est en
+   retard, au bleu pour un rendez-vous. **Dérivé de façon déterministe** de la
+   relance ouverte et du dernier événement du journal (`lib/crm/nextAction.ts`)
+   — aucune clé IA nécessaire ;
+3. **CHRONOLOGIE** : fil vertical, du plus récent au plus ancien, chaque
+   événement typé et daté (échange noté, note interne, email envoyé, réponse
+   reçue, rendez-vous) — pastille de couleur et puce de type, la nature de
+   l'échange se lit avant le texte ;
+4. **puis seulement** les formulaires : « Noter un échange » (note + type +
+   les deux cases de faits + étape + prochaine action datée, bouton ✨ qui
+   propose), composeur email, planifier une relance, modifier la fiche.
+
+En colonne latérale : les chiffres de l'affaire (valeur, probabilité, valeur
+pondérée), les relances, et l'espace **Brouillons**. Toute l'interface est en
+**français**, vouvoiement.
+
+### Les brouillons ne sont pas des échanges
+
+Un texte jamais envoyé (`activities.is_draft`) **ne figure pas dans la
+chronologie**, ne compte pour aucun fait d'étape et ne touche pas à
+`last_contact_at` (le trigger `bump_last_contact` l'ignore). Il vit dans
+l'espace « Brouillons » de la colonne latérale, et se supprime d'un clic.
+
+**Corbeille sur chaque entrée du journal** — admin uniquement, revérifié côté
+serveur, via server action (aucun SQL côté client). Confirmation en deux temps,
+inline : la question dit ce qui disparaît, et le ton s'endurcit pour un email
+réellement envoyé ou reçu, qui est une trace et non un brouillon.
 
 ## Saisie assistée par IA
 
@@ -240,10 +330,17 @@ C'est la fonction sur laquelle Bora s'appuie pour remplir sa liste
   Google Maps liégeoise, signature d'email bruxelloise, ligne d'annuaire
   gantoise). Ces exemples valent plus que les instructions — les conserver.
 
-Mêmes principes pour `analyzeNoteAction` (note d'échange → étape, date réelle,
-contact, résumé — proposés, jamais appliqués sans clic) et pour le tri des
-réponses email. **L'IA propose, elle n'exécute pas.** Tout passe côté serveur
-(aucune clé en `NEXT_PUBLIC_*`, le module jette s'il est importé côté client).
+Mêmes principes pour `analyzeNoteAction` (note d'échange → date réelle,
+contact, résumé) et pour le tri des réponses email. **L'IA propose, elle
+n'exécute pas.** Tout passe côté serveur (aucune clé en `NEXT_PUBLIC_*`, le
+module jette s'il est importé côté client).
+
+**L'étape, elle, n'est plus jamais poussée par le modèle** (correctif du
+4 août) : `analyzeNoteAction` l'affiche comme suggestion à retenir d'un clic,
+et le code arbitre avant même l'affichage — une note qui parle d'un « RDV »
+sans date réelle est ramenée à `contacte`, `gagne`/`perdu` sont signalés comme
+réservés à l'humain, `proposition` renvoie vers la case explicite. Le champ
+`statutReserve` porte cette réserve, en clair, dans le formulaire.
 
 ## Boîte Zoho (SMTP + IMAP)
 
@@ -305,21 +402,43 @@ du projet Supabase.
 désactivé, streamable HTTP sans état, sans Redis). L'URL du connecteur à coller
 dans Claude est donc `https://<domaine-de-prod>/mcp`.
 
-**Les huit outils** (noms français, descriptions lues par Claude pour décider) :
+**Les neuf outils** (noms français, descriptions lues par Claude pour décider) :
 `lister_prospects`, `obtenir_prospect`, `a_faire`, `creer_prospect`,
-`mettre_a_jour_statut`, `ajouter_note`, `planifier_relance`, `importer_prospects`.
-Toute opération en lot (`importer_prospects`) est d'abord une **simulation** ;
-l'écriture réelle exige `confirmer: true`. `creer_prospect` **avertit** en cas de
-doublon au lieu de créer (forçable par `forcer: true`).
+`mettre_a_jour_statut`, `ajouter_note`, `planifier_relance`,
+`supprimer_activite`, `importer_prospects`.
+Toute opération destructrice ou en lot (`importer_prospects`,
+`supprimer_activite`) est d'abord une **simulation** ; l'écriture réelle exige
+`confirmer: true`. `creer_prospect` **avertit** en cas de doublon au lieu de
+créer (forçable par `forcer: true`).
+
+Trois précautions dictées par la règle des faits (4 août) :
+
+- `mettre_a_jour_statut` **verrouille** la fiche — sa description le dit, pour
+  que Claude ne l'emploie que sur demande explicite et préfère `ajouter_note`
+  pour un simple compte rendu ;
+- `ajouter_note` déclare ses faits : `echange` (**défaut false**), `brouillon`,
+  `proposition_envoyee` — et `planifier_relance` passe `isExchange: false`
+  (planifier n'est pas échanger) ;
+- `supprimer_activite` efface une entrée précise, ou **tous les brouillons**
+  d'un prospect d'un coup (`brouillons: true`) — c'est l'outil de nettoyage du
+  journal depuis Claude. De fait réservé à l'admin, puisque le jeton OAuth
+  n'est délivré qu'à lui.
 
 **Réutilise la logique existante, ne la duplique pas.** Chaque outil est une
 enveloppe fine au-dessus du **cœur partagé `lib/crm/`** (extrait le 4 août sans
 changement de comportement) : `dedup.ts` (normalisation `+32`, clés de dédup,
 `findDuplicates`), `prospects.ts` (`createProspectCore`, `importProspectsCore`),
-`exchange.ts` (`saveExchangeCore`). Les server actions (`app/actions.ts`,
+`exchange.ts` (`saveExchangeCore`), `status.ts` (la règle des faits, le verrou :
+`readProspectFacts`, `evaluateStatus`, `applyAutoStatus`, `manualStatusPatch`),
+`nextAction.ts` (`deriveNextAction`). Les server actions (`app/actions.ts`,
 `app/ai-actions.ts`) et le connecteur appellent **le même code** : un prospect
 créé par Claude est indiscernable d'un prospect créé à la main (même dédup, même
-`+32`, même cadence de relance).
+`+32`, même cadence de relance, mêmes règles d'étape).
+
+Seule exception assumée : l'edge function `crm-mail` (Deno) ne peut pas importer
+le code Next. Elle ré-applique donc la règle à la main sur un seul point — une
+réponse reçue fait passer `a_appeler` → `contacte` **sauf si `status_locked`**.
+Toute évolution de la règle doit être répercutée là aussi.
 
 **Périmètre strictement CRM.** Le serveur MCP ne touche QUE `prospects`,
 `activities`, `tasks` (et `emails` en lecture le jour où un outil l'expose) —
@@ -384,7 +503,17 @@ Chaque push sur `main` redéploie automatiquement le projet Vercel
 configurer. Déploiement manuel possible avec `npx vercel --prod`.
 
 Migrations SQL : appliquées via le MCP Supabase, copies dans
-`supabase/migrations/`. Edge functions : déployées via le MCP Supabase —
+`supabase/migrations/` — dernières en date, `009_statut_faits.sql` (verrou,
+traçabilité, `is_exchange` / `is_draft`, trigger `bump_last_contact` qui ignore
+les brouillons, **et la ré-évaluation unique** des fiches mal classées) et
+`010_probabilite.sql` (probabilité + colonne générée). Toutes deux **additives**,
+donc applicables avant le déploiement du code sans rien casser en production.
+
+⚠️ **L'edge function `crm-mail` reste à redéployer** : son correctif du 4 août
+(respecter `status_locked` à l'arrivée d'une réponse) est dans le dépôt mais
+pas encore en ligne — voir Reste à faire.
+
+Edge functions : déployées via le MCP Supabase —
 `crm-admin` avec `verify_jwt: true`, `crm-mail` avec `verify_jwt: false`
 (le cron pg_net n'a pas de JWT ; l'authentification est faite dans le corps).
 
@@ -447,6 +576,23 @@ déployé dans le même geste. Pour la migration 007, le code lisait les deux
 jeux de statuts (`normalizeStatus`) avant la bascule ; ce garde-fou reste en
 place.
 
+**Deviner un statut en lisant du texte : la régression à ne jamais refaire.**
+Le 4 août, Garage Boetendael s'est retrouvé en « Rendez-vous » alors qu'aucun
+rendez-vous n'était posé — le modèle avait lu « RDV » dans une note et l'étape
+avait été appliquée sans confirmation. Deux garde-fous permanents en découlent :
+la règle des faits (`lib/crm/status.ts`) et le verrou (`status_locked`). **Si
+un jour une étape doit bouger, cherchez le fait qui la justifie ; s'il n'existe
+pas, proposez au lieu d'appliquer.**
+
+**Trier sur une valeur calculée.** PostgREST ne sait pas trier sur une
+expression : `weighted_value` est une **colonne générée**, pas un calcul
+applicatif. Même réflexe pour tout futur indicateur dérivé qu'on voudra trier.
+
+**Chronologie et faits : filtrer les brouillons partout.** `is_draft` doit être
+exclu à trois endroits — la chronologie, la lecture des faits
+(`readProspectFacts`) et le trigger `bump_last_contact`. En oublier un remet un
+texte jamais envoyé au rang d'échange réel.
+
 **`email_accounts` : RLS activée sans aucune politique — c'est voulu, ne pas le
 « corriger ».** L'audit de sécurité Supabase (et n'importe quel lint RLS) signale
 « RLS enabled, no policy » sur cette table et proposera d'ajouter une politique.
@@ -464,6 +610,16 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
 ---
 
 ## Reste à faire
+
+00. **Redéployer l'edge function `crm-mail`** (30 secondes, MCP Supabase) : le
+    correctif du 4 août — une réponse reçue ne réécrit plus une étape
+    verrouillée — est dans le dépôt mais pas en ligne. Sans risque tant que la
+    boîte Zoho n'est pas activée, **mais à faire avant le point 1** : sinon la
+    première réponse reçue pourrait écraser une étape que Bora a fixée.
+    Fichier unique, tout en imports distants : `deploy_edge_function` avec
+    `supabase/functions/crm-mail/index.ts`, `verify_jwt: false` (impératif —
+    le cron pg_net n'a pas de JWT). La version en ligne (v2) est par ailleurs
+    identique au dépôt : rien d'autre à reporter.
 
 0. **Activer le connecteur MCP** (le code est en production) : poser la variable
    d'environnement Vercel **`SUPABASE_SERVICE_ROLE_KEY`** (Settings → Environment

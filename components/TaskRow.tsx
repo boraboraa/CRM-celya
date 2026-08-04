@@ -30,7 +30,14 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-export function TaskRow({ task }: { task: TaskWithProspect }) {
+export function TaskRow({
+  task,
+  compact = false,
+}: {
+  task: TaskWithProspect;
+  /** Colonne étroite (fiche prospect) : les commandes passent sous le titre. */
+  compact?: boolean;
+}) {
   const done = task.status === "fait";
   const overdue = !done && new Date(task.due_at).getTime() < Date.now();
   const [pending, startTransition] = useTransition();
@@ -56,7 +63,13 @@ export function TaskRow({ task }: { task: TaskWithProspect }) {
   }
 
   return (
-    <li className="flex flex-wrap items-start gap-3 px-4 py-3.5 sm:flex-nowrap">
+    <li
+      className={`gap-3 px-4 py-3.5 ${
+        compact
+          ? "grid grid-cols-[auto_1fr] items-start"
+          : "flex flex-wrap items-start sm:flex-nowrap"
+      }`}
+    >
       <form action={completeTaskAction} className="pt-0.5">
         <input type="hidden" name="id" value={task.id} />
         <input type="hidden" name="prospect_id" value={task.prospect_id ?? ""} />
@@ -124,7 +137,11 @@ export function TaskRow({ task }: { task: TaskWithProspect }) {
       </div>
 
       {!done && (
-        <div className="flex shrink-0 flex-wrap items-center gap-1">
+        <div
+          className={`flex flex-wrap items-center gap-1 ${
+            compact ? "col-start-2 mt-2" : "shrink-0"
+          }`}
+        >
           {/* Champ de date réel : reprogrammer au jour près. Les raccourcis
               remplissent la même date (et l'appliquent aussitôt). */}
           <input

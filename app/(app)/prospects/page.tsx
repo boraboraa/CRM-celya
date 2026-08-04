@@ -31,7 +31,7 @@ export default async function ProspectsPage({
   let query = supabase
     .from("prospects")
     .select(
-      "id, company_name, contact_name, email, phone, city, status, value_estimate, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
+      "id, company_name, contact_name, email, phone, city, status, value_estimate, probability, weighted_value, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
     );
 
   if (q) {
@@ -55,6 +55,9 @@ export default async function ProspectsPage({
     query = query.order("next_action_at", { ascending: true, nullsFirst: false });
   } else if (sort === "valeur") {
     query = query.order("value_estimate", { ascending: false, nullsFirst: false });
+  } else if (sort === "ponderee") {
+    // Colonne générée en base : le tri se fait en SQL, pas après coup.
+    query = query.order("weighted_value", { ascending: false, nullsFirst: false });
   } else if (sort === "nom") {
     query = query.order("company_name", { ascending: true });
   } else {
@@ -71,6 +74,8 @@ export default async function ProspectsPage({
     city: string | null;
     status: string;
     value_estimate: number | null;
+    probability: number | null;
+    weighted_value: number | null;
     next_action_at: string | null;
     last_contact_at: string | null;
     crm_users: { full_name: string | null } | null;
@@ -87,6 +92,8 @@ export default async function ProspectsPage({
     contact_name: p.contact_name,
     status: p.status,
     value_estimate: p.value_estimate,
+    probability: p.probability,
+    weighted_value: p.weighted_value,
     next_action_at: p.next_action_at,
   }));
 
@@ -178,6 +185,7 @@ export default async function ProspectsPage({
               <select id="tri" name="tri" defaultValue={sort} className="input">
                 <option value="recent">Activité récente</option>
                 <option value="relance">Prochaine action</option>
+                <option value="ponderee">Valeur pondérée</option>
                 <option value="valeur">Valeur estimée</option>
                 <option value="nom">Nom</option>
               </select>
@@ -215,6 +223,9 @@ export default async function ProspectsPage({
                 <th className="th">Prospect</th>
                 <th className="th">Étape</th>
                 <th className="th">Valeur</th>
+                <th className="th" title="Valeur estimée × probabilité de conclure">
+                  Pondérée
+                </th>
                 <th className="th">Prochaine action</th>
                 <th className="th">Dernier contact</th>
                 <th className="th">Responsable</th>
@@ -244,6 +255,20 @@ export default async function ProspectsPage({
                     </td>
                     <td className="td whitespace-nowrap">
                       {fmtMoney(p.value_estimate)}
+                      {p.probability !== null && (
+                        <span className="ml-1.5 text-xs text-slate-500">
+                          {p.probability} %
+                        </span>
+                      )}
+                    </td>
+                    <td className="td whitespace-nowrap">
+                      {p.weighted_value !== null ? (
+                        <span className="font-medium text-celya-cyan">
+                          {fmtMoney(p.weighted_value)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
                     </td>
                     <td className={`td whitespace-nowrap ${overdue ? "text-rose-400" : ""}`}>
                       {p.next_action_at ? relative(p.next_action_at) : "—"}

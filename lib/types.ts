@@ -51,6 +51,18 @@ export type Prospect = {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Étape fixée à la main : l'auto-classification ne la réécrit jamais. */
+  status_locked: boolean;
+  status_locked_at: string | null;
+  /** L'événement qui a justifié le dernier avancement automatique. */
+  status_auto_reason: string | null;
+  status_auto_at: string | null;
+  /** Signal explicite d'une proposition envoyée (jamais deviné). */
+  proposal_sent_at: string | null;
+  /** Probabilité de conclure, en % (0–100). null = non renseignée. */
+  probability: number | null;
+  /** Colonne générée : value_estimate × probability / 100. */
+  weighted_value: number | null;
 };
 
 export type Activity = {
@@ -64,6 +76,10 @@ export type Activity = {
   duration_min: number | null;
   occurred_at: string;
   created_at: string;
+  /** Brouillon non envoyé : hors chronologie, et ne compte pour aucun fait. */
+  is_draft: boolean;
+  /** La note atteste-t-elle d'un échange réel (case « j'ai eu cet échange ») ? */
+  is_exchange: boolean;
 };
 
 export type Task = {

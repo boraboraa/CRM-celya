@@ -290,6 +290,33 @@ serveur, via server action (aucun SQL côté client). Confirmation en deux temps
 inline : la question dit ce qui disparaît, et le ton s'endurcit pour un email
 réellement envoyé ou reçu, qui est une trace et non un brouillon.
 
+## Direction visuelle (4 août)
+
+Outil ouvert toute la journée : lisible d'un coup d'œil, sans saturation.
+
+- **Une couleur franche par étape**, la même partout où l'étape apparaît
+  (badge, bandeau de colonne du pipeline, pastille du compteur, liseré gauche
+  des cartes, halo de la colonne cible pendant le drag) : ardoise → cyan →
+  bleu → **ambre** (Proposition, « ça chauffe ») → émeraude / rose. Les
+  Records de classes complètes vivent dans `lib/constants.ts` (`STATUS_CHIP`,
+  `STATUS_DOT`, `STATUS_ICON`, `STATUS_EDGE`) et dans `PipelineBoard`
+  (bandeaux, compteurs, cibles de drag) — jamais d'interpolation (règle JIT).
+- **La couleur ne porte jamais seule** : libellé + pictogramme (`STATUS_ICON`)
+  l'accompagnent (daltonisme).
+- **Probabilité = jauge « chaleur »** (`ProbabilityGauge` dans `ui.tsx`,
+  `probabilityHeat` dans `constants.ts`) : bleu froid sous 40 %, ambre autour
+  de 50 %, orange dès 65 %, rouge dès 85 % — le pourcentage reste écrit à
+  côté. Affichée sur la fiche, la liste, les cartes du pipeline et en direct
+  dans `ValueFields`.
+- **Contraste hiérarchisé** : titres quasi blancs (`slate-50`), texte
+  secondaire jamais plus délavé que `slate-400` (#94A3B8) quand il doit se
+  lire. Le dégradé Celya reste réservé aux **actions principales** ; ce sont
+  les couleurs d'étape qui différencient.
+- **Motion sobre** (150–250 ms, `globals.css`) : `card-lift` (survol qui
+  soulève), `animate-rise` (apparition des listes et colonnes), `animate-pop`
+  (étape qui vient d'être choisie), colonne cible illuminée dans sa propre
+  teinte. `prefers-reduced-motion` neutralise tout.
+
 ## Saisie assistée par IA
 
 L'abstraction fournisseur vit dans `lib/ai/provider.ts` : `AGENT_PROVIDER`
@@ -556,7 +583,11 @@ ou depuis vercel.com.
 (`confirmation_token`, `recovery_token`, `email_change*`, `phone_change*`,
 `reauthentication_token`) restent à `NULL` : les initialiser à `''`, et créer
 la ligne `auth.identities` (provider `email`). Rencontré le 3 août avec le
-compte de test E2E.
+compte de test E2E. Nuance du 4 août : un `insert into auth.users` en SQL
+direct (MCP `execute_sql`) déclenche bien le trigger qui crée la ligne
+`crm_users` — la mettre à jour ensuite (`update`), pas l'insérer (doublon
+sinon). Le compte de test se supprime après usage : `crm_users`,
+`auth.refresh_tokens`, `auth.sessions`, `auth.identities`, puis `auth.users`.
 
 **Renommer une table ou une valeur d'enum ne suit pas le corps des fonctions.**
 Les politiques RLS et leurs sous-requêtes sont des arbres d'expressions : elles

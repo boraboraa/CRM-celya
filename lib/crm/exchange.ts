@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { dateInputToISO } from "@/lib/time";
 import { STATUS_ORDER } from "@/lib/constants";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
+import { recalcConfidence } from "@/lib/crm/confidence";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
 export type SaveExchangeInput = {
@@ -193,6 +194,12 @@ export async function saveExchangeCore(
   const auto = statusChanged
     ? { changed: false as const }
     : await applyAutoStatus(supabase, prospect.id);
+
+  // 5. La confiance suit l'événement — jamais sur un brouillon (un texte
+  //    jamais envoyé n'est pas un signal), et jamais bloquant.
+  if (!isDraft) {
+    await recalcConfidence(supabase, prospect.id);
+  }
 
   return {
     ok: true,

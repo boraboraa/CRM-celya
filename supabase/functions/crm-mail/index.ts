@@ -542,7 +542,7 @@ async function handleRealReply(
 ) {
   const { data: prospect } = await admin
     .from("prospects")
-    .select("id, status, last_contact_at, status_locked")
+    .select("id, status, last_contact_at, status_locked, confidence_locked")
     .eq("id", prospectId)
     .maybeSingle();
   if (!prospect) return;
@@ -562,6 +562,15 @@ async function handleRealReply(
     patch.status = "contacte";
     patch.status_auto_reason = "une réponse est arrivée par email";
     patch.status_auto_at = new Date().toISOString();
+  }
+  // Une nouvelle réponse rend l'ancien niveau de confiance caduc : la fiche
+  // repasse honnêtement « à évaluer » (le recalcul IA se fait côté app, au
+  // traitement de la réponse) — jamais par-dessus un niveau fixé à la main.
+  // Même règle que lib/crm/confidence.ts, ré-appliquée ici (Deno).
+  if (!prospect.confidence_locked) {
+    patch.confidence_level = null;
+    patch.confidence_reason = null;
+    patch.confidence_at = new Date().toISOString();
   }
   if (Object.keys(patch).length > 0) {
     await admin.from("prospects").update(patch).eq("id", prospect.id);

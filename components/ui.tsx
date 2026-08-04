@@ -1,11 +1,16 @@
 import Link from "next/link";
-import type { ProspectStatus } from "@/lib/types";
+import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
 import {
   STATUS_CHIP,
   STATUS_LABEL,
   STATUS_ICON,
+  CONFIDENCE_CHIP,
+  CONFIDENCE_LABEL,
+  CONFIDENCE_ICON,
+  CONFIDENCE_PENDING_CHIP,
+  CONFIDENCE_PENDING_LABEL,
+  CONFIDENCE_PENDING_ICON,
   initials,
-  probabilityHeat,
 } from "@/lib/constants";
 
 export function StatusChip({ status }: { status: ProspectStatus }) {
@@ -20,34 +25,39 @@ export function StatusChip({ status }: { status: ProspectStatus }) {
 }
 
 /**
- * Jauge « chaleur » de la probabilité de conclure : froid (bleu) sous 40 %,
- * ambre autour de 50 %, orange puis rouge au-delà. Le pourcentage reste écrit
- * à côté — la couleur ne porte jamais l'information seule.
+ * Confiance estimée par l'IA : Chaud (orange/rouge) / Tiède (ambre) /
+ * Froid (bleu-ardoise), toujours avec libellé + pictogramme — la couleur ne
+ * porte jamais seule. Sans estimation (IA indisponible, pas assez
+ * d'éléments), le badge dit honnêtement « À évaluer ».
  */
-export function ProbabilityGauge({
-  probability,
-  size = "md",
+export function ConfidenceBadge({
+  level,
+  reason,
+  locked = false,
 }: {
-  probability?: number | null;
-  size?: "sm" | "md";
+  level: ConfidenceLevel | null;
+  /** La raison courte, montrée en infobulle (les pages l'affichent en clair). */
+  reason?: string | null;
+  /** Niveau fixé à la main par Bora. */
+  locked?: boolean;
 }) {
-  if (probability === null || probability === undefined) return null;
-  const heat = probabilityHeat(probability);
-  const track = size === "sm" ? "h-1 w-10" : "h-1.5 w-16";
+  const chip = level ? CONFIDENCE_CHIP[level] : CONFIDENCE_PENDING_CHIP;
+  const label = level ? CONFIDENCE_LABEL[level] : CONFIDENCE_PENDING_LABEL;
+  const icon = level ? CONFIDENCE_ICON[level] : CONFIDENCE_PENDING_ICON;
+  const title = locked
+    ? `Confiance fixée par vous : ${label}`
+    : reason
+      ? `${label} — ${reason}`
+      : level
+        ? `Confiance estimée : ${label}`
+        : "Pas encore d'estimation — l'assistant évalue après chaque échange.";
   return (
-    <span
-      className="inline-flex items-center gap-1.5 align-middle"
-      title={`Probabilité de conclure : ${probability} %`}
-    >
-      <span className={`${track} overflow-hidden rounded-full bg-white/[0.09]`}>
-        <span
-          className={`block h-full rounded-full ${heat.bar} transition-all duration-300`}
-          style={{ width: `${Math.min(100, Math.max(4, probability))}%` }}
-        />
+    <span className={`chip ${chip}`} title={title}>
+      <span aria-hidden className="text-[10px] leading-none">
+        {icon}
       </span>
-      <span className={`text-[11px] font-medium tabular-nums ${heat.text}`}>
-        {probability} %
-      </span>
+      {label}
+      {locked && <span aria-hidden>🔒</span>}
     </span>
   );
 }

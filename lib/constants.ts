@@ -1,4 +1,9 @@
-import type { ActivityType, EmailIntent, ProspectStatus } from "./types";
+import type {
+  ActivityType,
+  ConfidenceLevel,
+  EmailIntent,
+  ProspectStatus,
+} from "./types";
 
 export const STATUS_ORDER: ProspectStatus[] = [
   "a_appeler",
@@ -154,55 +159,39 @@ export function fmtMoney(value?: number | null, currency = "EUR"): string {
 }
 
 // ---------------------------------------------------------------------------
-// Probabilité de conclure & valeur pondérée
+// Confiance commerciale (Chaud / Tiède / Froid) — estimée par l'IA
 // ---------------------------------------------------------------------------
 
-/** Raccourcis de saisie — la saisie libre reste possible (0 à 100). */
-export const PROBABILITY_PRESETS = [10, 25, 50, 75, 90] as const;
+export const CONFIDENCE_ORDER: ConfidenceLevel[] = ["chaud", "tiede", "froid"];
+
+export const CONFIDENCE_LABEL: Record<ConfidenceLevel, string> = {
+  chaud: "Chaud",
+  tiede: "Tiède",
+  froid: "Froid",
+};
 
 /**
- * Valeur pondérée = valeur estimée × probabilité (4 000 € à 50 % = 2 000 €).
- * C'est l'indicateur de priorisation. Sans probabilité renseignée, il n'y a
- * pas de valeur pondérée : le CRM n'invente pas un pressentiment.
- *
- * Miroir exact de la colonne générée `prospects.weighted_value` — utilisée
- * pour l'aperçu en direct des formulaires, la base restant la référence.
- */
-export function weightedValue(
-  value?: number | null,
-  probability?: number | null
-): number | null {
-  if (value === null || value === undefined) return null;
-  if (probability === null || probability === undefined) return null;
-  if (!Number.isFinite(value) || !Number.isFinite(probability)) return null;
-  return Math.round(value * probability) / 100;
-}
-
-export function fmtProbability(probability?: number | null): string {
-  return probability === null || probability === undefined ? "—" : `${probability} %`;
-}
-
-/**
- * La « chaleur » d'une affaire, lue d'un coup d'œil : froid (bleu/ardoise)
- * en dessous de 40 %, ambre autour de 50 %, orange puis rouge au-delà.
+ * Chaud = orange/rouge (« ça brûle »), tiède = ambre, froid = bleu/ardoise.
+ * La couleur ne porte jamais seule : libellé + pictogramme l'accompagnent.
  * Classes complètes, jamais interpolées (règle JIT).
  */
-const HEAT = {
-  froid: { bar: "bg-sky-400", text: "text-sky-300" },
-  tiede: { bar: "bg-amber-400", text: "text-amber-300" },
-  chaud: { bar: "bg-orange-400", text: "text-orange-300" },
-  brulant: { bar: "bg-red-400", text: "text-red-300" },
-} as const;
+export const CONFIDENCE_CHIP: Record<ConfidenceLevel, string> = {
+  chaud: "bg-orange-500/15 text-orange-300 ring-orange-400/30",
+  tiede: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
+  froid: "bg-sky-500/15 text-sky-300 ring-sky-400/25",
+};
 
-export function probabilityHeat(probability: number): {
-  bar: string;
-  text: string;
-} {
-  if (probability >= 85) return HEAT.brulant;
-  if (probability >= 65) return HEAT.chaud;
-  if (probability >= 40) return HEAT.tiede;
-  return HEAT.froid;
-}
+export const CONFIDENCE_ICON: Record<ConfidenceLevel, string> = {
+  chaud: "♨",
+  tiede: "◐",
+  froid: "❄",
+};
+
+/** L'état honnête quand rien n'a (encore) pu être estimé. */
+export const CONFIDENCE_PENDING_LABEL = "À évaluer";
+export const CONFIDENCE_PENDING_CHIP =
+  "bg-white/[0.04] text-slate-400 ring-white/10";
+export const CONFIDENCE_PENDING_ICON = "…";
 
 /** « il y a 3 jours » / « dans 2 h » */
 export function relative(value?: string | null): string {

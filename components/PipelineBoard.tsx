@@ -8,11 +8,10 @@ import {
   STATUS_LABEL,
   STATUS_ICON,
   STATUS_EDGE,
-  fmtMoney,
   relative,
 } from "@/lib/constants";
-import { ProbabilityGauge } from "@/components/ui";
-import type { ProspectStatus } from "@/lib/types";
+import { ConfidenceBadge } from "@/components/ui";
+import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
 
 /**
  * La couleur de chaque étape, déclinée pour la colonne : bandeau d'en-tête,
@@ -61,9 +60,9 @@ export type BoardProspect = {
   company_name: string;
   contact_name: string | null;
   status: ProspectStatus;
-  value_estimate: number | null;
-  probability: number | null;
-  weighted_value: number | null;
+  confidence_level: ConfidenceLevel | null;
+  confidence_reason: string | null;
+  confidence_locked: boolean;
   next_action_at: string | null;
 };
 
@@ -73,8 +72,9 @@ export type BoardProspect = {
  * Déposer une fiche est une décision humaine — elle VERROUILLE l'étape
  * (moveProspectAction), et l'auto-classification n'y touchera plus.
  *
- * En tête de colonne : le total pondéré (valeur estimée × probabilité), qui
- * est l'indicateur de priorisation, et le total brut en second.
+ * Plus aucun montant sur les cartes : c'est la CONFIANCE estimée par l'IA
+ * (Chaud / Tiède / Froid, avec sa raison courte) qui dit si l'affaire est
+ * chaude. « À évaluer » quand rien n'a pu être estimé.
  */
 export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
   const [items, setItems] = useState(prospects);
@@ -134,11 +134,6 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
         <div className="flex min-w-max gap-4">
           {STATUS_ORDER.map((status, columnIndex) => {
             const list = items.filter((c) => c.status === status);
-            const total = list.reduce((sum, c) => sum + Number(c.value_estimate ?? 0), 0);
-            const weighted = list.reduce(
-              (sum, c) => sum + Number(c.weighted_value ?? 0),
-              0
-            );
             const isTarget = overColumn === status;
             // Colonne d'origine de la carte en cours de déplacement : on la
             // laisse en retrait pour que la cible ressorte.
@@ -191,24 +186,6 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                       {list.length}
                     </span>
                   </h2>
-                  {/* Total pondéré d'abord : c'est lui qui sert à prioriser. */}
-                  {(weighted > 0 || total > 0) && (
-                    <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 px-1 text-[11px]">
-                      {weighted > 0 && (
-                        <span
-                          className="font-semibold text-slate-100"
-                          title="Total pondéré : somme des valeurs × probabilités"
-                        >
-                          {fmtMoney(weighted)}
-                        </span>
-                      )}
-                      {total > 0 && (
-                        <span className="text-slate-500" title="Total des valeurs estimées">
-                          / {fmtMoney(total)} brut
-                        </span>
-                      )}
-                    </p>
-                  )}
                 </header>
 
                 <div className="space-y-2.5">
@@ -271,33 +248,22 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                             </p>
                           )}
 
-                          <p className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                            <span className="min-w-0 text-slate-400">
-                              {c.weighted_value !== null ? (
-                                <>
-                                  <span className="font-semibold text-celya-cyan">
-                                    {fmtMoney(c.weighted_value)}
-                                  </span>
-                                  <span className="text-slate-500">
-                                    {" "}
-                                    · {fmtMoney(c.value_estimate)}
-                                  </span>
-                                </>
-                              ) : (
-                                fmtMoney(c.value_estimate)
-                              )}
-                            </span>
+                          {/* La confiance, d'un coup d'œil — et sa raison. */}
+                          <p className="mt-2 flex items-center justify-between gap-2">
+                            <ConfidenceBadge
+                              level={c.confidence_level}
+                              reason={c.confidence_reason}
+                              locked={c.confidence_locked}
+                            />
                             <span
-                              className={`shrink-0 ${overdue ? "text-rose-400" : "text-slate-400"}`}
+                              className={`shrink-0 text-[11px] ${overdue ? "text-rose-400" : "text-slate-400"}`}
                             >
                               {c.next_action_at ? relative(c.next_action_at) : "—"}
                             </span>
                           </p>
-
-                          {/* La chaleur de l'affaire, d'un coup d'œil. */}
-                          {c.probability !== null && (
-                            <p className="mt-1.5">
-                              <ProbabilityGauge probability={c.probability} size="sm" />
+                          {c.confidence_reason && !c.confidence_locked && (
+                            <p className="mt-1 truncate text-[11px] text-slate-500">
+                              {c.confidence_reason}
                             </p>
                           )}
                         </Link>

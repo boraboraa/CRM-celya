@@ -106,7 +106,7 @@ d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 | Table | Rôle |
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password` |
-| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability`, `weighted_value` (**colonne générée**), `owner_id`, `next_action_at`, `last_contact_at` |
+| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `owner_id`, `next_action_at`, `last_contact_at` |
 | `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie) et `is_exchange` (la note atteste-t-elle d'un échange réel) |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
@@ -191,21 +191,42 @@ champ** au lieu de s'y substituer. Toujours modifiable à la main — c'était l
 défaut le plus gênant de la V1 (préréglages seuls, impossible de saisir « le
 14 octobre »).
 
-### Probabilité de conclure et valeur pondérée (migration `010`, 4 août)
+### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
-`prospects.probability` (0–100, contrainte en base ; `null` = non renseignée) et
-`weighted_value`, **colonne générée** `value_estimate × probability / 100`.
-Générée pour deux raisons : jamais désynchronisée de ses termes, et **triable
-directement en SQL** — PostgREST ne sait pas trier sur une expression.
+**La probabilité chiffrée à la main est retirée de l'interface** (décision de
+Bora, 4 août au soir) : plus de champ %, plus de montants ni de valeur pondérée
+sur les cartes du pipeline et dans la liste. Les colonnes `probability` et
+`weighted_value` **restent en base, intouchées** (rien de destructif — le
+connecteur MCP les expose toujours). La « Valeur estimée » reste saisie et
+affichée sur la fiche uniquement.
 
-La valeur pondérée est l'indicateur de priorisation (4 000 € à 50 % passent
-après 3 000 € à 90 %) : affichée sur la fiche, en colonne « Pondérée » dans la
-liste (triable), sur chaque carte du pipeline et **en total par colonne**.
-Saisie par presets 10 / 25 / 50 / 75 / 90 % qui **remplissent** le champ — même
-principe que `DateField` — la saisie libre restant toujours possible.
+À la place : une **confiance à trois niveaux**, estimée par l'IA
+(`lib/crm/confidence.ts`, même contrat fournisseur que le reste) à partir des
+signaux réels — contenu des échanges (notes, emails envoyés, réponses reçues),
+étape du pipeline, silence, RDV posé, proposition. Stockée dans
+`confidence_level` (`chaud`/`tiede`/`froid`, `null` = « à évaluer ») avec sa
+**raison courte** (`confidence_reason` : « réponse positive reçue », « sans
+réponse depuis 12 jours »), affichée sur la carte du pipeline, dans la liste
+et en tête de fiche (`ConfidenceBadge`, `ConfidenceControl`).
 
-**Sans probabilité, pas de valeur pondérée** (« — ») : décision de Bora, le CRM
-n'invente pas un pressentiment qu'il n'a pas exprimé. Pas de défaut par étape.
+Les règles, calquées sur la règle des faits :
+
+- **Suggestion, pas vérité** : Bora corrige d'un clic (trois chips en tête de
+  fiche) — la correction **verrouille** (`confidence_locked`, même logique que
+  `status_locked`), l'IA ne réécrit plus rien ; « Rendre la main à
+  l'assistant » déverrouille et ré-estime.
+- **Recalcul sur ÉVÉNEMENT, jamais à l'affichage** : échange consigné
+  (`saveExchangeCore`, donc UI + MCP), changement d'étape (fiche, drag,
+  formulaire, suggestion acceptée, outil MCP `mettre_a_jour_statut`), email
+  envoyé, réponse traitée (Accepter du tri), relance créée. Bouton
+  « ✨ Réévaluer » sur la fiche pour forcer. À la **relève IMAP**, l'edge
+  function `crm-mail` ne fait que remettre la fiche « à évaluer » sur une
+  vraie réponse (sauf verrou) — le recalcul IA se fait côté app.
+- **Jamais un faux niveau** : IA indisponible → rien n'est écrit (le niveau
+  précédent reste) et rien ne se bloque ; pas assez d'éléments (aucun échange)
+  → `null`, badge « À évaluer ». Sans clé IA le recalcul est un no-op
+  immédiat.
+- Un **brouillon** ne déclenche ni ne pèse rien.
 
 ### Choix de modélisation assumé
 
@@ -274,8 +295,10 @@ du 4 août). De haut en bas :
    les deux cases de faits + étape + prochaine action datée, bouton ✨ qui
    propose), composeur email, planifier une relance, modifier la fiche.
 
-En colonne latérale : les chiffres de l'affaire (valeur, probabilité, valeur
-pondérée), les relances, et l'espace **Brouillons**. Toute l'interface est en
+En colonne latérale : les chiffres de l'affaire (valeur estimée seule — la
+probabilité n'est plus affichée), les relances, et l'espace **Brouillons**.
+En tête de fiche, sous le contact : la **confiance** (badge + raison +
+correction manuelle, voir la section Confiance IA). Toute l'interface est en
 **français**, vouvoiement.
 
 ### Les brouillons ne sont pas des échanges
@@ -303,11 +326,11 @@ Outil ouvert toute la journée : lisible d'un coup d'œil, sans saturation.
   (bandeaux, compteurs, cibles de drag) — jamais d'interpolation (règle JIT).
 - **La couleur ne porte jamais seule** : libellé + pictogramme (`STATUS_ICON`)
   l'accompagnent (daltonisme).
-- **Probabilité = jauge « chaleur »** (`ProbabilityGauge` dans `ui.tsx`,
-  `probabilityHeat` dans `constants.ts`) : bleu froid sous 40 %, ambre autour
-  de 50 %, orange dès 65 %, rouge dès 85 % — le pourcentage reste écrit à
-  côté. Affichée sur la fiche, la liste, les cartes du pipeline et en direct
-  dans `ValueFields`.
+- **Confiance = badge « chaleur »** (`ConfidenceBadge` dans `ui.tsx`,
+  `CONFIDENCE_*` dans `constants.ts`) : Chaud orange, Tiède ambre, Froid
+  bleu-ardoise, « À évaluer » neutre — toujours avec libellé + pictogramme
+  (♨ / ◐ / ❄ / …). Sur les cartes du pipeline, la liste et la tête de fiche,
+  avec la raison courte.
 - **Contraste hiérarchisé** : titres quasi blancs (`slate-50`), texte
   secondaire jamais plus délavé que `slate-400` (#94A3B8) quand il doit se
   lire. Le dégradé Celya reste réservé aux **actions principales** ; ce sont
@@ -531,14 +554,15 @@ configurer. Déploiement manuel possible avec `npx vercel --prod`.
 
 Migrations SQL : appliquées via le MCP Supabase, copies dans
 `supabase/migrations/` — dernières en date, `009_statut_faits.sql` (verrou,
-traçabilité, `is_exchange` / `is_draft`, trigger `bump_last_contact` qui ignore
-les brouillons, **et la ré-évaluation unique** des fiches mal classées) et
-`010_probabilite.sql` (probabilité + colonne générée). Toutes deux **additives**,
-donc applicables avant le déploiement du code sans rien casser en production.
+traçabilité, `is_exchange` / `is_draft`), `010_probabilite.sql` (probabilité +
+colonne générée, interface retirée depuis) et `011_confiance.sql` (les quatre
+colonnes de confiance). Toutes **additives**, donc applicables avant le
+déploiement du code sans rien casser en production — `011` a été appliquée
+ainsi le 4 août au soir.
 
-⚠️ **L'edge function `crm-mail` reste à redéployer** : son correctif du 4 août
-(respecter `status_locked` à l'arrivée d'une réponse) est dans le dépôt mais
-pas encore en ligne — voir Reste à faire.
+L'edge function `crm-mail` est en ligne en **v3** (4 août au soir) : correctif
+`status_locked` + remise « à évaluer » de la confiance sur vraie réponse —
+identique au dépôt.
 
 Edge functions : déployées via le MCP Supabase —
 `crm-admin` avec `verify_jwt: true`, `crm-mail` avec `verify_jwt: false`
@@ -642,16 +666,6 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
 
 ## Reste à faire
 
-00. **Redéployer l'edge function `crm-mail`** (30 secondes, MCP Supabase) : le
-    correctif du 4 août — une réponse reçue ne réécrit plus une étape
-    verrouillée — est dans le dépôt mais pas en ligne. Sans risque tant que la
-    boîte Zoho n'est pas activée, **mais à faire avant le point 1** : sinon la
-    première réponse reçue pourrait écraser une étape que Bora a fixée.
-    Fichier unique, tout en imports distants : `deploy_edge_function` avec
-    `supabase/functions/crm-mail/index.ts`, `verify_jwt: false` (impératif —
-    le cron pg_net n'a pas de JWT). La version en ligne (v2) est par ailleurs
-    identique au dépôt : rien d'autre à reporter.
-
 0. **Activer le connecteur MCP** (le code est en production) : poser la variable
    d'environnement Vercel **`SUPABASE_SERVICE_ROLE_KEY`** (Settings → Environment
    Variables — jamais `NEXT_PUBLIC_*`, jamais dans le dépôt) ; c'est la seule
@@ -688,7 +702,9 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
    = remettre `AGENT_PROVIDER=minimax`. Rappel : pas de résidence des données
    en Europe chez Anthropic à ce jour — OK pour des coordonnées publiques, à
    réexaminer avant d'analyser le contenu privé des réponses. La panne ne
-   bloque rien : le formulaire s'ouvre vide, saisie manuelle.
+   bloque rien : le formulaire s'ouvre vide, saisie manuelle. **La confiance
+   dépend du même fournisseur** : sans lui, les fiches restent « À évaluer »
+   (ou gardent leur dernier niveau) — rien ne casse, mais rien ne s'estime.
 4. **Renommer le projet Vercel** `celya-accounting-app` → `celya-crm`
    (vercel.com → Settings → General → Project Name), pour que l'URL corresponde
    au contenu. Attention : ce projet portait l'app comptable et le renommage

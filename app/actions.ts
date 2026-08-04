@@ -12,6 +12,13 @@ import {
   unlockStatusPatch,
   applyAutoStatus,
 } from "@/lib/crm/status";
+import {
+  evaluateConfidenceCore,
+  recalcConfidence,
+  manualConfidencePatch,
+  unlockConfidencePatch,
+  isConfidenceLevel,
+} from "@/lib/crm/confidence";
 import { createProspectCore } from "@/lib/crm/prospects";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
@@ -79,7 +86,6 @@ export async function createProspectAction(fd: FormData) {
       status: str(fd, "status"),
       source: str(fd, "source"),
       value_estimate: num(fd, "value_estimate"),
-      probability: num(fd, "probability"),
       owner_id: str(fd, "owner_id"),
       notes: str(fd, "notes"),
     }
@@ -104,8 +110,9 @@ export async function updateProspectAction(fd: FormData) {
 
   const status = normalizeStatus(str(fd, "status"));
   const assign = str(fd, "owner_id");
-  const probability = num(fd, "probability");
 
+  // La probabilité n'est plus saisie : la colonne reste en base, intouchée —
+  // c'est la confiance estimée par l'IA qui la remplace à l'écran.
   const patch: Record<string, unknown> = {
     company_name: str(fd, "company_name") ?? "Sans nom",
     contact_name: str(fd, "contact_name"),
@@ -116,10 +123,6 @@ export async function updateProspectAction(fd: FormData) {
     city: str(fd, "city"),
     source: str(fd, "source"),
     value_estimate: num(fd, "value_estimate"),
-    probability:
-      probability === null
-        ? null
-        : Math.min(100, Math.max(0, Math.round(probability))),
     owner_id: assign === "none" ? null : assign,
     notes: str(fd, "notes"),
     lost_reason: str(fd, "lost_reason"),
@@ -127,7 +130,9 @@ export async function updateProspectAction(fd: FormData) {
 
   // Changer l'étape depuis le formulaire est une décision humaine : elle
   // verrouille. La laisser telle quelle ne verrouille rien.
-  if (before && normalizeStatus(before.status as string) !== status) {
+  const statusChanged =
+    Boolean(before) && normalizeStatus(before!.status as string) !== status;
+  if (statusChanged) {
     Object.assign(patch, manualStatusPatch(status));
   } else {
     patch.status = status;
@@ -135,6 +140,9 @@ export async function updateProspectAction(fd: FormData) {
 
   const { error } = await supabase.from("prospects").update(patch).eq("id", id);
   if (error) throw new Error(error.message);
+
+  // Un changement d'étape est un événement : la confiance se recalcule.
+  if (statusChanged) await recalcConfidence(supabase, id);
 
   revalidateProspect(id);
 }
@@ -153,6 +161,7 @@ export async function setProspectStatusAction(fd: FormData) {
     .from("prospects")
     .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
+  await recalcConfidence(supabase, id);
 
   revalidateProspect(id);
 }
@@ -168,6 +177,7 @@ export async function unlockProspectStatusAction(fd: FormData) {
 
   await supabase.from("prospects").update(unlockStatusPatch()).eq("id", id);
   await applyAutoStatus(supabase, id);
+  await recalcConfidence(supabase, id);
 
   revalidateProspect(id);
 }
@@ -187,8 +197,76 @@ export async function acceptStatusSuggestionAction(fd: FormData) {
     .from("prospects")
     .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
+  await recalcConfidence(supabase, id);
 
   revalidateProspect(id);
+}
+
+// =====================================================================
+// Confiance (Chaud / Tiède / Froid) — suggestion IA, dernier mot humain.
+// =====================================================================
+
+/**
+ * Corriger le niveau à la main. Comme pour l'étape, la correction VERROUILLE :
+ * l'assistant ne réécrira plus la confiance par-dessus le choix de Bora.
+ */
+export async function setConfidenceAction(fd: FormData): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  const level = str(fd, "level");
+  if (!id || !isConfidenceLevel(level)) return {};
+
+  const { error } = await supabase
+    .from("prospects")
+    .update(manualConfidencePatch(level))
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateProspect(id);
+  return {};
+}
+
+/** Rendre la main à l'assistant : déverrouille et ré-estime tout de suite. */
+export async function unlockConfidenceAction(fd: FormData): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) return {};
+
+  const { error } = await supabase
+    .from("prospects")
+    .update(unlockConfidencePatch())
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  await recalcConfidence(supabase, id);
+  revalidateProspect(id);
+  return {};
+}
+
+/** Ré-estimation à la demande (bouton ✨ de la fiche). */
+export async function evaluateConfidenceAction(
+  fd: FormData
+): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) return {};
+
+  const result = await evaluateConfidenceCore(supabase, id);
+  revalidateProspect(id);
+
+  if (result.outcome === "indisponible") {
+    return {
+      error:
+        "Assistant indisponible — vérifiez la configuration du fournisseur IA.",
+    };
+  }
+  if (result.outcome === "a_evaluer") {
+    return {
+      error:
+        "Pas encore assez d'éléments pour estimer — consignez d'abord un échange.",
+    };
+  }
+  return {};
 }
 
 export async function deleteProspectAction(fd: FormData) {
@@ -323,6 +401,7 @@ export async function createTaskAction(fd: FormData) {
   // avancer vers « Rendez-vous ». applyAutoStatus respecte le verrou.
   if (prospectId) {
     await applyAutoStatus(supabase, prospectId);
+    await recalcConfidence(supabase, prospectId);
     revalidatePath(`/prospects/${prospectId}`);
   }
   revalidatePath("/dashboard");
@@ -530,6 +609,8 @@ export async function moveProspectAction(id: string, status: ProspectStatus) {
     .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  await recalcConfidence(supabase, id);
 
   revalidateProspect(id);
 }

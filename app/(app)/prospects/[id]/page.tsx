@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { Avatar, ProbabilityGauge } from "@/components/ui";
+import { Avatar } from "@/components/ui";
+import { ConfidenceControl } from "@/components/ConfidenceControl";
 import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
 import { StatusControl } from "@/components/StatusControl";
@@ -23,7 +24,6 @@ import {
   normalizeStatus,
   fmtDateTime,
   fmtMoney,
-  fmtProbability,
   relative,
 } from "@/lib/constants";
 import type { Activity, Prospect, Email, Profile } from "@/lib/types";
@@ -195,6 +195,16 @@ export default async function ProspectDetailPage({
               )}
               {prospect.city && <span>{prospect.city}</span>}
             </p>
+
+            {/* La confiance — le signal, sa raison, et la main de Bora. */}
+            <div className="mt-3">
+              <ConfidenceControl
+                prospectId={prospect.id}
+                level={prospect.confidence_level ?? null}
+                reason={prospect.confidence_reason ?? null}
+                locked={Boolean(prospect.confidence_locked)}
+              />
+            </div>
           </div>
 
           <div className="w-full max-w-md">
@@ -305,27 +315,8 @@ export default async function ProspectDetailPage({
               <p className="text-[11px] uppercase tracking-wider text-slate-400">
                 Valeur estimée
               </p>
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-slate-100">
+              <p className="mt-0.5 text-sm font-medium text-slate-100">
                 {fmtMoney(prospect.value_estimate, prospect.currency)}
-                {prospect.probability !== null && prospect.probability !== undefined ? (
-                  <ProbabilityGauge probability={prospect.probability} />
-                ) : (
-                  <span className="text-xs font-normal text-slate-500">
-                    × {fmtProbability(prospect.probability)}
-                  </span>
-                )}
-              </p>
-              <p className="mt-1 text-xs">
-                {prospect.weighted_value !== null &&
-                prospect.weighted_value !== undefined ? (
-                  <span className="font-medium text-celya-cyan">
-                    = {fmtMoney(prospect.weighted_value, prospect.currency)} pondérés
-                  </span>
-                ) : (
-                  <span className="text-slate-600">
-                    Pondérée : renseignez une probabilité
-                  </span>
-                )}
               </p>
             </div>
 

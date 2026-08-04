@@ -5,16 +5,16 @@ import {
   StatusChip,
   EmptyState,
   Avatar,
-  ProbabilityGauge,
+  ConfidenceBadge,
 } from "@/components/ui";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import {
   STATUS_ORDER,
   STATUS_LABEL,
   normalizeStatus,
-  fmtMoney,
   relative,
 } from "@/lib/constants";
+import type { ConfidenceLevel } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +37,7 @@ export default async function ProspectsPage({
   let query = supabase
     .from("prospects")
     .select(
-      "id, company_name, contact_name, email, phone, city, status, value_estimate, probability, weighted_value, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
+      "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
     );
 
   if (q) {
@@ -59,11 +59,6 @@ export default async function ProspectsPage({
   const sort = tri ?? "recent";
   if (sort === "relance") {
     query = query.order("next_action_at", { ascending: true, nullsFirst: false });
-  } else if (sort === "valeur") {
-    query = query.order("value_estimate", { ascending: false, nullsFirst: false });
-  } else if (sort === "ponderee") {
-    // Colonne générée en base : le tri se fait en SQL, pas après coup.
-    query = query.order("weighted_value", { ascending: false, nullsFirst: false });
   } else if (sort === "nom") {
     query = query.order("company_name", { ascending: true });
   } else {
@@ -79,9 +74,9 @@ export default async function ProspectsPage({
     phone: string | null;
     city: string | null;
     status: string;
-    value_estimate: number | null;
-    probability: number | null;
-    weighted_value: number | null;
+    confidence_level: ConfidenceLevel | null;
+    confidence_reason: string | null;
+    confidence_locked: boolean | null;
     next_action_at: string | null;
     last_contact_at: string | null;
     crm_users: { full_name: string | null } | null;
@@ -97,9 +92,9 @@ export default async function ProspectsPage({
     company_name: p.company_name,
     contact_name: p.contact_name,
     status: p.status,
-    value_estimate: p.value_estimate,
-    probability: p.probability,
-    weighted_value: p.weighted_value,
+    confidence_level: p.confidence_level,
+    confidence_reason: p.confidence_reason,
+    confidence_locked: Boolean(p.confidence_locked),
     next_action_at: p.next_action_at,
   }));
 
@@ -191,8 +186,6 @@ export default async function ProspectsPage({
               <select id="tri" name="tri" defaultValue={sort} className="input">
                 <option value="recent">Activité récente</option>
                 <option value="relance">Prochaine action</option>
-                <option value="ponderee">Valeur pondérée</option>
-                <option value="valeur">Valeur estimée</option>
                 <option value="nom">Nom</option>
               </select>
             </div>
@@ -228,9 +221,8 @@ export default async function ProspectsPage({
               <tr>
                 <th className="th">Prospect</th>
                 <th className="th">Étape</th>
-                <th className="th">Valeur</th>
-                <th className="th" title="Valeur estimée × probabilité de conclure">
-                  Pondérée
+                <th className="th" title="Confiance estimée par l'assistant, corrigeable sur la fiche">
+                  Confiance
                 </th>
                 <th className="th">Prochaine action</th>
                 <th className="th">Dernier contact</th>
@@ -260,21 +252,11 @@ export default async function ProspectsPage({
                       <StatusChip status={p.status} />
                     </td>
                     <td className="td whitespace-nowrap">
-                      {fmtMoney(p.value_estimate)}
-                      {p.probability !== null && (
-                        <span className="ml-2">
-                          <ProbabilityGauge probability={p.probability} size="sm" />
-                        </span>
-                      )}
-                    </td>
-                    <td className="td whitespace-nowrap">
-                      {p.weighted_value !== null ? (
-                        <span className="font-medium text-celya-cyan">
-                          {fmtMoney(p.weighted_value)}
-                        </span>
-                      ) : (
-                        <span className="text-slate-600">—</span>
-                      )}
+                      <ConfidenceBadge
+                        level={p.confidence_level}
+                        reason={p.confidence_reason}
+                        locked={Boolean(p.confidence_locked)}
+                      />
                     </td>
                     <td className={`td whitespace-nowrap ${overdue ? "text-rose-400" : ""}`}>
                       {p.next_action_at ? relative(p.next_action_at) : "—"}

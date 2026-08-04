@@ -542,7 +542,7 @@ async function handleRealReply(
 ) {
   const { data: prospect } = await admin
     .from("prospects")
-    .select("id, status, last_contact_at")
+    .select("id, status, last_contact_at, status_locked")
     .eq("id", prospectId)
     .maybeSingle();
   if (!prospect) return;
@@ -554,7 +554,15 @@ async function handleRealReply(
   ) {
     patch.last_contact_at = receivedAt;
   }
-  if (prospect.status === "a_appeler") patch.status = "contacte";
+  // Une réponse reçue est un fait fort — mais si Bora a fixé l'étape à la
+  // main, son choix prime : on ne la réécrit jamais par-dessus (la fiche
+  // affichera une suggestion). Même règle que lib/crm/status.ts, appliquée
+  // ici parce que l'edge function (Deno) ne partage pas le code Next.
+  if (prospect.status === "a_appeler" && !prospect.status_locked) {
+    patch.status = "contacte";
+    patch.status_auto_reason = "une réponse est arrivée par email";
+    patch.status_auto_at = new Date().toISOString();
+  }
   if (Object.keys(patch).length > 0) {
     await admin.from("prospects").update(patch).eq("id", prospect.id);
   }

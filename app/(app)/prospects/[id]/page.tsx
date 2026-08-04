@@ -2,22 +2,21 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { StatusChip, Avatar } from "@/components/ui";
+import { Avatar } from "@/components/ui";
 import { ProspectForm } from "@/components/ProspectForm";
 import { QuickNote } from "@/components/QuickNote";
+import { StatusControl } from "@/components/StatusControl";
 import { EmailComposer } from "@/components/EmailComposer";
 import { DateField } from "@/components/DateField";
 import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
 import {
   updateProspectAction,
-  setProspectStatusAction,
   deleteProspectAction,
   createTaskAction,
 } from "@/app/actions";
+import { readProspectFacts, evaluateStatus } from "@/lib/crm/status";
 import {
   ACTIVITY_LABEL,
-  STATUS_ORDER,
-  STATUS_LABEL,
   normalizeStatus,
   fmtDateTime,
   fmtMoney,
@@ -72,6 +71,14 @@ export default async function ProspectDetailPage({
   if (!prospect) notFound();
 
   const status = normalizeStatus(prospect.status);
+
+  // L'étape confrontée aux faits. Sur une fiche verrouillée, le verdict ne
+  // sert qu'à proposer — jamais à écrire (voir lib/crm/status.ts).
+  const facts = await readProspectFacts(supabase, id);
+  const verdict = evaluateStatus(status, Boolean(prospect.status_locked), facts);
+  const suggestion = verdict.suggest
+    ? { status: verdict.derived, reason: verdict.reason }
+    : null;
 
   const members = (membersRes.data ?? []) as Pick<
     Profile,
@@ -136,23 +143,14 @@ export default async function ProspectDetailPage({
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <StatusChip status={status} />
-            <form action={setProspectStatusAction} className="flex items-center gap-2">
-              <input type="hidden" name="id" value={prospect.id} />
-              <select
-                name="status"
-                defaultValue={status}
-                className="input py-2 text-xs"
-              >
-                {STATUS_ORDER.map((s) => (
-                  <option key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </option>
-                ))}
-              </select>
-              <button className="btn-ghost px-3 py-2 text-xs">Changer</button>
-            </form>
+          <div className="w-full max-w-md">
+            <StatusControl
+              prospectId={prospect.id}
+              status={status}
+              locked={Boolean(prospect.status_locked)}
+              autoReason={prospect.status_auto_reason}
+              suggestion={suggestion}
+            />
           </div>
         </div>
 
@@ -209,14 +207,12 @@ export default async function ProspectDetailPage({
             <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               Noter un échange
             </h2>
-            {/* key : remonte le composant quand l'étape change, pour que son
-                état local reparte de l'étape à jour (sinon un ancien état
-                pourrait rétrograder la fiche au prochain enregistrement). */}
+            {/* Le sélecteur d'étape part désormais sur « ne pas changer » :
+                aucun état local ne peut plus rétrograder la fiche. */}
             <QuickNote
-              key={`${prospect.id}-${status}`}
               prospectId={prospect.id}
               companyName={prospect.company_name}
-              currentStatus={prospect.status}
+              contactName={prospect.contact_name}
             />
           </section>
 

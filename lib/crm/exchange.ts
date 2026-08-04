@@ -9,6 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dateInputToISO } from "@/lib/time";
 import { STATUS_ORDER } from "@/lib/constants";
+import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
 export type SaveExchangeInput = {
@@ -18,10 +19,26 @@ export type SaveExchangeInput = {
   note?: string | null;
   resume?: string | null;
   contactName?: string | null;
+  /**
+   * Étape imposée par un humain. La renseigner VERROUILLE la fiche :
+   * l'auto-classification ne la réécrira plus (elle pourra seulement
+   * suggérer). Laisser vide pour que l'étape suive les faits.
+   */
   statut?: ProspectStatus | null;
   motif?: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles). null : pas de relance. */
   dateLocale?: string | null;
+  /**
+   * Cette note atteste-t-elle d'un échange réel avec le prospect ?
+   * Défaut true (la saisie humaine passe par « Noter un échange ») ; le
+   * connecteur MCP doit le déclarer explicitement. Sans attestation, une
+   * note de repérage ne fait pas passer la fiche en « Contacté ».
+   */
+  isExchange?: boolean;
+  /** Brouillon : versé hors chronologie, ne compte pour aucun fait. */
+  isDraft?: boolean;
+  /** Signal explicite : une proposition / un devis vient d'être envoyé. */
+  proposalSent?: boolean;
 };
 
 export type SaveExchangeResult = {
@@ -35,6 +52,9 @@ export type SaveExchangeResult = {
   /** ISO UTC de la relance posée / re-datée, ou null. */
   scheduledAt?: string | null;
   taskTitle?: string | null;
+  /** Étape avancée automatiquement par les faits, et son motif. */
+  autoStatus?: ProspectStatus | null;
+  autoReason?: string | null;
 };
 
 export async function saveExchangeCore(
@@ -60,20 +80,33 @@ export async function saveExchangeCore(
   const dueAt = dateInputToISO(input.dateLocale ?? null);
   if (input.dateLocale && !dueAt) return { error: "Date invalide." };
 
+  const isDraft = input.isDraft === true;
+  // Un brouillon n'est ni un échange, ni un fait : il ne déclenche aucune
+  // relance et ne fait avancer aucune étape.
+  const isExchange = isDraft ? false : input.isExchange !== false;
+
   if (!note && !resume && !statusChanged && !dueAt && !input.contactName?.trim()) {
     return { error: "Rien à enregistrer." };
   }
+  if (isDraft && !note && !resume) {
+    return { error: "Un brouillon a besoin d'un texte." };
+  }
 
   // 1. Fiche : étape, contact, raison de perte.
+  //    Une étape explicite est une décision humaine → elle VERROUILLE la fiche.
   const patch: Record<string, unknown> = {};
   if (statusChanged) {
-    patch.status = newStatus;
+    Object.assign(patch, manualStatusPatch(newStatus!));
     if (newStatus === "perdu") {
       patch.lost_reason = input.motif?.trim() || "Sans précision";
     }
   }
   if (input.contactName?.trim()) {
     patch.contact_name = input.contactName.trim().slice(0, 120);
+  }
+  // Le signal explicite d'une proposition — jamais deviné dans le texte.
+  if (input.proposalSent && !isDraft) {
+    patch.proposal_sent_at = new Date().toISOString();
   }
   if (Object.keys(patch).length > 0) {
     const { error } = await supabase
@@ -92,6 +125,8 @@ export async function saveExchangeCore(
       subject: resume,
       body: note,
       occurred_at: new Date().toISOString(),
+      is_draft: isDraft,
+      is_exchange: isExchange,
     });
   }
 
@@ -114,7 +149,7 @@ export async function saveExchangeCore(
         .update({ status: "annule" })
         .in("id", allOpen.map((t) => t.id));
     }
-  } else if (dueAt) {
+  } else if (dueAt && !isDraft) {
     // « RDV avec … » uniquement quand l'échange enregistré EST un rendez-vous
     // (le titre commande la protection côté email : une tâche « RDV » n'est
     // jamais annulée ni re-datée par une réponse). Une simple relance ne
@@ -152,6 +187,13 @@ export async function saveExchangeCore(
     scheduledTitle = title;
   }
 
+  // 4. L'étape suit les faits — sauf si Bora vient de la fixer lui-même
+  //    (elle est alors verrouillée, et applyAutoStatus n'y touchera pas).
+  //    N'avance que vers l'avant, et affiche toujours son motif.
+  const auto = statusChanged
+    ? { changed: false as const }
+    : await applyAutoStatus(supabase, prospect.id);
+
   return {
     ok: true,
     prospectId: prospect.id,
@@ -160,5 +202,7 @@ export async function saveExchangeCore(
     newStatus: statusChanged ? newStatus : null,
     scheduledAt: newStatus === "perdu" ? null : (dueAt ?? null),
     taskTitle: scheduledTitle,
+    autoStatus: auto.changed ? (auto.status ?? null) : null,
+    autoReason: auto.changed ? (auto.reason ?? null) : null,
   };
 }

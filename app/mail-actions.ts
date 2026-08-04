@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { classifyReply } from "@/lib/ai/triage";
 import { isoToLocalInput, localInputToISO, inDaysAt9 } from "@/lib/time";
+import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import type { ActionState } from "@/app/actions";
 import type { Email, EmailIntent } from "@/lib/types";
 
@@ -121,6 +122,9 @@ export async function sendProspectEmailAction(
   const to = String(fd.get("to") ?? "").trim();
   const subject = String(fd.get("subject") ?? "").trim();
   const body = String(fd.get("body") ?? "").trim();
+  // Signal explicite : ce message EST la proposition. Jamais deviné dans
+  // le texte — c'est la case cochée qui fait foi.
+  const isProposal = fd.get("is_proposal") === "1";
 
   if (!prospectId || !to || !subject || !body) {
     return { error: "Destinataire, sujet et message requis." };
@@ -134,6 +138,13 @@ export async function sendProspectEmailAction(
     body,
   });
   if (res.error) return { error: res.error };
+
+  if (isProposal) {
+    await supabase
+      .from("prospects")
+      .update({ proposal_sent_at: new Date().toISOString() })
+      .eq("id", prospectId);
+  }
 
   // Cadence : l'envoi déclenche la relance — une tâche à J+3 si aucune
   // relance ouverte n'existe déjà (on n'écrase jamais un rappel planifié).
@@ -160,9 +171,18 @@ export async function sendProspectEmailAction(
     });
   }
 
+  // Un email réellement envoyé est un fait fort : l'étape peut avancer
+  // (« À appeler » → « Contacté », ou « Proposition » si la case est cochée).
+  // applyAutoStatus n'avance jamais à rebours et respecte le verrou.
+  const auto = await applyAutoStatus(supabase, prospectId);
+
   revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
-  return { success: "Email envoyé. Relance planifiée à 3 jours si aucune n'existait." };
+  return {
+    success: auto.changed
+      ? `Email envoyé. Relance planifiée à 3 jours si aucune n'existait. Étape avancée automatiquement — ${auto.reason}.`
+      : "Email envoyé. Relance planifiée à 3 jours si aucune n'existait.",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -265,19 +285,26 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
     }
   };
 
+  // L'étape n'est plus forcée ici : la réponse reçue est déjà un fait, et
+  // c'est applyAutoStatus (appelé plus bas) qui en tire « Contacté » — sans
+  // jamais reculer une fiche déjà plus avancée, ni écraser un choix humain.
+  // Seul « Perdu » est écrit directement : c'est une décision humaine
+  // irréversible, jamais automatique — le clic « Accepter » la vaut, et
+  // elle verrouille la fiche.
   switch (intent) {
     case "interesse":
-      await supabase.from("prospects").update({ status: "contacte" }).eq("id", prospectId);
       await upsertTask(`Relancer ${company} — intéressé (réponse email)`, proposedDue ?? inDaysAt9(1));
       break;
     case "demande_info":
-      await supabase.from("prospects").update({ status: "contacte" }).eq("id", prospectId);
       await upsertTask(`Envoyer les informations à ${company}`, proposedDue ?? inDaysAt9(1));
       break;
     case "pas_interesse":
       await supabase
         .from("prospects")
-        .update({ status: "perdu", lost_reason: "Pas intéressé (réponse email)" })
+        .update({
+          ...manualStatusPatch("perdu"),
+          lost_reason: "Pas intéressé (réponse email)",
+        })
         .eq("id", prospectId);
       if (openTasks.length > 0) {
         await supabase
@@ -289,7 +316,6 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
     case "rappel_plus_tard":
       // La mise en sommeil ne passe plus par un statut : c'est la date de la
       // relance qui sort la fiche de « À faire » jusqu'à l'échéance.
-      await supabase.from("prospects").update({ status: "contacte" }).eq("id", prospectId);
       await upsertTask(`Recontacter ${company} (à sa demande)`, proposedDue ?? inDaysAt9(30));
       break;
     case "absence": {
@@ -314,6 +340,10 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
     .from("emails")
     .update({ triage: "accepte", is_read: true })
     .eq("id", emailId);
+
+  if (intent !== "pas_interesse") {
+    await applyAutoStatus(supabase, prospectId);
+  }
 
   revalidatePath("/dashboard");
   revalidatePath(`/prospects/${prospectId}`);

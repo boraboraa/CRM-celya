@@ -24,6 +24,7 @@ import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { saveExchangeCore } from "@/lib/crm/exchange";
+import { manualStatusPatch } from "@/lib/crm/status";
 import { STATUS_LABEL, ACTIVITY_LABEL, STATUS_ORDER, fmtDateTime } from "@/lib/constants";
 import { todayBounds } from "@/lib/time";
 import type { ProspectStatus } from "@/lib/types";
@@ -317,7 +318,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ».",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -331,12 +332,12 @@ function register(server: McpServer) {
 
       const { error } = await admin
         .from("prospects")
-        .update({ status: args.statut })
+        .update(manualStatusPatch(args.statut as ProspectStatus))
         .eq("id", resolved.id);
       if (error) return fail(`Erreur : ${error.message}`);
 
       return text(
-        `✅ ${resolved.company_name} : étape passée à « ${STATUS_LABEL[args.statut as keyof typeof STATUS_LABEL]} ».`
+        `✅ ${resolved.company_name} : étape passée à « ${STATUS_LABEL[args.statut as keyof typeof STATUS_LABEL]} » et verrouillée (plus de déduction automatique — déverrouillable depuis la fiche).`
       );
     }
   );
@@ -344,7 +345,7 @@ function register(server: McpServer) {
   // --- ajouter_note ---------------------------------------------------------
   server.tool(
     "ajouter_note",
-    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). Peut aussi changer l'étape. N'impose pas de date de relance — pour poser une relance, utilisez « planifier_relance ».",
+    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. N'impose pas de date de relance — pour poser une relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -352,7 +353,26 @@ function register(server: McpServer) {
       note: z.string().describe("Texte de l'échange."),
       resume: z.string().optional().describe("Résumé court (versé en sujet)."),
       contact: z.string().optional().describe("Nom du contact à mettre à jour sur la fiche."),
-      statut: z.enum(STATUS_ENUM).optional().describe("Nouvelle étape, si l'échange l'implique."),
+      echange: z
+        .boolean()
+        .optional()
+        .describe(
+          "true UNIQUEMENT si un échange a réellement eu lieu avec le prospect (appel passé, visite). Défaut false : une note de repérage ou de préparation ne fait pas passer la fiche en « Contacté »."
+        ),
+      brouillon: z
+        .boolean()
+        .optional()
+        .describe(
+          "true pour un texte non envoyé (brouillon d'email) : rangé dans « Brouillons », hors chronologie, et ne compte pour aucun fait."
+        ),
+      proposition_envoyee: z
+        .boolean()
+        .optional()
+        .describe("true si une proposition / un devis vient d'être ENVOYÉ (fait passer en « Proposition »)."),
+      statut: z
+        .enum(STATUS_ENUM)
+        .optional()
+        .describe("Étape imposée. VERROUILLE la fiche — à n'utiliser que sur demande explicite."),
       motif: z.string().optional().describe("Raison de la perte (si statut = perdu)."),
     },
     async (args, extra) => {
@@ -371,11 +391,29 @@ function register(server: McpServer) {
         statut: args.statut as ProspectStatus | undefined,
         motif: args.motif,
         dateLocale: null,
+        // Défaut prudent côté connecteur : sans déclaration explicite, une
+        // note écrite par Claude n'atteste pas d'un échange (l'interface, elle,
+        // coche la case par défaut — la saisie y est humaine).
+        isExchange: args.echange === true,
+        isDraft: args.brouillon === true,
+        proposalSent: args.proposition_envoyee === true,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
-      const bits = [`✅ Note ajoutée sur ${resolved.company_name}.`];
-      if (r.statusChanged) bits.push(`Étape → « ${STATUS_LABEL[r.newStatus as keyof typeof STATUS_LABEL]} ».`);
+      const bits = [
+        args.brouillon
+          ? `✅ Brouillon rangé sur ${resolved.company_name} (hors chronologie).`
+          : `✅ Note ajoutée sur ${resolved.company_name}.`,
+      ];
+      if (r.statusChanged) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.newStatus as keyof typeof STATUS_LABEL]} » (fixée à la main, donc verrouillée).`
+        );
+      } else if (r.autoStatus) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
+        );
+      }
       return text(bits.join(" "));
     }
   );
@@ -406,12 +444,22 @@ function register(server: McpServer) {
         type: args.type ?? "note",
         note: args.note ?? null,
         dateLocale: args.date,
+        // Planifier n'est pas échanger : poser une relance ne fait pas passer
+        // la fiche en « Contacté ». Un rendez-vous daté, lui, est un fait —
+        // il passe par la tâche « RDV avec … » que crée le cœur partagé.
+        isExchange: false,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
-      return text(
-        `✅ Relance posée sur ${resolved.company_name} : « ${r.taskTitle} » pour le ${fmtDateTime(r.scheduledAt)}.`
-      );
+      const bits = [
+        `✅ Relance posée sur ${resolved.company_name} : « ${r.taskTitle} » pour le ${fmtDateTime(r.scheduledAt)}.`,
+      ];
+      if (r.autoStatus) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
+        );
+      }
+      return text(bits.join(" "));
     }
   );
 

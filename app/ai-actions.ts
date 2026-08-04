@@ -271,6 +271,12 @@ export async function extractProspectAction(input: {
 export type NoteProposal = {
   /** Étape proposée — null si la note ne l'implique pas clairement. */
   statut: ProspectStatus | null;
+  /**
+   * Pourquoi l'étape proposée reste une simple suggestion, à confirmer d'un
+   * clic — le fait correspondant manque, ou l'étape est réservée à l'humain.
+   * null quand rien n'est proposé.
+   */
+  statutReserve: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm », heure de Bruxelles. */
   dateLocale: string | null;
   contact_name: string | null;
@@ -302,7 +308,18 @@ ${etapes}
 
 Règles absolues :
 1. N'invente JAMAIS : si la note ne dit rien, mets null.
-2. "etape" uniquement si la note l'implique clairement (rendez-vous fixé → "rendez_vous", refus net → "perdu", devis/offre à envoyer → "proposition", accord conclu → "gagne", échange qui a eu lieu → "contacte"), sinon null — l'étape actuelle reste inchangée.
+2. "etape" ne se déduit JAMAIS des mots employés, mais du fait correspondant :
+   - "rendez_vous" UNIQUEMENT si la note donne une date de rendez-vous réelle
+     (jour, et heure si elle est dite). Un « RDV à planifier », « il faudrait
+     se voir », « je le rappelle pour caler un RDV » n'est PAS un rendez-vous :
+     mets null.
+   - "proposition" UNIQUEMENT si la note dit qu'un devis / une offre a été
+     ENVOYÉ. « Je dois lui envoyer un devis » n'est pas une proposition envoyée.
+   - "contacte" si un échange a réellement eu lieu (on s'est parlé, il a
+     répondu).
+   - "gagne" et "perdu" : tu peux les proposer, mais ce sont des décisions
+     humaines — elles ne seront jamais appliquées sans un clic.
+   Dans le doute, mets null : l'étape actuelle reste inchangée.
 3. "date_relance" : la date de relance ou de rendez-vous déduite de la note, convertie en date réelle "YYYY-MM-DD" (ou "YYYY-MM-DDTHH:mm" si l'heure est précisée) — « après les fêtes » = début janvier, « dans 3 mois » = +3 mois. null si la note ne mentionne aucune échéance.
 4. Ce sont des propositions : un humain valide avant tout enregistrement.
 
@@ -318,13 +335,16 @@ Note : « pas intéressé, bosse déjà avec un concurrent »
 {"etape":"perdu","date_relance":null,"contact_name":null,"resume":"Pas intéressé : travaille déjà avec un concurrent."}
 
 Note : « la secrétaire dit de revoir ça après les fêtes »
-{"etape":null,"date_relance":"2027-01-04","contact_name":null,"resume":"À relancer début janvier, à la demande de la secrétaire."}`;
+{"etape":null,"date_relance":"2027-01-04","contact_name":null,"resume":"À relancer début janvier, à la demande de la secrétaire."}
+
+Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la semaine prochaine »
+{"etape":"contacte","date_relance":"2026-08-10","contact_name":null,"resume":"Échange positif par téléphone, rendez-vous à planifier au prochain appel."}`;
 
   const raw = await chatJSON({ system, user: note, maxTokens: 400 });
   if (!raw) return { unavailable: true };
 
   const etapeRaw = cleanStr(raw.etape, 40);
-  const statut =
+  let statut =
     etapeRaw && (STATUS_ORDER as string[]).includes(etapeRaw)
       ? (etapeRaw as ProspectStatus)
       : null;
@@ -333,9 +353,33 @@ Note : « la secrétaire dit de revoir ça après les fêtes »
   const dateLocale =
     dateRaw && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(dateRaw) ? dateRaw : null;
 
+  // ------------------------------------------------------------------
+  // Le garde-fou côté code : le modèle propose, les faits arbitrent.
+  // C'est ici qu'on empêche la régression du 4 août — une note qui parle
+  // d'un « RDV » sans date ne fait plus passer la fiche en « Rendez-vous ».
+  // ------------------------------------------------------------------
+  let statutReserve: string | null = null;
+
+  if (statut === "rendez_vous" && !dateLocale) {
+    // « Rendez-vous » exige une date réelle. Sans elle, le fait n'existe pas.
+    statut = "contacte";
+    statutReserve =
+      "Aucune date de rendez-vous dans la note : l'étape « Rendez-vous » demande une date réelle.";
+  } else if (statut === "rendez_vous") {
+    statutReserve =
+      "Vérifiez la date : l'étape passera en « Rendez-vous » une fois l'échange enregistré.";
+  } else if (statut === "gagne" || statut === "perdu") {
+    statutReserve =
+      "« Gagné » et « Perdu » ne s'obtiennent jamais automatiquement — à vous de confirmer.";
+  } else if (statut === "proposition") {
+    statutReserve =
+      "Cochez « j'ai envoyé une proposition » si le devis est bien parti : c'est ce geste qui fait foi.";
+  }
+
   return {
     proposal: {
       statut,
+      statutReserve,
       dateLocale,
       contact_name: cleanStr(raw.contact_name, 120),
       resume: cleanStr(raw.resume, 300),

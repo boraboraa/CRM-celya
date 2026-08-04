@@ -53,7 +53,8 @@ par l'edge function, où Supabase l'injecte automatiquement.
 
 Next.js 15 (App Router) · React 19 · TypeScript strict · Tailwind 3.4 ·
 Supabase (Postgres + Auth + RLS) · `@anthropic-ai/sdk` (fournisseur IA
-optionnel) · déployé sur Vercel.
+optionnel) · `mcp-handler` + `@modelcontextprotocol/sdk` + `zod` (connecteur MCP,
+voir plus bas) · déployé sur Vercel.
 
 Pas de librairie de composants : les styles vivent dans `app/globals.css`
 (`.card`, `.btn-primary`, `.input`, `.chip`…). Thème sombre Celya —
@@ -66,6 +67,13 @@ fond `#0A0E1A`, dégradé `#22D3EE → #4F7BFF → #A855F7`.
 Tout repose sur la **RLS Postgres**, pas sur le code applicatif. Même si une
 page oublie un filtre, la base refuse. C'est le choix structurant du projet ;
 ne le contourne jamais en passant par le service_role côté serveur Next.
+
+**Unique exception sanctionnée : le connecteur MCP** (voir « Connecteur MCP »
+plus bas). Il agit en `service_role` — c'est structurellement nécessaire — mais
+l'exception est encapsulée : le jeton OAuth n'est délivré qu'au compte **admin**
+(un commercial verrait sinon tous les prospects, RLS contournée), et le serveur
+MCP n'ouvre que les tables CRM. Aucune autre partie du code Next ne doit toucher
+au `service_role`.
 
 Trois fonctions `security definer` portent la logique :
 
@@ -103,6 +111,7 @@ d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
+| `mcp_oauth_clients` / `mcp_oauth_codes` / `mcp_oauth_tokens` | état du serveur OAuth du connecteur MCP (migration `008`) — **RLS fermée sans policy** comme `email_accounts`, seul le `service_role` y accède. Ne pas « corriger » l'absence de policy. |
 
 Triggers utiles : une activité met à jour `prospects.last_contact_at` ; une
 tâche recalcule `prospects.next_action_at` (la plus proche échéance ouverte).
@@ -282,6 +291,76 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
 
 ---
 
+## Connecteur MCP « Celya CRM »
+
+Le CRM s'expose à Claude comme **connecteur personnalisé** (« Custom connector »)
+sous le nom **Celya CRM**, description « Prospection Celya — prospects, statuts,
+relances ». C'est le socle du « système d'action » de Bora : Claude peut ajouter
+un prospect, changer un statut, poser une relance, lister ce qu'il y a à faire —
+**et rien d'autre**. Pas de SQL brut, pas d'accès à la comptabilité, pas au reste
+du projet Supabase.
+
+**Hébergé dans l'app Next.js**, pas de service séparé. Route MCP servie par
+`mcp-handler` (v1) à **`/[transport]/route.ts`** → endpoint **`/mcp`** (SSE
+désactivé, streamable HTTP sans état, sans Redis). L'URL du connecteur à coller
+dans Claude est donc `https://<domaine-de-prod>/mcp`.
+
+**Les huit outils** (noms français, descriptions lues par Claude pour décider) :
+`lister_prospects`, `obtenir_prospect`, `a_faire`, `creer_prospect`,
+`mettre_a_jour_statut`, `ajouter_note`, `planifier_relance`, `importer_prospects`.
+Toute opération en lot (`importer_prospects`) est d'abord une **simulation** ;
+l'écriture réelle exige `confirmer: true`. `creer_prospect` **avertit** en cas de
+doublon au lieu de créer (forçable par `forcer: true`).
+
+**Réutilise la logique existante, ne la duplique pas.** Chaque outil est une
+enveloppe fine au-dessus du **cœur partagé `lib/crm/`** (extrait le 4 août sans
+changement de comportement) : `dedup.ts` (normalisation `+32`, clés de dédup,
+`findDuplicates`), `prospects.ts` (`createProspectCore`, `importProspectsCore`),
+`exchange.ts` (`saveExchangeCore`). Les server actions (`app/actions.ts`,
+`app/ai-actions.ts`) et le connecteur appellent **le même code** : un prospect
+créé par Claude est indiscernable d'un prospect créé à la main (même dédup, même
+`+32`, même cadence de relance).
+
+**Périmètre strictement CRM.** Le serveur MCP ne touche QUE `prospects`,
+`activities`, `tasks` (et `emails` en lecture le jour où un outil l'expose) —
+jamais les tables comptables du même projet, jamais d'exécution SQL libre. C'est
+sa raison d'être face au connecteur Supabase brut. (Vérifié : les seuls
+`.from(...)` du serveur MCP sont ces tables ; aucun `rpc`/`execute_sql`.)
+
+**Authentification OAuth 2.1** (l'UI des connecteurs Claude l'exige ; un simple
+Bearer n'y est pas configurable proprement). Serveur d'autorisation minimal mais
+conforme, dans l'app :
+- Découverte : `/.well-known/oauth-protected-resource` (RFC 9728) →
+  `/.well-known/oauth-authorization-server` (RFC 8414).
+- Enregistrement dynamique de client (DCR, RFC 7591) : `POST /api/oauth/register`.
+- Autorisation avec **PKCE S256** : `/api/oauth/authorize` — page de connexion
+  aux couleurs Celya, identité vérifiée par **Supabase Auth** (email + mot de
+  passe habituels de Bora).
+- Jeton : `/api/oauth/token` (code + PKCE, `refresh_token`). Jetons d'accès =
+  **JWT HS256 sans état** (`lib/mcp/jwt.ts`), signés avec une clé dérivée de
+  `MCP_OAUTH_SECRET` ou, à défaut, de `SUPABASE_SERVICE_ROLE_KEY`. Vérification
+  via `withMcpAuth`.
+- **Garde-fou capital** : le jeton n'est délivré qu'à un compte **actif ET
+  admin**. Le connecteur agissant en `service_role` (RLS contournée), l'ouvrir à
+  un commercial lui donnerait tous les prospects. Mono-utilisateur (Bora) par
+  conception.
+
+**`service_role` côté serveur uniquement.** Le serveur MCP l'utilise pour agir
+(via `lib/supabase/admin.ts`, qui jette si la clé manque) et **impose** que tout
+est rattaché à Bora : `created_by` / `author_id` = sujet du jeton. La clé n'est
+JAMAIS dans le dépôt ni en `NEXT_PUBLIC_*` — variable d'environnement Vercel
+`SUPABASE_SERVICE_ROLE_KEY` (**à poser, voir Reste à faire** : sans elle, les
+outils répondent proprement « service_role manquante » et n'écrivent rien).
+
+Le middleware exempte `/mcp`, `/sse`, `/message`, `/api/oauth`, `/.well-known`
+de la redirection cookie (ces routes s'authentifient par jeton, pas par cookie).
+
+**Ajouter le connecteur dans Claude** : Personnaliser → Connecteurs → « + » →
+Ajouter un connecteur personnalisé → coller `https://<domaine-de-prod>/mcp` →
+suivre l'OAuth (se connecter avec le compte admin).
+
+---
+
 ## Conventions
 
 - Mutations = **server actions** dans `app/actions.ts`, jamais d'appel Supabase
@@ -385,6 +464,16 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
 ---
 
 ## Reste à faire
+
+0. **Activer le connecteur MCP** (le code est en production) : poser la variable
+   d'environnement Vercel **`SUPABASE_SERVICE_ROLE_KEY`** (Settings → Environment
+   Variables — jamais `NEXT_PUBLIC_*`, jamais dans le dépôt) ; c'est la seule
+   config requise. Puis, dans Claude : Personnaliser → Connecteurs → « + » →
+   coller `https://<domaine-de-prod>/mcp` → OAuth avec le compte admin.
+   Vérification : demander à Claude de créer un prospect de test, contrôler dans
+   le CRM le `+32` normalisé et le statut « À appeler », puis le supprimer.
+   (Optionnel : `MCP_OAUTH_SECRET` pour découpler la signature des jetons de la
+   clé service_role — sinon elle en est dérivée, ce qui suffit.)
 
 1. **Activer la boîte Zoho** (le code est en production) :
    dans Zoho Mail, créer un mot de passe d'application (Sécurité → Mots de

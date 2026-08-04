@@ -5,10 +5,21 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
-import { normalizeStatus, STATUS_ORDER } from "@/lib/constants";
-import type { ActivityType, ProspectStatus } from "@/lib/types";
+import { normalizeStatus } from "@/lib/constants";
+import type { ProspectStatus } from "@/lib/types";
+import { createProspectCore } from "@/lib/crm/prospects";
+import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
+import {
+  importProspectsCore,
+  type ImportRow,
+  type ImportResult,
+} from "@/lib/crm/prospects";
 
 export type ActionState = { error?: string; success?: string };
+
+// Types réexportés depuis le cœur partagé (lib/crm) pour ne pas rompre les
+// imports existants des composants.
+export type { SaveExchangeInput, ImportRow, ImportResult };
 
 const str = (fd: FormData, k: string): string | null => {
   const v = fd.get(k);
@@ -46,31 +57,32 @@ function revalidateProspect(id?: string | null) {
 export async function createProspectAction(fd: FormData) {
   const { supabase, userId } = await currentUserId();
 
-  const assign = str(fd, "owner_id");
-  const { data, error } = await supabase
-    .from("prospects")
-    .insert({
-      company_name: str(fd, "company_name") ?? "Sans nom",
+  // Passe par le cœur partagé (même insertion que le connecteur MCP). Le
+  // formulaire ne force ni dédup ni normalisation « +32 » : la saisie manuelle
+  // est conservée telle quelle (la dédup a déjà été proposée à l'extraction).
+  const result = await createProspectCore(
+    supabase,
+    userId,
+    {
+      company_name: str(fd, "company_name"),
       contact_name: str(fd, "contact_name"),
-      email: str(fd, "email")?.toLowerCase() ?? null,
+      email: str(fd, "email"),
       phone: str(fd, "phone"),
       website: str(fd, "website"),
       sector: str(fd, "sector"),
       city: str(fd, "city"),
-      status: normalizeStatus(str(fd, "status")),
+      status: str(fd, "status"),
       source: str(fd, "source"),
       value_estimate: num(fd, "value_estimate"),
-      owner_id: assign === "none" ? null : (assign ?? userId),
+      owner_id: str(fd, "owner_id"),
       notes: str(fd, "notes"),
-      created_by: userId,
-    })
-    .select("id")
-    .single();
+    }
+  );
 
-  if (error) throw new Error(error.message);
+  if (result.error) throw new Error(result.error);
 
   revalidatePath("/prospects");
-  redirect(`/prospects/${data.id}`);
+  redirect(`/prospects/${result.id}`);
 }
 
 export async function updateProspectAction(fd: FormData) {
@@ -135,138 +147,15 @@ export async function deleteProspectAction(fd: FormData) {
 // c'est la date qui décide de tout.
 // =====================================================================
 
-export type SaveExchangeInput = {
-  prospectId: string;
-  /** Type d'échange versé au journal : note, email, rendez_vous. */
-  type: ActivityType;
-  /** Texte libre de l'échange. */
-  note?: string | null;
-  /** Résumé court (proposé par l'assistant ou saisi), versé en sujet. */
-  resume?: string | null;
-  /** Nom de contact à mettre à jour sur la fiche (validé par l'humain). */
-  contactName?: string | null;
-  /** Nouvelle étape — null : inchangée. */
-  statut?: ProspectStatus | null;
-  /** Raison de la perte — utilisée quand statut = perdu. */
-  motif?: string | null;
-  /** Prochaine action : « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles).
-   *  null : aucune relance créée ni re-datée. */
-  dateLocale?: string | null;
-};
-
 export async function saveExchangeAction(
   input: SaveExchangeInput
 ): Promise<ActionState> {
   const { supabase, userId } = await currentUserId();
 
-  const { data: prospect } = await supabase
-    .from("prospects")
-    .select("id, company_name, status")
-    .eq("id", input.prospectId)
-    .maybeSingle();
-  if (!prospect) return { error: "Prospect introuvable." };
+  const result = await saveExchangeCore(supabase, userId, input);
+  if (result.error) return { error: result.error };
 
-  const note = input.note?.trim() || null;
-  const resume = input.resume?.trim().slice(0, 300) || null;
-  const newStatus =
-    input.statut && (STATUS_ORDER as string[]).includes(input.statut)
-      ? input.statut
-      : null;
-  const statusChanged = newStatus !== null && newStatus !== prospect.status;
-
-  const dueAt = dateInputToISO(input.dateLocale ?? null);
-  if (input.dateLocale && !dueAt) return { error: "Date invalide." };
-
-  if (!note && !resume && !statusChanged && !dueAt && !input.contactName?.trim()) {
-    return { error: "Rien à enregistrer." };
-  }
-
-  // 1. Fiche : étape, contact, raison de perte.
-  const patch: Record<string, unknown> = {};
-  if (statusChanged) {
-    patch.status = newStatus;
-    if (newStatus === "perdu") {
-      patch.lost_reason = input.motif?.trim() || "Sans précision";
-    }
-  }
-  if (input.contactName?.trim()) {
-    patch.contact_name = input.contactName.trim().slice(0, 120);
-  }
-  if (Object.keys(patch).length > 0) {
-    const { error } = await supabase
-      .from("prospects")
-      .update(patch)
-      .eq("id", prospect.id);
-    if (error) return { error: error.message };
-  }
-
-  // 2. Journal — met aussi à jour last_contact_at via trigger.
-  if (note || resume) {
-    await supabase.from("activities").insert({
-      prospect_id: prospect.id,
-      author_id: userId,
-      type: input.type,
-      subject: resume,
-      body: note,
-      occurred_at: new Date().toISOString(),
-    });
-  }
-
-  // 3. Relance — jamais de doublon : la tâche ouverte est re-datée, les
-  //    surnuméraires annulées. Un prospect perdu n'a plus de relance.
-  const { data: openTasks } = await supabase
-    .from("tasks")
-    .select("id, title")
-    .eq("prospect_id", prospect.id)
-    .eq("status", "a_faire")
-    .order("due_at", { ascending: true });
-  const allOpen = openTasks ?? [];
-
-  if (newStatus === "perdu") {
-    if (allOpen.length > 0) {
-      await supabase
-        .from("tasks")
-        .update({ status: "annule" })
-        .in("id", allOpen.map((t) => t.id));
-    }
-  } else if (dueAt) {
-    // « RDV avec … » uniquement quand l'échange enregistré EST un rendez-vous
-    // (le titre commande la protection côté email : une tâche « RDV » n'est
-    // jamais annulée ni re-datée par une réponse). Une simple relance ne
-    // touche pas aux tâches RDV existantes.
-    const planningRdv = input.type === "rendez_vous";
-    const title = planningRdv
-      ? `RDV avec ${prospect.company_name}`
-      : `Relancer ${prospect.company_name}`;
-    const reusable = planningRdv
-      ? allOpen
-      : allOpen.filter((t) => !t.title.startsWith("RDV"));
-    const reusableIds = reusable.map((t) => t.id);
-
-    if (reusableIds.length > 0) {
-      await supabase
-        .from("tasks")
-        .update({ title, due_at: dueAt, assignee_id: userId })
-        .eq("id", reusableIds[0]);
-      if (reusableIds.length > 1) {
-        await supabase
-          .from("tasks")
-          .update({ status: "annule" })
-          .in("id", reusableIds.slice(1));
-      }
-    } else {
-      await supabase.from("tasks").insert({
-        prospect_id: prospect.id,
-        title,
-        due_at: dueAt,
-        priority: 2,
-        assignee_id: userId,
-        created_by: userId,
-      });
-    }
-  }
-
-  revalidateProspect(prospect.id);
+  revalidateProspect(input.prospectId);
   return {};
 }
 
@@ -520,184 +409,17 @@ export async function moveProspectAction(id: string, status: ProspectStatus) {
 // Import CSV
 // =====================================================================
 
-export type ImportRow = Partial<
-  Record<
-    | "company_name"
-    | "contact_name"
-    | "email"
-    | "phone"
-    | "website"
-    | "sector"
-    | "city"
-    | "status"
-    | "source"
-    | "value_estimate"
-    | "notes",
-    string
-  >
->;
-
-export type ImportResult = {
-  inserted: number;
-  skipped: number;
-  reasons: string[];
-  error?: string;
-};
-
-const STATUS_ALIASES: Record<string, ProspectStatus> = {
-  a_appeler: "a_appeler",
-  "à appeler": "a_appeler",
-  "a appeler": "a_appeler",
-  nouveau: "a_appeler",
-  new: "a_appeler",
-  contacte: "contacte",
-  contacté: "contacte",
-  contacted: "contacte",
-  contact_etabli: "contacte",
-  "contact établi": "contacte",
-  "contact etabli": "contacte",
-  sans_reponse: "contacte",
-  "sans réponse": "contacte",
-  "sans reponse": "contacte",
-  rappel_programme: "contacte",
-  "rappel programmé": "contacte",
-  "rappel programme": "contacte",
-  rendez_vous: "rendez_vous",
-  "rendez-vous": "rendez_vous",
-  "rendez vous": "rendez_vous",
-  rdv: "rendez_vous",
-  "rdv fixé": "rendez_vous",
-  "rdv fixe": "rendez_vous",
-  qualifie: "rendez_vous",
-  qualifié: "rendez_vous",
-  qualified: "rendez_vous",
-  meeting: "rendez_vous",
-  proposition: "proposition",
-  devis: "proposition",
-  proposal: "proposition",
-  negociation: "proposition",
-  négociation: "proposition",
-  negotiation: "proposition",
-  gagne: "gagne",
-  gagné: "gagne",
-  won: "gagne",
-  client: "gagne",
-  perdu: "perdu",
-  lost: "perdu",
-};
-
-function toStatus(raw?: string): ProspectStatus {
-  if (!raw) return "a_appeler";
-  return STATUS_ALIASES[raw.trim().toLowerCase()] ?? "a_appeler";
-}
-
-function toNumber(raw?: string): number | null {
-  if (!raw) return null;
-  const cleaned = raw.replace(/[^\d,.-]/g, "").replace(/\s/g, "");
-  if (!cleaned) return null;
-  // « 4.800,50 » (format FR) vs « 4,800.50 » (format EN)
-  const normalised =
-    cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")
-      ? cleaned.replace(/\./g, "").replace(",", ".")
-      : cleaned.replace(/,/g, "");
-  const n = Number(normalised);
-  return Number.isFinite(n) ? n : null;
-}
-
-const clean = (v?: string): string | null => {
-  const t = (v ?? "").trim();
-  return t === "" ? null : t;
-};
-
 export async function importProspectsAction(
   rows: ImportRow[],
   ownerId: string | null
 ): Promise<ImportResult> {
   const { supabase, userId } = await currentUserId();
 
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return { inserted: 0, skipped: 0, reasons: [], error: "Aucune ligne à importer." };
+  const result = await importProspectsCore(supabase, userId, rows, ownerId);
+
+  if (result.inserted > 0) {
+    revalidatePath("/prospects");
+    revalidatePath("/dashboard");
   }
-  if (rows.length > 2000) {
-    return {
-      inserted: 0,
-      skipped: 0,
-      reasons: [],
-      error: "Maximum 2000 lignes par import. Découpez votre fichier.",
-    };
-  }
-
-  // Doublons : on compare aux emails déjà présents et à ceux du fichier lui-même.
-  const { data: existing } = await supabase
-    .from("prospects")
-    .select("email")
-    .not("email", "is", null);
-
-  const seen = new Set(
-    (existing ?? [])
-      .map((c) => (c.email as string | null)?.toLowerCase())
-      .filter(Boolean) as string[]
-  );
-
-  const reasons: string[] = [];
-  let skipped = 0;
-  const payload: Record<string, unknown>[] = [];
-
-  rows.forEach((row, index) => {
-    const ligne = index + 2; // +1 en-tête, +1 pour compter à partir de 1
-    const company = clean(row.company_name);
-
-    if (!company) {
-      skipped++;
-      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : société manquante`);
-      return;
-    }
-
-    const email = clean(row.email)?.toLowerCase() ?? null;
-    if (email && seen.has(email)) {
-      skipped++;
-      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : ${email} existe déjà`);
-      return;
-    }
-    if (email) seen.add(email);
-
-    payload.push({
-      company_name: company,
-      contact_name: clean(row.contact_name),
-      email,
-      phone: clean(row.phone),
-      website: clean(row.website),
-      sector: clean(row.sector),
-      city: clean(row.city),
-      status: toStatus(row.status),
-      source: clean(row.source) ?? "Import CSV",
-      value_estimate: toNumber(row.value_estimate),
-      notes: clean(row.notes),
-      owner_id: ownerId === "none" || ownerId === null ? null : ownerId,
-      created_by: userId,
-    });
-  });
-
-  let inserted = 0;
-  for (let i = 0; i < payload.length; i += 200) {
-    const chunk = payload.slice(i, i + 200);
-    const { error, count } = await supabase
-      .from("prospects")
-      .insert(chunk, { count: "exact" });
-
-    if (error) {
-      return {
-        inserted,
-        skipped,
-        reasons,
-        error: `Import interrompu après ${inserted} fiche(s) : ${error.message}`,
-      };
-    }
-    inserted += count ?? chunk.length;
-  }
-
-  revalidatePath("/prospects");
-  revalidatePath("/dashboard");
-
-  return { inserted, skipped, reasons };
+  return result;
 }

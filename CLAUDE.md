@@ -107,7 +107,7 @@ d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password` |
 | `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `owner_id`, `next_action_at`, `last_contact_at` |
-| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie) et `is_exchange` (la note atteste-t-elle d'un échange réel) |
+| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` (colonne de 001, réactivée le 7 août : `'sans_reponse'` = « Appelé, pas de réponse » — un résultat, pas un échange) |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
@@ -116,6 +116,16 @@ d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 Triggers utiles : une activité met à jour `prospects.last_contact_at` ; une
 tâche recalcule `prospects.next_action_at` (la plus proche échéance ouverte).
 C'est `next_action_at` qui pilote « À faire ».
+
+**Vue `prospect_action_state`** (migration `012`, 7 août) : par prospect, le
+dernier événement réel du journal (`last_kind` : email_sortant / email_entrant /
+appel_sans_reponse / echange / rendez_vous / note_interne, brouillons exclus),
+`last_at`, `last_email_sent_at`, `last_reply_at`. `security_invoker = on` — la
+RLS des tables de base s'applique au lecteur, un commercial n'y voit que ses
+fiches. C'est elle qui alimente la ligne « dernière action » des cartes, la
+zone « En attente de réponse » (`last_kind = 'email_sortant'`) et le filtre
+« Emails envoyés ». Le module `lib/crm/lastAction.ts` (neutre) porte les
+libellés et pictogrammes.
 
 **La table s'appelle `crm_users`, pas `profiles`.** Le projet Supabase hébergeait
 l'ancienne app de comptabilité, qui avait déjà un `profiles`. Ce schéma comptable
@@ -171,11 +181,15 @@ des faits lisibles sans interprétation ; une note peut être un compte rendu
 d'appel autant qu'un simple repérage. D'où `activities.is_exchange`, et la
 répartition des défauts — **à conserver** :
 
-- **interface** (« Noter un échange ») : case **cochée** par défaut, la saisie
-  y est humaine et intentionnelle ;
+- **interface** (« Noter un échange ») : trois natures de note depuis le
+  7 août — « J'ai réellement eu cet échange » (défaut, `is_exchange: true`),
+  « **Appelé, pas de réponse** » (`is_exchange: false` + `outcome:
+  'sans_reponse'`, tracé au journal **même sans texte** — c'est le résultat
+  que la carte affiche) et « Note de repérage » (`is_exchange: false`) ;
 - **connecteur MCP** (`ajouter_note`) : **`echange: false`** par défaut, à
   déclarer explicitement. C'est ainsi qu'une note de repérage écrite par Claude
-  ne fait plus passer une fiche en « Contacté ».
+  ne fait plus passer une fiche en « Contacté ». (Le cœur partagé accepte
+  `noAnswer` ; l'outil MCP ne l'expose pas encore.)
 
 Le geste central est `saveExchangeAction` (`app/actions.ts`) : note au journal,
 étape si elle change, et relance à une date précise — **jamais de doublon** :
@@ -265,13 +279,28 @@ et en périphérie : `/compte` (avec les liens admin vers `/reglages-email` et
 `/pipeline` vers `/prospects?vue=colonnes`, `/clients` vers `/prospects`
 (next.config.mjs).
 
-- **À faire** — ce qui échoit aujourd'hui et ce qui est en retard, tous
-  prospects confondus (les tâches ouvertes, En retard puis Aujourd'hui), plus
-  les « Réponses reçues » de la boîte Zoho. Une relance au 14 octobre n'y
-  remonte que le 14 octobre.
+- **À faire** — **trois zones, jamais mélangées** (refonte du 7 août) :
+  1. « **À appeler / à rappeler** » — les tâches échues (En retard puis
+     Aujourd'hui) : appel jamais passé, appel sans réponse, relance échue.
+     Une relance au 14 octobre n'y remonte que le 14 octobre.
+  2. « **En attente de réponse** » — les fiches dont le dernier événement est
+     un mail sortant (`prospect_action_state`). Zone **calme** : jamais « en
+     retard », chaque ligne dit « Mail envoyé il y a X · Remonte le <date> ».
+     Dès que la relance « si pas de réponse » échoit, la fiche passe en
+     zone 1 — jamais dans les deux à la fois.
+  3. « **Réponses reçues** » — la boîte Zoho, agir maintenant. Une fiche qui
+     a répondu ne traîne pas en zone 1 (ses relances hors « RDV » en sont
+     exclues le temps du tri).
 - **Prospects** — une seule liste, filtres (recherche, étape) et **bascule
   liste ↔ colonnes par étape** (glisser-déposer) : la vue en colonnes est un
-  mode d'affichage de la même liste, plus une page distincte.
+  mode d'affichage de la même liste, plus une page distincte. Chaque carte
+  (liste ET pipeline) porte la **dernière action** — canal + résultat + date
+  relative : « 📧 Mail envoyé · il y a 2 j », « 📞 Appelé, pas de réponse ·
+  il y a 3 j » (`LastActionLine`, `lib/crm/lastAction.ts`). La colonne
+  « Dernier contact » de la liste a cédé sa place à « Dernière action ».
+  Bouton-filtre « **📧 Emails envoyés** » (`?filtre=emails`) : seulement les
+  fiches à qui un mail est parti, triées par date du dernier envoi, colonne
+  « Dernier mail » ajoutée.
 - **Équipe** — inchangé.
 
 **La fiche se lit d'abord — elle ne s'ouvre pas sur des formulaires** (refonte
@@ -292,8 +321,9 @@ du 4 août). De haut en bas :
    reçue, rendez-vous) — pastille de couleur et puce de type, la nature de
    l'échange se lit avant le texte ;
 4. **puis seulement** les formulaires : « Noter un échange » (note + type +
-   les deux cases de faits + étape + prochaine action datée, bouton ✨ qui
-   propose), composeur email, planifier une relance, modifier la fiche.
+   la nature de la note + la case proposition + étape + prochaine action
+   datée, bouton ✨ qui propose), composeur email, planifier une relance,
+   modifier la fiche.
 
 En colonne latérale : les chiffres de l'affaire (valeur estimée seule — la
 probabilité n'est plus affichée), les relances, et l'espace **Brouillons**.
@@ -407,8 +437,15 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
   `mail_get_credentials` / `mail_get_secret` (security definer, `execute`
   réservé à `service_role`).
 - **Envoi** : `smtppro.zoho.com|eu:465` SSL via nodemailer — ligne `emails`
-  `direction='sortant'` avec `message_id`, activité `type='email'`, relance
-  J+3 si aucune ouverte.
+  `direction='sortant'` avec `message_id`, activité `type='email'`. **Un mail
+  envoyé CLÔT l'action en cours** (correctif du 7 août,
+  `lib/crm/emailCadence.ts`, appelé par `sendProspectEmailAction`) : la
+  relance ouverte la plus proche (hors « RDV … ») passe « fait », les
+  surnuméraires sont annulées, et une relance « Relancer … si pas de
+  réponse » part à **+5 jours** (sauf fiche Gagné/Perdu). La fiche va dans
+  « En attente de réponse » — plus jamais « en retard » juste après un envoi
+  (c'était le bug : la relance n'était créée que « si aucune n'existait »,
+  l'ancienne restait ouverte).
 - **Relève** : `imappro.zoho.com|eu:993` via imapflow + mailparser (jamais
   d'analyseur MIME maison). IMAP IDLE exigerait une connexion permanente,
   impossible sur Vercel → **pg_cron + pg_net toutes les 5 min** (job
@@ -555,10 +592,15 @@ configurer. Déploiement manuel possible avec `npx vercel --prod`.
 Migrations SQL : appliquées via le MCP Supabase, copies dans
 `supabase/migrations/` — dernières en date, `009_statut_faits.sql` (verrou,
 traçabilité, `is_exchange` / `is_draft`), `010_probabilite.sql` (probabilité +
-colonne générée, interface retirée depuis) et `011_confiance.sql` (les quatre
-colonnes de confiance). Toutes **additives**, donc applicables avant le
-déploiement du code sans rien casser en production — `011` a été appliquée
-ainsi le 4 août au soir.
+colonne générée, interface retirée depuis), `011_confiance.sql` (les quatre
+colonnes de confiance) et `012_derniere_action.sql` (vue
+`prospect_action_state`, index `emails(prospect_id, received_at)`, et la
+correction unique des relances laissées « en retard » par l'ancienne cadence
+d'envoi — re-datées à envoi + 5 j). Toutes **additives**, donc applicables
+avant le déploiement du code sans rien casser en production — `011` a été
+appliquée ainsi le 4 août au soir, `012` le 7 août (vérifiée en local sur la
+base de prod avant fusion : envoi réel → relance faite + relance +5 j, zones
+du tableau de bord, cartes ; prospects réels intacts).
 
 L'edge function `crm-mail` est en ligne en **v3** (4 août au soir) : correctif
 `status_locked` + remise « à évaluer » de la confiance sur vraie réponse —

@@ -10,6 +10,31 @@ import type { ActivityType, ProspectStatus } from "@/lib/types";
 const TYPES: ActivityType[] = ["note", "email", "rendez_vous"];
 
 /**
+ * Ce qu'une note ATTESTE — le fait que le CRM ne devine jamais. Trois natures :
+ * l'échange a eu lieu, l'appel est resté sans réponse (un résultat, pas un
+ * échange — c'est lui que la carte affiche), ou simple repérage.
+ */
+type NoteNature = "echange" | "sans_reponse" | "reperage";
+
+const NOTE_NATURES: { value: NoteNature; label: string; hint: string }[] = [
+  {
+    value: "echange",
+    label: "J'ai réellement eu cet échange (appel, visite)",
+    hint: "Un échange attesté peut faire passer la fiche en « Contacté ».",
+  },
+  {
+    value: "sans_reponse",
+    label: "Appelé, pas de réponse",
+    hint: "La fiche reste « À appeler » ; la carte affichera « Appelé, pas de réponse ».",
+  },
+  {
+    value: "reperage",
+    label: "Note de repérage",
+    hint: "Aucun échange : rien ne bouge sur la fiche.",
+  },
+];
+
+/**
  * Noter un échange : le geste central de la fiche. Une note (ce qu'il faut
  * retenir), la prochaine action à une date précise — et l'étape, qui suit
  * désormais les FAITS et non le texte :
@@ -40,7 +65,7 @@ export function QuickNote({
   const [resume, setResume] = useState("");
   const [contactProposal, setContactProposal] = useState("");
   const [applyContact, setApplyContact] = useState(true);
-  const [isExchange, setIsExchange] = useState(true);
+  const [nature, setNature] = useState<NoteNature>("echange");
   const [proposalSent, setProposalSent] = useState(false);
   const [suggestion, setSuggestion] = useState<{
     statut: ProspectStatus;
@@ -77,7 +102,7 @@ export function QuickNote({
     setMotif("");
     setResume("");
     setContactProposal("");
-    setIsExchange(true);
+    setNature("echange");
     setProposalSent(false);
     setSuggestion(undefined);
     setAiNote(undefined);
@@ -128,8 +153,10 @@ export function QuickNote({
         motif: motif || null,
         dateLocale: dateLocale || null,
         // Un email ou un rendez-vous sont des faits par construction ; une
-        // note ne l'est que si Bora l'atteste.
-        isExchange: type === "note" ? isExchange : true,
+        // note ne l'est que si Bora l'atteste. Un appel sans réponse est un
+        // résultat, pas un échange — tracé même sans texte.
+        isExchange: type === "note" ? nature === "echange" : true,
+        noAnswer: type === "note" && nature === "sans_reponse",
         proposalSent,
       });
       if (res.error) {
@@ -240,23 +267,36 @@ export function QuickNote({
         </label>
       )}
 
-      {/* Les deux faits que le CRM ne devine jamais. */}
+      {/* Les faits que le CRM ne devine jamais. */}
       <div className="space-y-2 rounded-xl bg-white/[0.02] px-3.5 py-3 ring-1 ring-white/[0.06]">
         {type === "note" && (
-          <label className="flex items-start gap-2 text-xs text-slate-300">
-            <input
-              type="checkbox"
-              checked={isExchange}
-              onChange={(e) => setIsExchange(e.target.checked)}
-              className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
-            />
-            <span>
-              J&apos;ai réellement eu cet échange (appel, visite)
-              <span className="block text-[11px] text-slate-500">
-                Décochez pour une note de repérage : la fiche restera « À appeler ».
-              </span>
-            </span>
-          </label>
+          <fieldset className="space-y-1.5">
+            <legend className="mb-1 text-[11px] uppercase tracking-wider text-slate-500">
+              Ce que cette note atteste
+            </legend>
+            {NOTE_NATURES.map((n) => (
+              <label
+                key={n.value}
+                className="flex items-start gap-2 text-xs text-slate-300"
+              >
+                <input
+                  type="radio"
+                  name="note-nature"
+                  checked={nature === n.value}
+                  onChange={() => setNature(n.value)}
+                  className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
+                />
+                <span>
+                  {n.label}
+                  {nature === n.value && (
+                    <span className="block text-[11px] text-slate-500">
+                      {n.hint}
+                    </span>
+                  )}
+                </span>
+              </label>
+            ))}
+          </fieldset>
         )}
         <label className="flex items-start gap-2 text-xs text-slate-300">
           <input

@@ -36,6 +36,13 @@ export type SaveExchangeInput = {
    * note de repérage ne fait pas passer la fiche en « Contacté ».
    */
   isExchange?: boolean;
+  /**
+   * « Appelé, pas de réponse » : l'appel a été TENTÉ mais n'a pas abouti.
+   * Ce n'est pas un échange (la fiche reste « À appeler ») mais c'est un
+   * résultat, tracé au journal (activities.outcome = 'sans_reponse') même
+   * sans texte — c'est lui que la carte affiche.
+   */
+  noAnswer?: boolean;
   /** Brouillon : versé hors chronologie, ne compte pour aucun fait. */
   isDraft?: boolean;
   /** Signal explicite : une proposition / un devis vient d'être envoyé. */
@@ -82,11 +89,20 @@ export async function saveExchangeCore(
   if (input.dateLocale && !dueAt) return { error: "Date invalide." };
 
   const isDraft = input.isDraft === true;
+  // Un appel sans réponse n'est pas un échange — mais c'est un résultat.
+  const noAnswer = !isDraft && input.type === "note" && input.noAnswer === true;
   // Un brouillon n'est ni un échange, ni un fait : il ne déclenche aucune
   // relance et ne fait avancer aucune étape.
-  const isExchange = isDraft ? false : input.isExchange !== false;
+  const isExchange = isDraft || noAnswer ? false : input.isExchange !== false;
 
-  if (!note && !resume && !statusChanged && !dueAt && !input.contactName?.trim()) {
+  if (
+    !note &&
+    !resume &&
+    !statusChanged &&
+    !dueAt &&
+    !input.contactName?.trim() &&
+    !noAnswer
+  ) {
     return { error: "Rien à enregistrer." };
   }
   if (isDraft && !note && !resume) {
@@ -117,14 +133,16 @@ export async function saveExchangeCore(
     if (error) return { error: error.message };
   }
 
-  // 2. Journal — met aussi à jour last_contact_at via trigger.
-  if (note || resume) {
+  // 2. Journal — met aussi à jour last_contact_at via trigger. Un appel sans
+  //    réponse se trace même sans texte : c'est le résultat qui compte.
+  if (note || resume || noAnswer) {
     await supabase.from("activities").insert({
       prospect_id: prospect.id,
       author_id: userId,
       type: input.type,
-      subject: resume,
+      subject: resume ?? (noAnswer && !note ? "Appel sans réponse" : null),
       body: note,
+      outcome: noAnswer ? "sans_reponse" : null,
       occurred_at: new Date().toISOString(),
       is_draft: isDraft,
       is_exchange: isExchange,

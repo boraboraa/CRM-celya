@@ -13,7 +13,9 @@ import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { classifyReply } from "@/lib/ai/triage";
 import { isoToLocalInput, localInputToISO, inDaysAt9 } from "@/lib/time";
+import { fmtDate } from "@/lib/constants";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
+import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import type { ActionState } from "@/app/actions";
 import type { Email, EmailIntent } from "@/lib/types";
@@ -147,30 +149,11 @@ export async function sendProspectEmailAction(
       .eq("id", prospectId);
   }
 
-  // Cadence : l'envoi déclenche la relance — une tâche à J+3 si aucune
-  // relance ouverte n'existe déjà (on n'écrase jamais un rappel planifié).
-  const { data: prospect } = await supabase
-    .from("prospects")
-    .select("id, company_name")
-    .eq("id", prospectId)
-    .maybeSingle();
-  const { data: openTasks } = await supabase
-    .from("tasks")
-    .select("id")
-    .eq("prospect_id", prospectId)
-    .eq("status", "a_faire")
-    .limit(1);
-
-  if (prospect && (openTasks ?? []).length === 0) {
-    await supabase.from("tasks").insert({
-      prospect_id: prospectId,
-      title: `Relancer ${prospect.company_name} — email envoyé`,
-      due_at: inDaysAt9(3),
-      priority: 2,
-      assignee_id: userId,
-      created_by: userId,
-    });
-  }
+  // Cadence : un mail envoyé CLÔT l'action en cours — la relance ouverte
+  // passe « fait » (elle ne reste plus « en retard »), et la suite est datée :
+  // « Relancer … si pas de réponse » à +5 jours. La fiche passe dans la zone
+  // « En attente de réponse » de À faire.
+  const cadence = await applyEmailSentCadence(supabase, userId, prospectId);
 
   // Un email réellement envoyé est un fait fort : l'étape peut avancer
   // (« À appeler » → « Contacté », ou « Proposition » si la case est cochée).
@@ -180,11 +163,17 @@ export async function sendProspectEmailAction(
   await recalcConfidence(supabase, prospectId);
 
   revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/prospects");
   revalidatePath("/dashboard");
+
+  const done = cadence.completedTitle ? " Relance en cours marquée faite." : "";
+  const next = cadence.followUpAt
+    ? ` Sans réponse, la fiche remonte le ${fmtDate(cadence.followUpAt)}.`
+    : "";
   return {
     success: auto.changed
-      ? `Email envoyé. Relance planifiée à 3 jours si aucune n'existait. Étape avancée automatiquement — ${auto.reason}.`
-      : "Email envoyé. Relance planifiée à 3 jours si aucune n'existait.",
+      ? `Email envoyé.${done}${next} Étape avancée automatiquement — ${auto.reason}.`
+      : `Email envoyé.${done}${next}`,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   EmptyState,
   Avatar,
   ConfidenceBadge,
+  LastActionLine,
 } from "@/components/ui";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import {
@@ -13,12 +14,24 @@ import {
   STATUS_LABEL,
   normalizeStatus,
   relative,
+  fmtDate,
 } from "@/lib/constants";
+import {
+  LAST_ACTION_SELECT,
+  mapLastActions,
+  type LastActionRow,
+} from "@/lib/crm/lastAction";
 import type { ConfidenceLevel } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type Search = { q?: string; statut?: string; tri?: string; vue?: string };
+type Search = {
+  q?: string;
+  statut?: string;
+  tri?: string;
+  vue?: string;
+  filtre?: string;
+};
 
 /**
  * Une seule liste de prospects, deux affichages : liste (tableau filtrable)
@@ -30,9 +43,12 @@ export default async function ProspectsPage({
 }: {
   searchParams: Promise<Search>;
 }) {
-  const { q, statut, tri, vue } = await searchParams;
+  const { q, statut, tri, vue, filtre } = await searchParams;
   const supabase = await createClient();
   const view = vue === "colonnes" ? "colonnes" : "liste";
+  // « Emails envoyés » : ne garder que les fiches à qui un mail est parti,
+  // triées par date du dernier envoi — pour les retrouver d'un coup.
+  const filtreEmails = filtre === "emails";
 
   let query = supabase
     .from("prospects")
@@ -65,7 +81,18 @@ export default async function ProspectsPage({
     query = query.order("updated_at", { ascending: false });
   }
 
-  const { data, error } = await query.limit(500);
+  // La « dernière action » de chaque fiche (canal + date) vient de la vue
+  // prospect_action_state — la RLS s'y applique comme partout.
+  const [{ data, error }, actionsRes] = await Promise.all([
+    query.limit(500),
+    supabase
+      .from("prospect_action_state")
+      .select(LAST_ACTION_SELECT)
+      .limit(2000),
+  ]);
+  const lastActions = mapLastActions(
+    (actionsRes.data ?? []) as unknown as LastActionRow[]
+  );
   let prospects = ((data ?? []) as unknown as {
     id: string;
     company_name: string;
@@ -87,6 +114,18 @@ export default async function ProspectsPage({
     prospects = prospects.filter((p) => p.status === statutFilter);
   }
 
+  // Filtre « Emails envoyés » : au moins un mail sortant, le plus récent
+  // d'abord — la date affichée est celle du dernier mail.
+  if (filtreEmails) {
+    prospects = prospects
+      .filter((p) => lastActions.get(p.id)?.last_email_sent_at)
+      .sort(
+        (a, b) =>
+          new Date(lastActions.get(b.id)!.last_email_sent_at!).getTime() -
+          new Date(lastActions.get(a.id)!.last_email_sent_at!).getTime()
+      );
+  }
+
   const boardProspects: BoardProspect[] = prospects.map((p) => ({
     id: p.id,
     company_name: p.company_name,
@@ -96,18 +135,25 @@ export default async function ProspectsPage({
     confidence_reason: p.confidence_reason,
     confidence_locked: Boolean(p.confidence_locked),
     next_action_at: p.next_action_at,
+    last_kind: lastActions.get(p.id)?.last_kind ?? null,
+    last_at: lastActions.get(p.id)?.last_at ?? null,
   }));
 
-  /** URL d'une vue en conservant filtres et tri. */
-  const viewHref = (v: "liste" | "colonnes") => {
+  /** URL de la page en conservant recherche, étape, tri, vue et filtre. */
+  const makeHref = (over: {
+    vue?: "liste" | "colonnes";
+    filtreEmails?: boolean;
+  }) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (statut && statut !== "tous") params.set("statut", statut);
     if (tri) params.set("tri", tri);
-    if (v === "colonnes") params.set("vue", "colonnes");
+    if ((over.vue ?? view) === "colonnes") params.set("vue", "colonnes");
+    if (over.filtreEmails ?? filtreEmails) params.set("filtre", "emails");
     const qs = params.toString();
     return `/prospects${qs ? `?${qs}` : ""}`;
   };
+  const viewHref = (v: "liste" | "colonnes") => makeHref({ vue: v });
 
   return (
     <>
@@ -149,8 +195,24 @@ export default async function ProspectsPage({
           ))}
         </div>
 
+        {/* Emails envoyés : retrouver d'un coup les fiches déjà démarchées
+            par mail, avec la date du dernier envoi. */}
+        <Link
+          href={makeHref({ filtreEmails: !filtreEmails })}
+          aria-pressed={filtreEmails}
+          title="Ne montrer que les prospects à qui un mail a été envoyé"
+          className={`rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
+            filtreEmails
+              ? "bg-violet-500/15 text-violet-200 ring-violet-400/30"
+              : "bg-white/[0.03] text-slate-400 ring-white/10 hover:text-slate-200"
+          }`}
+        >
+          📧 Emails envoyés
+        </Link>
+
         <form className="flex flex-1 flex-wrap items-end gap-3">
           {view === "colonnes" && <input type="hidden" name="vue" value="colonnes" />}
+          {filtreEmails && <input type="hidden" name="filtre" value="emails" />}
           <div className="min-w-[200px] flex-1">
             <label className="label" htmlFor="q">
               Rechercher
@@ -203,11 +265,19 @@ export default async function ProspectsPage({
 
       {prospects.length === 0 ? (
         <EmptyState
-          title={q || statut ? "Aucun résultat" : "Aucun prospect pour l'instant"}
+          title={
+            filtreEmails
+              ? "Aucun email envoyé"
+              : q || statut
+                ? "Aucun résultat"
+                : "Aucun prospect pour l'instant"
+          }
           hint={
-            q || statut
-              ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
-              : "Créez votre première fiche, ou importez une liste depuis un fichier CSV."
+            filtreEmails
+              ? "Aucun mail n'est encore parti vers ces prospects — le filtre ne montre que les fiches déjà démarchées par email."
+              : q || statut
+                ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
+                : "Créez votre première fiche, ou importez une liste depuis un fichier CSV."
           }
           href="/prospects/nouveau"
           cta="Créer un prospect"
@@ -225,7 +295,10 @@ export default async function ProspectsPage({
                   Confiance
                 </th>
                 <th className="th">Prochaine action</th>
-                <th className="th">Dernier contact</th>
+                <th className="th" title="Le dernier événement du journal : canal + résultat + date">
+                  Dernière action
+                </th>
+                {filtreEmails && <th className="th">Dernier mail</th>}
                 <th className="th">Responsable</th>
               </tr>
             </thead>
@@ -261,9 +334,21 @@ export default async function ProspectsPage({
                     <td className={`td whitespace-nowrap ${overdue ? "text-rose-400" : ""}`}>
                       {p.next_action_at ? relative(p.next_action_at) : "—"}
                     </td>
-                    <td className="td whitespace-nowrap text-slate-400">
-                      {p.last_contact_at ? relative(p.last_contact_at) : "Jamais"}
+                    <td className="td whitespace-nowrap">
+                      <LastActionLine
+                        kind={lastActions.get(p.id)?.last_kind}
+                        at={lastActions.get(p.id)?.last_at}
+                      />
                     </td>
+                    {filtreEmails && (
+                      <td className="td whitespace-nowrap text-slate-300">
+                        {fmtDate(lastActions.get(p.id)?.last_email_sent_at)}
+                        <span className="text-slate-500">
+                          {" "}
+                          · {relative(lastActions.get(p.id)?.last_email_sent_at)}
+                        </span>
+                      </td>
+                    )}
                     <td className="td">
                       <Avatar name={p.crm_users?.full_name ?? null} />
                     </td>

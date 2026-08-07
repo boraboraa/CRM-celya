@@ -120,9 +120,11 @@ export default async function ProspectDetailPage({
             ? ("rendez_vous" as const)
             : a.type === "email"
               ? ("email_sortant" as const)
-              : a.is_exchange === false
-                ? ("note_interne" as const)
-                : ("note" as const),
+              : a.outcome === "sans_reponse"
+                ? ("appel_sans_reponse" as const)
+                : a.is_exchange === false
+                  ? ("note_interne" as const)
+                  : ("note" as const),
         at: a.occurred_at,
         title: a.subject,
         body: a.body,

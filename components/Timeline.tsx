@@ -33,6 +33,12 @@ const STYLE: Record<
     chip: "bg-white/[0.03] text-slate-500 ring-white/[0.08]",
     icon: "•",
   },
+  appel_sans_reponse: {
+    label: "Appelé — pas de réponse",
+    dot: "bg-slate-500",
+    chip: "bg-white/[0.04] text-slate-400 ring-white/10",
+    icon: "☎",
+  },
   email_sortant: {
     label: "Email envoyé",
     dot: "bg-violet-400",

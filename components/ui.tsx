@@ -11,7 +11,13 @@ import {
   CONFIDENCE_PENDING_LABEL,
   CONFIDENCE_PENDING_ICON,
   initials,
+  relative,
 } from "@/lib/constants";
+import {
+  LAST_ACTION_ICON,
+  LAST_ACTION_LABEL,
+  type LastActionKind,
+} from "@/lib/crm/lastAction";
 
 export function StatusChip({ status }: { status: ProspectStatus }) {
   return (
@@ -58,6 +64,38 @@ export function ConfidenceBadge({
       </span>
       {label}
       {locked && <span aria-hidden>🔒</span>}
+    </span>
+  );
+}
+
+/**
+ * La DERNIÈRE ACTION d'une fiche : canal + résultat + date relative —
+ * « 📧 Mail envoyé · il y a 2 j », « 📞 Appelé, pas de réponse · il y a 3 j ».
+ * Même ligne sur la liste et sur les cartes du pipeline, dérivée du dernier
+ * événement réel du journal (vue prospect_action_state), jamais du texte.
+ */
+export function LastActionLine({
+  kind,
+  at,
+}: {
+  kind: LastActionKind | null | undefined;
+  at: string | null | undefined;
+}) {
+  if (!kind || !at) {
+    return <span className="text-xs text-slate-600">Aucune action</span>;
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-xs text-slate-300"
+      title={`${LAST_ACTION_LABEL[kind]} — ${relative(at)}`}
+    >
+      <span aria-hidden className="text-[13px] leading-none">
+        {LAST_ACTION_ICON[kind]}
+      </span>
+      <span className="truncate">
+        {LAST_ACTION_LABEL[kind]}
+        <span className="text-slate-500"> · {relative(at)}</span>
+      </span>
     </span>
   );
 }

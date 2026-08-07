@@ -14,6 +14,7 @@ import { fmtDate, fmtDateTime } from "@/lib/constants";
 export type TimelineKind =
   | "note"
   | "note_interne"
+  | "appel_sans_reponse"
   | "email_sortant"
   | "email_entrant"
   | "rendez_vous";
@@ -75,6 +76,8 @@ function describeContext(last: LastEvent, contact: string | null): string {
         : `Dernier échange noté le ${fmtDate(last.at)}.`;
     case "note_interne":
       return `Note de repérage du ${fmtDate(last.at)} — aucun échange encore eu.`;
+    case "appel_sans_reponse":
+      return `Appelé le ${fmtDate(last.at)} — pas de réponse.`;
   }
 }
 

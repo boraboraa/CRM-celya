@@ -10,7 +10,8 @@ import {
   STATUS_EDGE,
   relative,
 } from "@/lib/constants";
-import { ConfidenceBadge } from "@/components/ui";
+import { ConfidenceBadge, LastActionLine } from "@/components/ui";
+import type { LastActionKind } from "@/lib/crm/lastAction";
 import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
 
 /**
@@ -64,6 +65,9 @@ export type BoardProspect = {
   confidence_reason: string | null;
   confidence_locked: boolean;
   next_action_at: string | null;
+  /** Dernière action (canal + date) — vue prospect_action_state. */
+  last_kind: LastActionKind | null;
+  last_at: string | null;
 };
 
 /**
@@ -245,6 +249,14 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                           {c.contact_name && (
                             <p className="truncate text-xs text-slate-400">
                               {c.contact_name}
+                            </p>
+                          )}
+
+                          {/* La DERNIÈRE ACTION : canal + résultat + date —
+                              ce qui manquait le plus sur la carte. */}
+                          {c.last_kind && c.last_at && (
+                            <p className="mt-1.5 truncate text-[11px]">
+                              <LastActionLine kind={c.last_kind} at={c.last_at} />
                             </p>
                           )}
 

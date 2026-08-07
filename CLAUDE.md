@@ -686,10 +686,20 @@ compromis assumé.
 `vercel.json` — `"regions": ["dub1"]`. Dublin **est** `eu-west-1`, la région du
 projet Supabase : les fonctions et la base sont dans le même datacentre au
 lieu de se parler d'un continent à l'autre (100–200 ms par aller-retour, et il
-y en a plusieurs par écran). **À vérifier une fois dans vercel.com** (Settings
-→ Functions → Function Region) : le plan Hobby n'expose qu'une région, et
-c'est elle qui gagne si elle contredit `vercel.json`. Le connecteur MCP Vercel
-ne voit pas ce projet — contrôle à faire à la main.
+y en a plusieurs par écran).
+
+**Vérifié en production le 7 août** : l'en-tête `x-vercel-id` d'une fonction
+renvoie `iad1::dub1::…` — le premier segment est le point d'entrée du réseau
+(l'edge le plus proche de l'appelant), le second la région d'exécution. C'est
+`dub1` qui compte, et c'est bien celui-là. Pour re-contrôler un jour :
+
+```
+curl -sD - -o /dev/null https://<domaine>/.well-known/oauth-protected-resource | grep x-vercel-id
+```
+
+Attention au piège de lecture : sur une redirection du middleware l'en-tête ne
+montre qu'un seul segment (`iad1::…`), parce que le middleware s'exécute sur
+l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 
 ---
 
@@ -923,12 +933,7 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
 8. Supprimer le bucket Storage `documents`, vide mais toujours présent.
 9. Activer la protection contre les mots de passe compromis (tableau de bord
    Supabase → Authentication).
-10. **Confirmer la région des fonctions Vercel** : `vercel.json` demande
-    `dub1` (= `eu-west-1`, la région Supabase), mais sur le plan Hobby c'est
-    le réglage du projet qui tranche — vercel.com → Settings → Functions →
-    Function Region. Si la région affichée n'est pas Dublin, la corriger : à
-    elle seule elle vaut 100–200 ms par aller-retour base, plusieurs fois par
-    écran. Invérifiable par le MCP (le connecteur ne voit pas ce projet).
+(La région des fonctions est réglée et vérifiée — voir « Vitesse et fluidité ».)
 
 ---
 

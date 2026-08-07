@@ -3,10 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
 import { PageHeader, EmptyState } from "@/components/ui";
-import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
+import { type TaskWithProspect } from "@/components/TaskRow";
+import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
-import { DateField } from "@/components/DateField";
-import { createTaskAction } from "@/app/actions";
+import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
 import { fmtDate, relative } from "@/lib/constants";
 import {
   LAST_ACTION_SELECT,
@@ -14,7 +14,6 @@ import {
   type LastActionRow,
 } from "@/lib/crm/lastAction";
 
-export const dynamic = "force-dynamic";
 
 /** Une fiche en attente de réponse — la zone CALME du tableau. */
 type WaitingProspect = {
@@ -46,7 +45,12 @@ export default async function TodoPage() {
   const TASK_SELECT =
     "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name, phone)";
 
-  const [overdueRes, todayRes, repliesRes, waitingRes] = await Promise.all([
+  // Les cinq requêtes partent ENSEMBLE. La liste des fiches en attente était
+  // auparavant lancée après coup, une fois les identifiants connus : un
+  // aller-retour de plus, en série, sur l'écran le plus consulté. On charge
+  // maintenant les fiches ouvertes en parallèle et on croise en mémoire.
+  const [overdueRes, todayRes, repliesRes, waitingRes, openProspectsRes] =
+    await Promise.all([
     // En retard — les plus anciennes d'abord.
     supabase
       .from("tasks")
@@ -86,6 +90,13 @@ export default async function TodoPage() {
       .select(LAST_ACTION_SELECT)
       .eq("last_kind", "email_sortant")
       .limit(200),
+
+    // Les fiches encore ouvertes — celles qui peuvent peupler la zone calme.
+    supabase
+      .from("prospects")
+      .select("id, company_name, contact_name, next_action_at")
+      .not("status", "in", "(gagne,perdu)")
+      .limit(500),
   ]);
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
@@ -112,38 +123,32 @@ export default async function TodoPage() {
       .map((t) => t.prospect_id)
       .filter(Boolean) as string[]
   );
-  const calmIds = waitingRows
-    .map((r) => r.prospect_id)
-    .filter((id) => !dueIds.has(id) && !replyIds.has(id));
+  const calmIds = new Set(
+    waitingRows
+      .map((r) => r.prospect_id)
+      .filter((id) => !dueIds.has(id) && !replyIds.has(id))
+  );
 
-  let waiting: WaitingProspect[] = [];
-  if (calmIds.length > 0) {
-    const { data } = await supabase
-      .from("prospects")
-      .select("id, company_name, contact_name, status, next_action_at")
-      .in("id", calmIds)
-      .not("status", "in", "(gagne,perdu)")
-      .limit(200);
-    waiting = ((data ?? []) as unknown as (WaitingProspect & {
-      status: string;
-    })[])
-      .map((p) => ({
-        ...p,
-        sent_at:
-          waitingMap.get(p.id)?.last_email_sent_at ??
-          waitingMap.get(p.id)?.last_at ??
-          null,
-      }))
-      // La prochaine à remonter d'abord ; sans relance posée, en fin de liste.
-      .sort((a, b) => {
-        if (!a.next_action_at) return 1;
-        if (!b.next_action_at) return -1;
-        return (
-          new Date(a.next_action_at).getTime() -
-          new Date(b.next_action_at).getTime()
-        );
-      });
-  }
+  const waiting: WaitingProspect[] = (
+    (openProspectsRes.data ?? []) as unknown as Omit<WaitingProspect, "sent_at">[]
+  )
+    .filter((p) => calmIds.has(p.id))
+    .map((p) => ({
+      ...p,
+      sent_at:
+        waitingMap.get(p.id)?.last_email_sent_at ??
+        waitingMap.get(p.id)?.last_at ??
+        null,
+    }))
+    // La prochaine à remonter d'abord ; sans relance posée, en fin de liste.
+    .sort((a, b) => {
+      if (!a.next_action_at) return 1;
+      if (!b.next_action_at) return -1;
+      return (
+        new Date(a.next_action_at).getTime() -
+        new Date(b.next_action_at).getTime()
+      );
+    });
 
   const firstName = session?.me?.full_name?.split(" ")[0];
   const nothingAtAll =
@@ -225,6 +230,7 @@ export default async function TodoPage() {
                       <div className="min-w-0 flex-1">
                         <Link
                           href={`/prospects/${p.id}`}
+                          prefetch={false}
                           className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-cyan hover:underline"
                         >
                           {p.company_name}
@@ -249,26 +255,7 @@ export default async function TodoPage() {
       )}
 
       {/* Nouvelle relance libre (avec ou sans prospect) */}
-      <form action={createTaskAction} className="card mt-8 flex flex-wrap items-end gap-4 p-4">
-        <div className="min-w-[240px] flex-1">
-          <label className="label" htmlFor="title">
-            Nouvelle relance
-          </label>
-          <input
-            id="title"
-            name="title"
-            required
-            className="input"
-            placeholder="Préparer la proposition pour lundi"
-          />
-        </div>
-        <div>
-          <span className="label">Échéance</span>
-          <DateField name="due_local" compact />
-        </div>
-        <input type="hidden" name="assignee_id" value={session?.userId ?? "none"} />
-        <button className="btn-ghost">Ajouter</button>
-      </form>
+      <NouvelleRelanceLibre assigneeId={session?.userId ?? "none"} />
 
       {/* ---------- 3. Réponses reçues — agir maintenant ---------- */}
       <section className="mt-8">
@@ -331,11 +318,10 @@ function TaskSection({
         </span>
       </h3>
 
-      <ul className="card animate-rise divide-y divide-white/[0.05]">
-        {tasks.map((t) => (
-          <TaskRow key={t.id} task={t} />
-        ))}
-      </ul>
+      <TaskList
+        tasks={tasks}
+        className="card animate-rise divide-y divide-white/[0.05]"
+      />
     </div>
   );
 }

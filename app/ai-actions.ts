@@ -34,13 +34,16 @@ import {
 // actions et le connecteur MCP. Réexporté ici pour les composants client.
 export type { DuplicateHit };
 
+/**
+ * Qui agit — sans aller-retour réseau (jetons ES256, signature vérifiée en
+ * local contre le JWKS mis en cache). Même raison que dans app/actions.ts.
+ */
 async function requireUser() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  return { supabase, userId: user.id };
+  const { data, error } = await supabase.auth.getClaims();
+  const userId = data?.claims?.sub;
+  if (error || !userId) redirect("/login");
+  return { supabase, userId };
 }
 
 // ---------------------------------------------------------------------------

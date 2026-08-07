@@ -7,7 +7,6 @@ import { adminUpdateUserAction } from "@/app/actions";
 import { fmtDate } from "@/lib/constants";
 import type { Profile } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
 
 export default async function TeamPage() {
   const session = await getSession();

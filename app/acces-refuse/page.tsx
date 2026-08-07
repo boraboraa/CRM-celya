@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 
-export const dynamic = "force-dynamic";
 
 // Page affichée quand la connexion Supabase réussit mais que le compte n'a
 // pas d'accès actif au CRM (fiche crm_users absente ou désactivée). Le

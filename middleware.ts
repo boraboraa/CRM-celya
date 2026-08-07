@@ -39,9 +39,15 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims() plutôt que getUser() : les jetons de ce projet sont signés en
+  // ES256, la signature se vérifie en local contre le JWKS (mis en cache pour
+  // tout le processus). Le middleware s'exécute sur CHAQUE requête — y compris
+  // les préchargements et les server actions — et ne paie donc plus d'aller-
+  // retour vers Supabase Auth. Le rafraîchissement du jeton expiré a lieu
+  // toujours ici : getClaims() passe par getSession(), qui renouvelle et
+  // repose les cookies.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? data.claims : null;
 
   const path = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((p) => path.startsWith(p));

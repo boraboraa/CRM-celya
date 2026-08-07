@@ -4,7 +4,6 @@ import { PageHeader, EmptyState } from "@/components/ui";
 import { attachEmailAction } from "@/app/mail-actions";
 import { fmtDateTime } from "@/lib/constants";
 
-export const dynamic = "force-dynamic";
 
 /**
  * Messages entrants sans correspondance : plutôt que de deviner (et polluer

@@ -23,7 +23,6 @@ import {
 } from "@/lib/crm/lastAction";
 import type { ConfidenceLevel } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
 
 type Search = {
   q?: string;
@@ -309,7 +308,14 @@ export default async function ProspectsPage({
                 return (
                   <tr key={p.id} className="transition duration-200 hover:bg-white/[0.04]">
                     <td className="td">
-                      <Link href={`/prospects/${p.id}`} className="flex items-center gap-3">
+                      {/* Pas de préchargement : la liste peut afficher 500
+                          lignes, et chacune déclenchait le rendu serveur
+                          complet de sa fiche. */}
+                      <Link
+                        href={`/prospects/${p.id}`}
+                        prefetch={false}
+                        className="flex items-center gap-3"
+                      >
                         <Avatar name={p.contact_name ?? p.company_name} />
                         <span className="min-w-0">
                           <span className="block truncate font-semibold text-slate-50">

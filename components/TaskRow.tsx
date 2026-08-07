@@ -1,14 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useTransition } from "react";
-import {
-  completeTaskAction,
-  rescheduleTaskAction,
-  deleteTaskAction,
-} from "@/app/actions";
 import { fmtDateTime, relative } from "@/lib/constants";
-import { isoToLocalInput } from "@/lib/time";
+import { isoToLocalInput, localInputToISO } from "@/lib/time";
 
 export type TaskWithProspect = {
   id: string;
@@ -30,17 +24,34 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/**
+ * Une ligne de relance — purement présentation.
+ *
+ * Elle ne parle plus au serveur elle-même : c'est `TaskList` qui tient l'état
+ * optimiste de la liste et déclenche les server actions. Sans quoi chaque
+ * ligne aurait attendu son propre aller-retour avant de bouger, et cocher une
+ * relance figeait l'écran une seconde et demie.
+ */
 export function TaskRow({
   task,
   compact = false,
+  pending = false,
+  onComplete,
+  onReschedule,
+  onDelete,
 }: {
   task: TaskWithProspect;
   /** Colonne étroite (fiche prospect) : les commandes passent sous le titre. */
   compact?: boolean;
+  /** Un geste est en cours sur CETTE ligne — le spinner est ici, pas ailleurs. */
+  pending?: boolean;
+  onComplete?: () => void;
+  /** (valeur du champ « YYYY-MM-DDTHH:mm » en heure de Bruxelles, ISO UTC) */
+  onReschedule?: (dueLocal: string, dueISO: string) => void;
+  onDelete?: () => void;
 }) {
   const done = task.status === "fait";
   const overdue = !done && new Date(task.due_at).getTime() < Date.now();
-  const [pending, startTransition] = useTransition();
 
   const dueLocal = isoToLocalInput(task.due_at); // YYYY-MM-DDTHH:mm Bruxelles
   const dueDate = dueLocal.slice(0, 10);
@@ -48,12 +59,11 @@ export function TaskRow({
 
   /** Reprogramme à une date précise en conservant l'heure existante. */
   function reschedule(date: string) {
-    if (!date) return;
-    const fd = new FormData();
-    fd.set("id", task.id);
-    fd.set("prospect_id", task.prospect_id ?? "");
-    fd.set("due_local", `${date}T${dueTime}`);
-    startTransition(() => rescheduleTaskAction(fd));
+    if (!date || !onReschedule) return;
+    const local = `${date}T${dueTime}`;
+    // La date affichée tout de suite doit être la vraie : même conversion que
+    // le serveur (heure de Bruxelles → UTC), par le même utilitaire.
+    onReschedule(local, localInputToISO(local) ?? task.due_at);
   }
 
   function shiftedDate(days: number): string {
@@ -64,18 +74,19 @@ export function TaskRow({
 
   return (
     <li
-      className={`gap-3 px-4 py-3.5 ${
+      className={`gap-3 px-4 py-3.5 transition-opacity duration-150 ${
+        pending ? "opacity-60" : ""
+      } ${
         compact
           ? "grid grid-cols-[auto_1fr] items-start"
           : "flex flex-wrap items-start sm:flex-nowrap"
       }`}
     >
-      <form action={completeTaskAction} className="pt-0.5">
-        <input type="hidden" name="id" value={task.id} />
-        <input type="hidden" name="prospect_id" value={task.prospect_id ?? ""} />
-        <input type="hidden" name="done" value={done ? "0" : "1"} />
+      <div className="pt-0.5">
         <button
-          type="submit"
+          type="button"
+          onClick={onComplete}
+          disabled={!onComplete}
           aria-label={done ? "Rouvrir la relance" : "Marquer comme faite"}
           className={`grid h-5 w-5 place-items-center rounded-md ring-1 transition ${
             done
@@ -87,7 +98,7 @@ export function TaskRow({
             <path d="M8 13.2 4.8 10l-1.2 1.2L8 15.6l8.4-8.4-1.2-1.2z" />
           </svg>
         </button>
-      </form>
+      </div>
 
       <div className="min-w-0 flex-1">
         <p
@@ -108,6 +119,7 @@ export function TaskRow({
             <>
               <Link
                 href={`/prospects/${task.prospects.id}`}
+                prefetch={false}
                 className="text-slate-400 underline-offset-2 hover:text-celya-cyan hover:underline"
               >
                 {task.prospects.company_name}
@@ -147,7 +159,7 @@ export function TaskRow({
           <input
             type="date"
             value={dueDate}
-            disabled={pending}
+            disabled={!onReschedule}
             onChange={(e) => reschedule(e.target.value)}
             aria-label="Reprogrammer la relance"
             className="rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
@@ -156,7 +168,7 @@ export function TaskRow({
             <button
               key={d}
               type="button"
-              disabled={pending}
+              disabled={!onReschedule}
               onClick={() => reschedule(shiftedDate(d))}
               title={`Reprogrammer à dans ${d} jour${d > 1 ? "s" : ""}`}
               className="rounded-lg px-2 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
@@ -164,17 +176,15 @@ export function TaskRow({
               +{d}j
             </button>
           ))}
-          <form action={deleteTaskAction}>
-            <input type="hidden" name="id" value={task.id} />
-            <input type="hidden" name="prospect_id" value={task.prospect_id ?? ""} />
-            <button
-              type="submit"
-              title="Supprimer la relance"
-              className="rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400"
-            >
-              ✕
-            </button>
-          </form>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={!onDelete}
+            title="Supprimer la relance"
+            className="rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400"
+          >
+            ✕
+          </button>
         </div>
       )}
     </li>

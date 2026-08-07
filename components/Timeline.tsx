@@ -14,6 +14,12 @@ export type TimelineEntry = {
   body: string | null;
   /** Auteur (activité) ou expéditeur (email). */
   by: string | null;
+  /**
+   * Entrée affichée avant que le serveur ne l'ait confirmée (UI optimiste).
+   * Elle se lit tout de suite, en retrait, et ne propose pas la corbeille :
+   * on ne supprime pas une trace qui n'existe pas encore.
+   */
+  pending?: boolean;
 };
 
 /** Libellé, couleur et pictogramme — classes complètes, jamais interpolées. */
@@ -102,7 +108,11 @@ export function Timeline({
               className={`absolute -left-6 top-4 h-[15px] w-[15px] rounded-full ring-4 ring-space ${style.dot}`}
             />
 
-            <div className="card card-hover px-4 py-3.5">
+            <div
+              className={`card card-hover px-4 py-3.5 transition-opacity duration-200 ${
+                entry.pending ? "opacity-60" : ""
+              }`}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`chip ${style.chip}`}>
                   <span aria-hidden>{style.icon}</span>
@@ -115,10 +125,24 @@ export function Timeline({
                   {relative(entry.at)}
                 </span>
                 <span className="ml-auto flex items-center gap-2">
-                  {entry.by && (
-                    <span className="truncate text-xs text-slate-400">{entry.by}</span>
+                  {entry.pending ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                      <span
+                        aria-hidden
+                        className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-celya-cyan/70 border-t-transparent"
+                      />
+                      Enregistrement…
+                    </span>
+                  ) : (
+                    <>
+                      {entry.by && (
+                        <span className="truncate text-xs text-slate-400">
+                          {entry.by}
+                        </span>
+                      )}
+                      {renderAction?.(entry)}
+                    </>
                   )}
-                  {renderAction?.(entry)}
                 </span>
               </div>
 

@@ -5,6 +5,7 @@ import { saveExchangeAction } from "@/app/actions";
 import { analyzeNoteAction } from "@/app/ai-actions";
 import { ACTIVITY_LABEL, STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
 import { DateField } from "@/components/DateField";
+import type { TimelineEntry } from "@/components/Timeline";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
 const TYPES: ActivityType[] = ["note", "email", "rendez_vous"];
@@ -51,10 +52,17 @@ export function QuickNote({
   prospectId,
   companyName,
   contactName,
+  onOptimistic,
 }: {
   prospectId: string;
   companyName: string;
   contactName?: string | null;
+  /**
+   * Inscrit l'échange en tête de la chronologie AVANT la réponse du serveur.
+   * Fourni par ProspectJournal ; absent, le formulaire se comporte comme
+   * avant (rien ne casse s'il est utilisé ailleurs).
+   */
+  onOptimistic?: (entree: TimelineEntry) => void;
 }) {
   const [type, setType] = useState<ActivityType>("note");
   const [note, setNote] = useState("");
@@ -139,10 +147,47 @@ export function QuickNote({
     });
   }
 
+  /**
+   * L'entrée telle qu'elle apparaîtra dans la chronologie — mêmes règles que
+   * `saveExchangeCore` : la nature de la note décide du type d'événement, et
+   * un appel sans réponse se trace même sans texte.
+   */
+  function entreeProvisoire(): TimelineEntry | null {
+    const texte = note.trim() || null;
+    const resumeNet = resume.trim() || null;
+    const sansReponse = type === "note" && nature === "sans_reponse";
+    // Le serveur n'écrit au journal que dans ces cas-là : on n'annonce rien
+    // qu'il n'écrira pas.
+    if (!texte && !resumeNet && !sansReponse) return null;
+
+    return {
+      key: `provisoire-${Date.now()}`,
+      id: "",
+      source: "activity",
+      kind:
+        type === "rendez_vous"
+          ? "rendez_vous"
+          : type === "email"
+            ? "email_sortant"
+            : sansReponse
+              ? "appel_sans_reponse"
+              : nature === "reperage"
+                ? "note_interne"
+                : "note",
+      at: new Date().toISOString(),
+      title: resumeNet ?? (sansReponse && !texte ? "Appel sans réponse" : null),
+      body: texte,
+      by: null,
+      pending: true,
+    };
+  }
+
   function save() {
     setError(undefined);
     setFeedback(undefined);
+    const provisoire = entreeProvisoire();
     startTransition(async () => {
+      if (provisoire) onOptimistic?.(provisoire);
       const res = await saveExchangeAction({
         prospectId,
         type,

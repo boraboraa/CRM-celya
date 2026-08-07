@@ -4,7 +4,6 @@ import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { ProfileForm, PasswordForm } from "@/components/AccountForms";
 
-export const dynamic = "force-dynamic";
 
 export default async function AccountPage() {
   const session = await getSession();

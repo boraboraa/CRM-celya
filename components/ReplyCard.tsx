@@ -44,6 +44,7 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
         {email.prospects ? (
           <Link
             href={`/prospects/${email.prospects.id}`}
+              prefetch={false}
             className="font-medium text-slate-100 hover:text-celya-cyan"
           >
             {company}
@@ -98,6 +99,7 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
             {email.prospects && (
               <Link
                 href={`/prospects/${email.prospects.id}`}
+              prefetch={false}
                 className="btn-ghost px-3.5 py-1.5 text-xs"
               >
                 Modifier sur la fiche

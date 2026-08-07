@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import {
   setConfidenceAction,
   unlockConfidenceAction,
@@ -41,15 +41,34 @@ export function ConfidenceControl({
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string>();
 
+  /**
+   * Le niveau tel qu'il s'affiche MAINTENANT. Corriger la confiance est un
+   * clic : la pastille se sélectionne à l'instant, verrou compris. Un refus
+   * du serveur ramène l'affichage à la valeur enregistrée tout seul
+   * (useOptimistic rend la main aux props à la fin de la transition).
+   *
+   * « ✨ Réévaluer » n'est PAS optimiste : le nouveau niveau est justement ce
+   * qu'on ignore avant la réponse — on l'attend au lieu de l'inventer.
+   */
+  const [vue, appliquer] = useOptimistic(
+    { level, locked },
+    (
+      etat: { level: ConfidenceLevel | null; locked: boolean },
+      patch: Partial<{ level: ConfidenceLevel | null; locked: boolean }>
+    ) => ({ ...etat, ...patch })
+  );
+
   function submit(
     action: (fd: FormData) => Promise<{ error?: string; success?: string } | void>,
-    fields: Record<string, string> = {}
+    fields: Record<string, string> = {},
+    optimiste?: Partial<{ level: ConfidenceLevel | null; locked: boolean }>
   ) {
     const fd = new FormData();
     fd.set("id", prospectId);
     for (const [k, v] of Object.entries(fields)) fd.set(k, v);
     setNotice(undefined);
     startTransition(async () => {
+      if (optimiste) appliquer(optimiste);
       const res = await action(fd);
       if (res && "error" in res && res.error) setNotice(res.error);
     });
@@ -64,13 +83,15 @@ export function ConfidenceControl({
 
         {/* Les trois niveaux, cliquables — un clic est une décision humaine. */}
         {CONFIDENCE_ORDER.map((l) => {
-          const active = l === level;
+          const active = l === vue.level;
           return (
             <button
               key={l}
               type="button"
               disabled={pending || active}
-              onClick={() => submit(setConfidenceAction, { level: l })}
+              onClick={() =>
+                submit(setConfidenceAction, { level: l }, { level: l, locked: true })
+              }
               aria-pressed={active}
               title={
                 active
@@ -91,7 +112,7 @@ export function ConfidenceControl({
           );
         })}
 
-        {level === null && (
+        {vue.level === null && (
           <span className={`chip ${CONFIDENCE_PENDING_CHIP}`}>
             <span aria-hidden className="text-[10px] leading-none">
               {CONFIDENCE_PENDING_ICON}
@@ -102,7 +123,7 @@ export function ConfidenceControl({
       </div>
 
       {/* La raison courte — pourquoi l'assistant estime ce niveau. */}
-      {!locked && reason && (
+      {!vue.locked && reason && (
         <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400">
           <span aria-hidden className="text-celya-cyan">
             ✦
@@ -111,14 +132,14 @@ export function ConfidenceControl({
         </p>
       )}
 
-      {locked ? (
+      {vue.locked ? (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
           <span aria-hidden>🔒</span>
           <span>Confiance fixée par vous — l&apos;assistant n&apos;y touchera plus.</span>
           <button
             type="button"
             disabled={pending}
-            onClick={() => submit(unlockConfidenceAction)}
+            onClick={() => submit(unlockConfidenceAction, {}, { locked: false })}
             className="underline decoration-dotted underline-offset-2 transition hover:text-slate-300"
           >
             Rendre la main à l&apos;assistant

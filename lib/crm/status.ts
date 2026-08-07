@@ -69,6 +69,88 @@ function latest(a: Fact | null, b: Fact | null): Fact | null {
   return new Date(b.at).getTime() > new Date(a.at).getTime() ? b : a;
 }
 
+/** Les lignes brutes dont les faits se déduisent — rien d'autre. */
+export type FactRows = {
+  /** Activités du prospect, brouillons compris (ils sont écartés ici). */
+  activities: {
+    type: string;
+    occurred_at: string;
+    is_exchange: boolean | null;
+    is_draft: boolean | null;
+  }[];
+  emails: { direction: string; received_at: string }[];
+  /** Relances OUVERTES du prospect (le filtre « RDV … » est appliqué ici). */
+  openTasks: { title: string; due_at: string }[];
+  proposalSentAt: string | null;
+};
+
+/**
+ * Déduit les faits de lignes DÉJÀ lues. Fonction pure : c'est elle qui porte
+ * la règle, `readProspectFacts` n'est plus qu'un lecteur.
+ *
+ * Sépare la règle de la lecture pour que la fiche prospect, qui a déjà chargé
+ * activités, emails et relances pour l'affichage, n'aille pas les redemander
+ * une deuxième fois (c'étaient quatre allers-retours de plus par ouverture).
+ */
+export function factsFromRows(rows: FactRows): ProspectFacts {
+  const facts: ProspectFacts = { exchange: null, meeting: null, proposal: null };
+
+  for (const a of rows.activities) {
+    if (a.is_draft) continue;
+
+    if (a.type === "rendez_vous") {
+      facts.meeting = latest(facts.meeting, {
+        at: a.occurred_at,
+        label: `un rendez-vous a été enregistré le ${fmtDate(a.occurred_at)}`,
+      });
+      facts.exchange = latest(facts.exchange, {
+        at: a.occurred_at,
+        label: `un rendez-vous a été enregistré le ${fmtDate(a.occurred_at)}`,
+      });
+    } else if (a.type === "email") {
+      facts.exchange = latest(facts.exchange, {
+        at: a.occurred_at,
+        label: `un email a été échangé le ${fmtDate(a.occurred_at)}`,
+      });
+    } else if (a.is_exchange !== false) {
+      // Note attestée : « j'ai eu cet échange » était cochée.
+      facts.exchange = latest(facts.exchange, {
+        at: a.occurred_at,
+        label: `un échange a été noté le ${fmtDate(a.occurred_at)}`,
+      });
+    }
+  }
+
+  for (const e of rows.emails) {
+    facts.exchange = latest(facts.exchange, {
+      at: e.received_at,
+      label:
+        e.direction === "entrant"
+          ? `une réponse est arrivée le ${fmtDate(e.received_at)}`
+          : `un email a été envoyé le ${fmtDate(e.received_at)}`,
+    });
+  }
+
+  // Une relance « RDV avec … » ouverte : c'est la tâche que pose la fiche
+  // quand on date un rendez-vous. Un fait, pas une lecture de texte.
+  for (const t of rows.openTasks) {
+    if (!t.title.startsWith("RDV")) continue;
+    facts.meeting = latest(facts.meeting, {
+      at: t.due_at,
+      label: `un rendez-vous est prévu le ${fmtDate(t.due_at)}`,
+    });
+  }
+
+  if (rows.proposalSentAt) {
+    facts.proposal = {
+      at: rows.proposalSentAt,
+      label: `une proposition a été marquée envoyée le ${fmtDate(rows.proposalSentAt)}`,
+    };
+  }
+
+  return facts;
+}
+
 /**
  * Lit les faits d'un prospect. Ne lit JAMAIS le contenu des notes — seulement
  * leur type, leur date et la case « j'ai eu cet échange ». Les brouillons sont
@@ -107,71 +189,14 @@ export async function readProspectFacts(
       .maybeSingle(),
   ]);
 
-  const facts: ProspectFacts = { exchange: null, meeting: null, proposal: null };
-
-  for (const a of (activitiesRes.data ?? []) as {
-    type: string;
-    occurred_at: string;
-    is_exchange: boolean | null;
-    is_draft: boolean | null;
-  }[]) {
-    if (a.is_draft) continue;
-
-    if (a.type === "rendez_vous") {
-      facts.meeting = latest(facts.meeting, {
-        at: a.occurred_at,
-        label: `un rendez-vous a été enregistré le ${fmtDate(a.occurred_at)}`,
-      });
-      facts.exchange = latest(facts.exchange, {
-        at: a.occurred_at,
-        label: `un rendez-vous a été enregistré le ${fmtDate(a.occurred_at)}`,
-      });
-    } else if (a.type === "email") {
-      facts.exchange = latest(facts.exchange, {
-        at: a.occurred_at,
-        label: `un email a été échangé le ${fmtDate(a.occurred_at)}`,
-      });
-    } else if (a.is_exchange !== false) {
-      // Note attestée : « j'ai eu cet échange » était cochée.
-      facts.exchange = latest(facts.exchange, {
-        at: a.occurred_at,
-        label: `un échange a été noté le ${fmtDate(a.occurred_at)}`,
-      });
-    }
-  }
-
-  for (const e of (emailsRes.data ?? []) as {
-    direction: string;
-    received_at: string;
-  }[]) {
-    facts.exchange = latest(facts.exchange, {
-      at: e.received_at,
-      label:
-        e.direction === "entrant"
-          ? `une réponse est arrivée le ${fmtDate(e.received_at)}`
-          : `un email a été envoyé le ${fmtDate(e.received_at)}`,
-    });
-  }
-
-  // Une relance « RDV avec … » ouverte : c'est la tâche que pose la fiche
-  // quand on date un rendez-vous. Un fait, pas une lecture de texte.
-  for (const t of (tasksRes.data ?? []) as { title: string; due_at: string }[]) {
-    facts.meeting = latest(facts.meeting, {
-      at: t.due_at,
-      label: `un rendez-vous est prévu le ${fmtDate(t.due_at)}`,
-    });
-  }
-
-  const proposalAt = (prospectRes.data as { proposal_sent_at: string | null } | null)
-    ?.proposal_sent_at;
-  if (proposalAt) {
-    facts.proposal = {
-      at: proposalAt,
-      label: `une proposition a été marquée envoyée le ${fmtDate(proposalAt)}`,
-    };
-  }
-
-  return facts;
+  return factsFromRows({
+    activities: (activitiesRes.data ?? []) as FactRows["activities"],
+    emails: (emailsRes.data ?? []) as FactRows["emails"],
+    openTasks: (tasksRes.data ?? []) as FactRows["openTasks"],
+    proposalSentAt:
+      (prospectRes.data as { proposal_sent_at: string | null } | null)
+        ?.proposal_sent_at ?? null,
+  });
 }
 
 // ---------------------------------------------------------------------------

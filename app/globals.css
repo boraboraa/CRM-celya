@@ -25,7 +25,22 @@ body {
   }
 
   .card-hover {
-    @apply transition hover:ring-white/15 hover:bg-space-700/70;
+    @apply transition-all duration-200 hover:ring-white/15 hover:bg-space-700/70;
+  }
+
+  /* Survol qui soulève légèrement — réservé aux cartes cliquables. */
+  .card-lift {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift;
+  }
+
+  /* Apparition en fondu des listes et colonnes (150–250 ms, rien de plus). */
+  .animate-rise {
+    animation: rise 220ms ease-out both;
+  }
+
+  /* Petit rebond quand une étape vient d'être choisie. */
+  .animate-pop {
+    animation: pop 200ms ease-out;
   }
 
   .label {
@@ -80,6 +95,39 @@ body {
 
   .td {
     @apply px-4 py-3.5 text-sm text-slate-300 align-middle;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.92);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1.03);
+  }
+}
+
+/* L'utilisateur qui refuse le mouvement ne doit rien voir bouger. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

@@ -46,7 +46,7 @@ function LoginForm() {
       <Logo className="mb-6" />
       <h1 className="font-display text-xl font-semibold text-slate-50">Connexion</h1>
       <p className="mb-6 mt-1 text-sm text-slate-400">
-        Accédez à votre suivi clients et vos relances.
+        Accédez à vos prospects et vos relances.
       </p>
 
       <div className="space-y-4">

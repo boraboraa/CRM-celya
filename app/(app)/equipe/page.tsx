@@ -149,11 +149,11 @@ export default async function TeamPage() {
         <ul className="list-inside list-disc space-y-1.5">
           <li>
             <span className="text-slate-200">Administrateur</span> — voit et modifie
-            tous les clients, toutes les relances, et gère l&apos;équipe.
+            tous les prospects, toutes les relances, et gère l&apos;équipe.
           </li>
           <li>
             <span className="text-slate-200">Commercial</span> — voit uniquement les
-            clients dont il est responsable, plus les fiches non assignées.
+            prospects dont il est responsable, plus les fiches non assignées.
           </li>
           <li>
             Un compte <span className="text-slate-200">inactif</span> peut se connecter

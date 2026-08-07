@@ -1,17 +1,18 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
-import { ClientForm } from "@/components/ClientForm";
-import { createClientAction } from "@/app/actions";
+import { ImportWizard } from "@/components/ImportWizard";
 import type { Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewClientPage() {
-  const supabase = await createClient();
+export default async function ImportPage() {
   const session = await getSession();
+  if (!session?.me?.is_active) redirect("/dashboard");
 
+  const supabase = await createClient();
   const { data } = await supabase
     .from("crm_users")
     .select("id, full_name, email")
@@ -23,23 +24,16 @@ export default async function NewClientPage() {
   return (
     <>
       <PageHeader
-        title="Nouveau client"
-        subtitle="Créez la fiche, puis notez chaque appel et planifiez la relance."
+        title="Importer des prospects"
+        subtitle="Chargez une liste d'entreprises depuis un fichier CSV."
         action={
-          <Link href="/clients" className="btn-ghost">
+          <Link href="/prospects" className="btn-ghost">
             Annuler
           </Link>
         }
       />
 
-      <div className="card max-w-3xl p-6">
-        <ClientForm
-          members={members}
-          action={createClientAction}
-          submitLabel="Créer la fiche"
-          currentUserId={session?.userId}
-        />
-      </div>
+      <ImportWizard members={members} currentUserId={session.userId} />
     </>
   );
 }

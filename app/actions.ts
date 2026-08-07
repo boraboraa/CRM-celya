@@ -4,10 +4,34 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
-import { localInputToISO, inDaysAt9 } from "@/lib/time";
-import type { ActivityType, ClientStatus } from "@/lib/types";
+import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
+import { normalizeStatus } from "@/lib/constants";
+import type { ProspectStatus } from "@/lib/types";
+import {
+  manualStatusPatch,
+  unlockStatusPatch,
+  applyAutoStatus,
+} from "@/lib/crm/status";
+import {
+  evaluateConfidenceCore,
+  recalcConfidence,
+  manualConfidencePatch,
+  unlockConfidencePatch,
+  isConfidenceLevel,
+} from "@/lib/crm/confidence";
+import { createProspectCore } from "@/lib/crm/prospects";
+import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
+import {
+  importProspectsCore,
+  type ImportRow,
+  type ImportResult,
+} from "@/lib/crm/prospects";
 
 export type ActionState = { error?: string; success?: string };
+
+// Types réexportés depuis le cœur partagé (lib/crm) pour ne pas rompre les
+// imports existants des composants.
+export type { SaveExchangeInput, ImportRow, ImportResult };
 
 const str = (fd: FormData, k: string): string | null => {
   const v = fd.get(k);
@@ -32,149 +56,319 @@ async function currentUserId() {
   return { supabase, userId: user.id };
 }
 
-// =====================================================================
-// Clients
-// =====================================================================
-
-export async function createClientAction(fd: FormData) {
-  const { supabase, userId } = await currentUserId();
-
-  const assign = str(fd, "owner_id");
-  const { data, error } = await supabase
-    .from("clients")
-    .insert({
-      company_name: str(fd, "company_name") ?? "Sans nom",
-      contact_name: str(fd, "contact_name"),
-      email: str(fd, "email")?.toLowerCase() ?? null,
-      phone: str(fd, "phone"),
-      website: str(fd, "website"),
-      sector: str(fd, "sector"),
-      city: str(fd, "city"),
-      status: (str(fd, "status") as ClientStatus) ?? "nouveau",
-      source: str(fd, "source"),
-      value_estimate: num(fd, "value_estimate"),
-      owner_id: assign === "none" ? null : (assign ?? userId),
-      notes: str(fd, "notes"),
-      created_by: userId,
-    })
-    .select("id")
-    .single();
-
-  if (error) throw new Error(error.message);
-
-  revalidatePath("/clients");
-  revalidatePath("/pipeline");
-  redirect(`/clients/${data.id}`);
-}
-
-export async function updateClientAction(fd: FormData) {
-  const { supabase } = await currentUserId();
-  const id = str(fd, "id");
-  if (!id) throw new Error("Client introuvable");
-
-  const assign = str(fd, "owner_id");
-  const { error } = await supabase
-    .from("clients")
-    .update({
-      company_name: str(fd, "company_name") ?? "Sans nom",
-      contact_name: str(fd, "contact_name"),
-      email: str(fd, "email")?.toLowerCase() ?? null,
-      phone: str(fd, "phone"),
-      website: str(fd, "website"),
-      sector: str(fd, "sector"),
-      city: str(fd, "city"),
-      status: (str(fd, "status") as ClientStatus) ?? "nouveau",
-      source: str(fd, "source"),
-      value_estimate: num(fd, "value_estimate"),
-      owner_id: assign === "none" ? null : assign,
-      notes: str(fd, "notes"),
-      lost_reason: str(fd, "lost_reason"),
-    })
-    .eq("id", id);
-
-  if (error) throw new Error(error.message);
-
-  revalidatePath(`/clients/${id}`);
-  revalidatePath("/clients");
-  revalidatePath("/pipeline");
-}
-
-export async function setClientStatusAction(fd: FormData) {
-  const { supabase } = await currentUserId();
-  const id = str(fd, "id");
-  const status = str(fd, "status") as ClientStatus | null;
-  if (!id || !status) return;
-
-  await supabase.from("clients").update({ status }).eq("id", id);
-
-  revalidatePath(`/clients/${id}`);
-  revalidatePath("/clients");
-  revalidatePath("/pipeline");
+function revalidateProspect(id?: string | null) {
+  if (id) revalidatePath(`/prospects/${id}`);
+  revalidatePath("/prospects");
   revalidatePath("/dashboard");
 }
 
-export async function deleteClientAction(fd: FormData) {
-  const { supabase } = await currentUserId();
-  const id = str(fd, "id");
-  if (!id) return;
+// =====================================================================
+// Prospects
+// =====================================================================
 
-  const { error } = await supabase.from("clients").delete().eq("id", id);
-  if (error) throw new Error(error.message);
+export async function createProspectAction(fd: FormData) {
+  const { supabase, userId } = await currentUserId();
 
-  revalidatePath("/clients");
-  revalidatePath("/pipeline");
-  redirect("/clients");
+  // Passe par le cœur partagé (même insertion que le connecteur MCP). Le
+  // formulaire ne force ni dédup ni normalisation « +32 » : la saisie manuelle
+  // est conservée telle quelle (la dédup a déjà été proposée à l'extraction).
+  const result = await createProspectCore(
+    supabase,
+    userId,
+    {
+      company_name: str(fd, "company_name"),
+      contact_name: str(fd, "contact_name"),
+      email: str(fd, "email"),
+      phone: str(fd, "phone"),
+      website: str(fd, "website"),
+      sector: str(fd, "sector"),
+      city: str(fd, "city"),
+      status: str(fd, "status"),
+      source: str(fd, "source"),
+      value_estimate: num(fd, "value_estimate"),
+      owner_id: str(fd, "owner_id"),
+      notes: str(fd, "notes"),
+    }
+  );
+
+  if (result.error) throw new Error(result.error);
+
+  revalidatePath("/prospects");
+  redirect(`/prospects/${result.id}`);
 }
 
-// =====================================================================
-// Activités (notes d'appel, emails, réunions…)
-// =====================================================================
+export async function updateProspectAction(fd: FormData) {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) throw new Error("Prospect introuvable");
 
-export async function addActivityAction(fd: FormData) {
-  const { supabase, userId } = await currentUserId();
-  const clientId = str(fd, "client_id");
-  if (!clientId) throw new Error("Client introuvable");
+  const { data: before } = await supabase
+    .from("prospects")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
 
-  const occurred = localInputToISO(str(fd, "occurred_at")) ?? new Date().toISOString();
+  const status = normalizeStatus(str(fd, "status"));
+  const assign = str(fd, "owner_id");
 
-  const { error } = await supabase.from("activities").insert({
-    client_id: clientId,
-    author_id: userId,
-    type: (str(fd, "type") as ActivityType) ?? "note",
-    subject: str(fd, "subject"),
-    body: str(fd, "body"),
-    outcome: str(fd, "outcome"),
-    duration_min: num(fd, "duration_min"),
-    occurred_at: occurred,
-  });
-  if (error) throw new Error(error.message);
+  // La probabilité n'est plus saisie : la colonne reste en base, intouchée —
+  // c'est la confiance estimée par l'IA qui la remplace à l'écran.
+  const patch: Record<string, unknown> = {
+    company_name: str(fd, "company_name") ?? "Sans nom",
+    contact_name: str(fd, "contact_name"),
+    email: str(fd, "email")?.toLowerCase() ?? null,
+    phone: str(fd, "phone"),
+    website: str(fd, "website"),
+    sector: str(fd, "sector"),
+    city: str(fd, "city"),
+    source: str(fd, "source"),
+    value_estimate: num(fd, "value_estimate"),
+    owner_id: assign === "none" ? null : assign,
+    notes: str(fd, "notes"),
+    lost_reason: str(fd, "lost_reason"),
+  };
 
-  // Relance planifiée dans la foulée de la note ?
-  const followUp = str(fd, "follow_up_days");
-  if (followUp && followUp !== "none") {
-    await supabase.from("tasks").insert({
-      client_id: clientId,
-      title: str(fd, "follow_up_title") ?? "Relancer le client",
-      due_at: inDaysAt9(Number(followUp)),
-      assignee_id: userId,
-      created_by: userId,
-      priority: 2,
-    });
+  // Changer l'étape depuis le formulaire est une décision humaine : elle
+  // verrouille. La laisser telle quelle ne verrouille rien.
+  const statusChanged =
+    Boolean(before) && normalizeStatus(before!.status as string) !== status;
+  if (statusChanged) {
+    Object.assign(patch, manualStatusPatch(status));
+  } else {
+    patch.status = status;
   }
 
-  revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/dashboard");
-  revalidatePath("/taches");
+  const { error } = await supabase.from("prospects").update(patch).eq("id", id);
+  if (error) throw new Error(error.message);
+
+  // Un changement d'étape est un événement : la confiance se recalcule.
+  if (statusChanged) await recalcConfidence(supabase, id);
+
+  revalidateProspect(id);
 }
 
-export async function deleteActivityAction(fd: FormData) {
+/**
+ * Fixer l'étape à la main — depuis la fiche. Verrouille : à partir de là,
+ * l'auto-classification ne réécrit plus rien, elle peut seulement suggérer.
+ */
+export async function setProspectStatusAction(fd: FormData) {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  const clientId = str(fd, "client_id");
+  const status = str(fd, "status");
+  if (!id || !status) return;
+
+  await supabase
+    .from("prospects")
+    .update(manualStatusPatch(normalizeStatus(status)))
+    .eq("id", id);
+  await recalcConfidence(supabase, id);
+
+  revalidateProspect(id);
+}
+
+/**
+ * Rendre la main à l'IA : l'étape redevient déductible des faits, et on la
+ * ré-évalue tout de suite pour que l'effet soit visible immédiatement.
+ */
+export async function unlockProspectStatusAction(fd: FormData) {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
   if (!id) return;
 
-  await supabase.from("activities").delete().eq("id", id);
-  if (clientId) revalidatePath(`/clients/${clientId}`);
+  await supabase.from("prospects").update(unlockStatusPatch()).eq("id", id);
+  await applyAutoStatus(supabase, id);
+  await recalcConfidence(supabase, id);
+
+  revalidateProspect(id);
+}
+
+/**
+ * Accepter la suggestion affichée sur une fiche verrouillée (« un RDV a été
+ * posé — passer en Rendez-vous ? »). C'est un clic humain : la fiche reste
+ * verrouillée sur ce nouveau choix.
+ */
+export async function acceptStatusSuggestionAction(fd: FormData) {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  const status = str(fd, "status");
+  if (!id || !status) return;
+
+  await supabase
+    .from("prospects")
+    .update(manualStatusPatch(normalizeStatus(status)))
+    .eq("id", id);
+  await recalcConfidence(supabase, id);
+
+  revalidateProspect(id);
+}
+
+// =====================================================================
+// Confiance (Chaud / Tiède / Froid) — suggestion IA, dernier mot humain.
+// =====================================================================
+
+/**
+ * Corriger le niveau à la main. Comme pour l'étape, la correction VERROUILLE :
+ * l'assistant ne réécrira plus la confiance par-dessus le choix de Bora.
+ */
+export async function setConfidenceAction(fd: FormData): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  const level = str(fd, "level");
+  if (!id || !isConfidenceLevel(level)) return {};
+
+  const { error } = await supabase
+    .from("prospects")
+    .update(manualConfidencePatch(level))
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateProspect(id);
+  return {};
+}
+
+/** Rendre la main à l'assistant : déverrouille et ré-estime tout de suite. */
+export async function unlockConfidenceAction(fd: FormData): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) return {};
+
+  const { error } = await supabase
+    .from("prospects")
+    .update(unlockConfidencePatch())
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  await recalcConfidence(supabase, id);
+  revalidateProspect(id);
+  return {};
+}
+
+/** Ré-estimation à la demande (bouton ✨ de la fiche). */
+export async function evaluateConfidenceAction(
+  fd: FormData
+): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) return {};
+
+  const result = await evaluateConfidenceCore(supabase, id);
+  revalidateProspect(id);
+
+  if (result.outcome === "indisponible") {
+    return {
+      error:
+        "Assistant indisponible — vérifiez la configuration du fournisseur IA.",
+    };
+  }
+  if (result.outcome === "a_evaluer") {
+    return {
+      error:
+        "Pas encore assez d'éléments pour estimer — consignez d'abord un échange.",
+    };
+  }
+  return {};
+}
+
+export async function deleteProspectAction(fd: FormData) {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  if (!id) return;
+
+  const { error } = await supabase.from("prospects").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/prospects");
+  redirect("/prospects");
+}
+
+// =====================================================================
+// Noter un échange — le geste central : note + étape + prochaine action.
+// Remplace l'ancienne mécanique de résultats d'appel : plus de cadence,
+// c'est la date qui décide de tout.
+// =====================================================================
+
+export type SaveExchangeState = ActionState & {
+  /** Étape avancée automatiquement par les faits, et son motif. */
+  autoStatus?: ProspectStatus | null;
+  autoReason?: string | null;
+};
+
+export async function saveExchangeAction(
+  input: SaveExchangeInput
+): Promise<SaveExchangeState> {
+  const { supabase, userId } = await currentUserId();
+
+  const result = await saveExchangeCore(supabase, userId, input);
+  if (result.error) return { error: result.error };
+
+  revalidateProspect(input.prospectId);
+  return { autoStatus: result.autoStatus, autoReason: result.autoReason };
+}
+
+// =====================================================================
+// Activités
+// =====================================================================
+
+/**
+ * Suppression d'une entrée du journal — réservée à l'admin.
+ *
+ * La RLS reste l'unique garde-fou de sécurité (un commercial n'atteint de
+ * toute façon que ses fiches) ; ce contrôle-ci est la règle métier demandée :
+ * l'historique d'un échange ne s'efface pas d'un doigt qui glisse. La
+ * confirmation est exigée explicitement (`confirm=1`), et le composant
+ * client la demande en deux temps.
+ */
+async function requireAdmin(): Promise<
+  { supabase: Awaited<ReturnType<typeof createClient>>; userId: string } | null
+> {
+  const { supabase, userId } = await currentUserId();
+  const { data: me } = await supabase
+    .from("crm_users")
+    .select("role, is_active")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!me || me.role !== "admin" || !me.is_active) return null;
+  return { supabase, userId };
+}
+
+export async function deleteActivityAction(fd: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Suppression réservée à l'administrateur." };
+
+  const id = str(fd, "id");
+  const prospectId = str(fd, "prospect_id");
+  if (!id) return { error: "Entrée introuvable." };
+  if (str(fd, "confirm") !== "1") return { error: "Confirmation requise." };
+
+  const { error } = await admin.supabase.from("activities").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/dashboard");
+  return { success: "Entrée supprimée." };
+}
+
+/**
+ * Suppression d'un email du journal — même règle. Un message réellement
+ * envoyé ou reçu reste une trace : le composant client prévient plus
+ * fermement avant de laisser cliquer.
+ */
+export async function deleteEmailAction(fd: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Suppression réservée à l'administrateur." };
+
+  const id = str(fd, "id");
+  const prospectId = str(fd, "prospect_id");
+  if (!id) return { error: "Message introuvable." };
+  if (str(fd, "confirm") !== "1") return { error: "Confirmation requise." };
+
+  const { error } = await admin.supabase.from("emails").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/emails");
+  return { success: "Message supprimé." };
 }
 
 // =====================================================================
@@ -184,17 +378,15 @@ export async function deleteActivityAction(fd: FormData) {
 export async function createTaskAction(fd: FormData) {
   const { supabase, userId } = await currentUserId();
 
-  const dueRaw = str(fd, "due_at");
-  const dueDays = str(fd, "due_days");
   const due =
-    dueDays && dueDays !== "custom"
-      ? inDaysAt9(Number(dueDays))
-      : (localInputToISO(dueRaw) ?? inDaysAt9(1));
+    dateInputToISO(str(fd, "due_local")) ??
+    localInputToISO(str(fd, "due_at")) ??
+    inDaysAt9(1);
 
   const assignee = str(fd, "assignee_id");
 
   const { error } = await supabase.from("tasks").insert({
-    client_id: str(fd, "client_id"),
+    prospect_id: str(fd, "prospect_id"),
     title: str(fd, "title") ?? "Relance",
     details: str(fd, "details"),
     due_at: due,
@@ -204,9 +396,14 @@ export async function createTaskAction(fd: FormData) {
   });
   if (error) throw new Error(error.message);
 
-  const clientId = str(fd, "client_id");
-  if (clientId) revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/taches");
+  const prospectId = str(fd, "prospect_id");
+  // Une relance « RDV avec … » posée à la main est un fait : l'étape peut
+  // avancer vers « Rendez-vous ». applyAutoStatus respecte le verrou.
+  if (prospectId) {
+    await applyAutoStatus(supabase, prospectId);
+    await recalcConfidence(supabase, prospectId);
+    revalidatePath(`/prospects/${prospectId}`);
+  }
   revalidatePath("/dashboard");
 }
 
@@ -221,23 +418,22 @@ export async function completeTaskAction(fd: FormData) {
     .update({ status: done ? "fait" : "a_faire" })
     .eq("id", id);
 
-  const clientId = str(fd, "client_id");
-  if (clientId) revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/taches");
+  const prospectId = str(fd, "prospect_id");
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
 }
 
-export async function snoozeTaskAction(fd: FormData) {
+/** Reprogramme une relance à une date précise (champ de date de TaskRow). */
+export async function rescheduleTaskAction(fd: FormData) {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  const days = Number(str(fd, "days") ?? 1);
-  if (!id) return;
+  const due = dateInputToISO(str(fd, "due_local"));
+  if (!id || !due) return;
 
-  await supabase.from("tasks").update({ due_at: inDaysAt9(days) }).eq("id", id);
+  await supabase.from("tasks").update({ due_at: due }).eq("id", id);
 
-  const clientId = str(fd, "client_id");
-  if (clientId) revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/taches");
+  const prospectId = str(fd, "prospect_id");
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
 }
 
@@ -248,9 +444,8 @@ export async function deleteTaskAction(fd: FormData) {
 
   await supabase.from("tasks").delete().eq("id", id);
 
-  const clientId = str(fd, "client_id");
-  if (clientId) revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/taches");
+  const prospectId = str(fd, "prospect_id");
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
 }
 
@@ -399,185 +594,42 @@ export async function adminResetPasswordAction(
 }
 
 // =====================================================================
-// Pipeline — glisser-déposer
+// Vue en colonnes — glisser-déposer
 // =====================================================================
 
-export async function moveClientAction(id: string, status: ClientStatus) {
+/**
+ * Glisser-déposer d'une colonne à l'autre : c'est une correction humaine,
+ * au même titre que le sélecteur de la fiche. Elle verrouille l'étape.
+ */
+export async function moveProspectAction(id: string, status: ProspectStatus) {
   const { supabase } = await currentUserId();
 
-  const { error } = await supabase.from("clients").update({ status }).eq("id", id);
+  const { error } = await supabase
+    .from("prospects")
+    .update(manualStatusPatch(normalizeStatus(status)))
+    .eq("id", id);
   if (error) throw new Error(error.message);
 
-  revalidatePath("/pipeline");
-  revalidatePath("/clients");
-  revalidatePath(`/clients/${id}`);
-  revalidatePath("/dashboard");
+  await recalcConfidence(supabase, id);
+
+  revalidateProspect(id);
 }
 
 // =====================================================================
 // Import CSV
 // =====================================================================
 
-export type ImportRow = Partial<
-  Record<
-    | "company_name"
-    | "contact_name"
-    | "email"
-    | "phone"
-    | "website"
-    | "sector"
-    | "city"
-    | "status"
-    | "source"
-    | "value_estimate"
-    | "notes",
-    string
-  >
->;
-
-export type ImportResult = {
-  inserted: number;
-  skipped: number;
-  reasons: string[];
-  error?: string;
-};
-
-const STATUS_ALIASES: Record<string, ClientStatus> = {
-  nouveau: "nouveau",
-  new: "nouveau",
-  contacte: "contacte",
-  contacté: "contacte",
-  contacted: "contacte",
-  qualifie: "qualifie",
-  qualifié: "qualifie",
-  qualified: "qualifie",
-  proposition: "proposition",
-  devis: "proposition",
-  proposal: "proposition",
-  negociation: "negociation",
-  négociation: "negociation",
-  negotiation: "negociation",
-  gagne: "gagne",
-  gagné: "gagne",
-  won: "gagne",
-  client: "gagne",
-  perdu: "perdu",
-  lost: "perdu",
-};
-
-function toStatus(raw?: string): ClientStatus {
-  if (!raw) return "nouveau";
-  return STATUS_ALIASES[raw.trim().toLowerCase()] ?? "nouveau";
-}
-
-function toNumber(raw?: string): number | null {
-  if (!raw) return null;
-  const cleaned = raw.replace(/[^\d,.-]/g, "").replace(/\s/g, "");
-  if (!cleaned) return null;
-  // « 4.800,50 » (format FR) vs « 4,800.50 » (format EN)
-  const normalised =
-    cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")
-      ? cleaned.replace(/\./g, "").replace(",", ".")
-      : cleaned.replace(/,/g, "");
-  const n = Number(normalised);
-  return Number.isFinite(n) ? n : null;
-}
-
-const clean = (v?: string): string | null => {
-  const t = (v ?? "").trim();
-  return t === "" ? null : t;
-};
-
-export async function importClientsAction(
+export async function importProspectsAction(
   rows: ImportRow[],
   ownerId: string | null
 ): Promise<ImportResult> {
   const { supabase, userId } = await currentUserId();
 
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return { inserted: 0, skipped: 0, reasons: [], error: "Aucune ligne à importer." };
+  const result = await importProspectsCore(supabase, userId, rows, ownerId);
+
+  if (result.inserted > 0) {
+    revalidatePath("/prospects");
+    revalidatePath("/dashboard");
   }
-  if (rows.length > 2000) {
-    return {
-      inserted: 0,
-      skipped: 0,
-      reasons: [],
-      error: "Maximum 2000 lignes par import. Découpez votre fichier.",
-    };
-  }
-
-  // Doublons : on compare aux emails déjà présents et à ceux du fichier lui-même.
-  const { data: existing } = await supabase
-    .from("clients")
-    .select("email")
-    .not("email", "is", null);
-
-  const seen = new Set(
-    (existing ?? [])
-      .map((c) => (c.email as string | null)?.toLowerCase())
-      .filter(Boolean) as string[]
-  );
-
-  const reasons: string[] = [];
-  let skipped = 0;
-  const payload: Record<string, unknown>[] = [];
-
-  rows.forEach((row, index) => {
-    const ligne = index + 2; // +1 en-tête, +1 pour compter à partir de 1
-    const company = clean(row.company_name);
-
-    if (!company) {
-      skipped++;
-      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : société manquante`);
-      return;
-    }
-
-    const email = clean(row.email)?.toLowerCase() ?? null;
-    if (email && seen.has(email)) {
-      skipped++;
-      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : ${email} existe déjà`);
-      return;
-    }
-    if (email) seen.add(email);
-
-    payload.push({
-      company_name: company,
-      contact_name: clean(row.contact_name),
-      email,
-      phone: clean(row.phone),
-      website: clean(row.website),
-      sector: clean(row.sector),
-      city: clean(row.city),
-      status: toStatus(row.status),
-      source: clean(row.source) ?? "Import CSV",
-      value_estimate: toNumber(row.value_estimate),
-      notes: clean(row.notes),
-      owner_id: ownerId === "none" || ownerId === null ? null : ownerId,
-      created_by: userId,
-    });
-  });
-
-  let inserted = 0;
-  for (let i = 0; i < payload.length; i += 200) {
-    const chunk = payload.slice(i, i + 200);
-    const { error, count } = await supabase
-      .from("clients")
-      .insert(chunk, { count: "exact" });
-
-    if (error) {
-      return {
-        inserted,
-        skipped,
-        reasons,
-        error: `Import interrompu après ${inserted} fiche(s) : ${error.message}`,
-      };
-    }
-    inserted += count ?? chunk.length;
-  }
-
-  revalidatePath("/clients");
-  revalidatePath("/pipeline");
-  revalidatePath("/dashboard");
-
-  return { inserted, skipped, reasons };
+  return result;
 }

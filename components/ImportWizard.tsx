@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import {
-  importClientsAction,
+  importProspectsAction,
   type ImportRow,
   type ImportResult,
 } from "@/app/actions";
@@ -76,7 +76,7 @@ export function ImportWizard({
   function submit() {
     setError(undefined);
     startTransition(async () => {
-      const res = await importClientsAction(buildRows(), owner);
+      const res = await importProspectsAction(buildRows(), owner);
       setResult(res);
     });
   }
@@ -114,8 +114,8 @@ export function ImportWizard({
         )}
 
         <div className="mt-6 flex gap-2">
-          <Link href="/clients" className="btn-primary">
-            Voir les clients
+          <Link href="/prospects" className="btn-primary">
+            Voir les prospects
           </Link>
           <button
             onClick={() => {

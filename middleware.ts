@@ -2,7 +2,18 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// /login, /auth : parcours d'authentification de l'app.
+// /mcp, /sse, /message : serveur MCP (auth par jeton Bearer, pas par cookie).
+// /api/oauth, /.well-known : serveur d'autorisation OAuth du connecteur MCP.
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth",
+  "/mcp",
+  "/sse",
+  "/message",
+  "/api/oauth",
+  "/.well-known",
+];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -53,5 +64,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|mcp|sse|message|api/oauth|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

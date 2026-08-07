@@ -1,22 +1,47 @@
-import { STATUS_ORDER, STATUS_LABEL, SOURCES } from "@/lib/constants";
-import type { Client, Profile } from "@/lib/types";
+import {
+  STATUS_ORDER,
+  STATUS_LABEL,
+  SOURCES,
+  normalizeStatus,
+} from "@/lib/constants";
+import type { Prospect, Profile } from "@/lib/types";
 
-export function ClientForm({
-  client,
+export function ProspectForm({
+  prospect,
   members,
   action,
   submitLabel = "Enregistrer",
   currentUserId,
+  aiFields,
+  uncertainFields,
 }: {
-  client?: Client;
+  prospect?: Partial<Prospect>;
   members: Pick<Profile, "id" | "full_name" | "email">[];
   action: (formData: FormData) => Promise<void>;
   submitLabel?: string;
   currentUserId?: string;
+  /** Champs pré-remplis par l'assistant — signalés visuellement. */
+  aiFields?: string[];
+  /** Champs déduits à faible confiance — surlignés plus fort, à vérifier. */
+  uncertainFields?: string[];
 }) {
+  // Classes complètes, jamais interpolées (le JIT doit les voir).
+  const cls = (name: string) =>
+    uncertainFields?.includes(name)
+      ? "input ring-2 ring-amber-400/70"
+      : aiFields?.includes(name)
+        ? "input ring-2 ring-celya-cyan/50"
+        : "input";
+  const status = normalizeStatus(prospect?.status);
+  // Une source héritée absente de la liste actuelle reste sélectionnable —
+  // sinon l'enregistrement l'effacerait silencieusement.
+  const sourceOptions =
+    prospect?.source && !SOURCES.includes(prospect.source)
+      ? [prospect.source, ...SOURCES]
+      : SOURCES;
   return (
     <form action={action} className="space-y-5">
-      {client && <input type="hidden" name="id" value={client.id} />}
+      {prospect?.id && <input type="hidden" name="id" value={prospect.id} />}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
@@ -27,8 +52,8 @@ export function ClientForm({
             id="company_name"
             name="company_name"
             required
-            defaultValue={client?.company_name ?? ""}
-            className="input"
+            defaultValue={prospect?.company_name ?? ""}
+            className={cls("company_name")}
             placeholder="Boulangerie Dupont SRL"
           />
         </div>
@@ -40,8 +65,8 @@ export function ClientForm({
           <input
             id="contact_name"
             name="contact_name"
-            defaultValue={client?.contact_name ?? ""}
-            className="input"
+            defaultValue={prospect?.contact_name ?? ""}
+            className={cls("contact_name")}
             placeholder="Marie Dupont"
           />
         </div>
@@ -54,8 +79,8 @@ export function ClientForm({
             id="phone"
             name="phone"
             type="tel"
-            defaultValue={client?.phone ?? ""}
-            className="input"
+            defaultValue={prospect?.phone ?? ""}
+            className={cls("phone")}
             placeholder="+32 470 00 00 00"
           />
         </div>
@@ -68,8 +93,8 @@ export function ClientForm({
             id="email"
             name="email"
             type="email"
-            defaultValue={client?.email ?? ""}
-            className="input"
+            defaultValue={prospect?.email ?? ""}
+            className={cls("email")}
             placeholder="contact@societe.be"
           />
           <p className="mt-1 text-[11px] text-slate-500">
@@ -84,8 +109,8 @@ export function ClientForm({
           <input
             id="website"
             name="website"
-            defaultValue={client?.website ?? ""}
-            className="input"
+            defaultValue={prospect?.website ?? ""}
+            className={cls("website")}
             placeholder="societe.be"
           />
         </div>
@@ -97,8 +122,8 @@ export function ClientForm({
           <input
             id="sector"
             name="sector"
-            defaultValue={client?.sector ?? ""}
-            className="input"
+            defaultValue={prospect?.sector ?? ""}
+            className={cls("sector")}
             placeholder="Horeca, garage, cabinet…"
           />
         </div>
@@ -110,21 +135,21 @@ export function ClientForm({
           <input
             id="city"
             name="city"
-            defaultValue={client?.city ?? ""}
-            className="input"
+            defaultValue={prospect?.city ?? ""}
+            className={cls("city")}
             placeholder="Bruxelles"
           />
         </div>
 
         <div>
           <label className="label" htmlFor="status">
-            Statut
+            Étape
           </label>
           <select
             id="status"
             name="status"
-            defaultValue={client?.status ?? "nouveau"}
-            className="input"
+            defaultValue={status}
+            className={cls("status")}
           >
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
@@ -141,11 +166,11 @@ export function ClientForm({
           <select
             id="source"
             name="source"
-            defaultValue={client?.source ?? ""}
-            className="input"
+            defaultValue={prospect?.source ?? ""}
+            className={cls("source")}
           >
             <option value="">—</option>
-            {SOURCES.map((s) => (
+            {sourceOptions.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -153,6 +178,8 @@ export function ClientForm({
           </select>
         </div>
 
+        {/* Plus de probabilité à saisir : la confiance est estimée par
+            l'assistant (et se corrige en tête de fiche). */}
         <div>
           <label className="label" htmlFor="value_estimate">
             Valeur estimée (€)
@@ -161,7 +188,7 @@ export function ClientForm({
             id="value_estimate"
             name="value_estimate"
             inputMode="decimal"
-            defaultValue={client?.value_estimate ?? ""}
+            defaultValue={prospect?.value_estimate ?? ""}
             className="input"
             placeholder="4800"
           />
@@ -174,7 +201,7 @@ export function ClientForm({
           <select
             id="owner_id"
             name="owner_id"
-            defaultValue={client?.owner_id ?? currentUserId ?? "none"}
+            defaultValue={prospect?.owner_id ?? currentUserId ?? "none"}
             className="input"
           >
             <option value="none">Non assigné (visible par tous)</option>
@@ -194,13 +221,13 @@ export function ClientForm({
             id="notes"
             name="notes"
             rows={3}
-            defaultValue={client?.notes ?? ""}
-            className="input resize-y"
+            defaultValue={prospect?.notes ?? ""}
+            className={`${cls("notes")} resize-y`}
             placeholder="Contexte, besoins, interlocuteurs, contraintes…"
           />
         </div>
 
-        {client?.status === "perdu" && (
+        {status === "perdu" && (
           <div className="sm:col-span-2">
             <label className="label" htmlFor="lost_reason">
               Raison de la perte
@@ -208,7 +235,7 @@ export function ClientForm({
             <input
               id="lost_reason"
               name="lost_reason"
-              defaultValue={client?.lost_reason ?? ""}
+              defaultValue={prospect?.lost_reason ?? ""}
               className="input"
               placeholder="Budget, timing, concurrent…"
             />

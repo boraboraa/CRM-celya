@@ -1,18 +1,16 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
-import { ImportWizard } from "@/components/ImportWizard";
+import { NewProspectAssist } from "@/components/NewProspectAssist";
 import type { Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function ImportPage() {
-  const session = await getSession();
-  if (!session?.me?.is_active) redirect("/dashboard");
-
+export default async function NewProspectPage() {
   const supabase = await createClient();
+  const session = await getSession();
+
   const { data } = await supabase
     .from("crm_users")
     .select("id, full_name, email")
@@ -24,16 +22,16 @@ export default async function ImportPage() {
   return (
     <>
       <PageHeader
-        title="Importer des prospects"
-        subtitle="Chargez une liste d'entreprises depuis un fichier CSV."
+        title="Nouveau prospect"
+        subtitle="Collez ce que vous avez trouvé — la fiche se pré-remplit, vous validez."
         action={
-          <Link href="/clients" className="btn-ghost">
+          <Link href="/prospects" className="btn-ghost">
             Annuler
           </Link>
         }
       />
 
-      <ImportWizard members={members} currentUserId={session.userId} />
+      <NewProspectAssist members={members} currentUserId={session?.userId} />
     </>
   );
 }

@@ -1,62 +1,112 @@
-import type { ActivityType, ClientStatus } from "./types";
+import type {
+  ActivityType,
+  ConfidenceLevel,
+  EmailIntent,
+  ProspectStatus,
+} from "./types";
 
-export const STATUS_ORDER: ClientStatus[] = [
-  "nouveau",
+export const STATUS_ORDER: ProspectStatus[] = [
+  "a_appeler",
   "contacte",
-  "qualifie",
+  "rendez_vous",
   "proposition",
-  "negociation",
   "gagne",
   "perdu",
 ];
 
-export const STATUS_LABEL: Record<ClientStatus, string> = {
-  nouveau: "Nouveau",
+export const STATUS_LABEL: Record<ProspectStatus, string> = {
+  a_appeler: "À appeler",
   contacte: "Contacté",
-  qualifie: "Qualifié",
+  rendez_vous: "Rendez-vous",
   proposition: "Proposition",
-  negociation: "Négociation",
   gagne: "Gagné",
   perdu: "Perdu",
 };
 
-/** Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir). */
-export const STATUS_CHIP: Record<ClientStatus, string> = {
-  nouveau: "bg-slate-500/15 text-slate-300 ring-slate-400/25",
+/**
+ * Une couleur franche par étape, la même partout où l'étape apparaît (badge,
+ * bandeau de colonne, liseré de carte). Progression froid → chaud à mesure que
+ * l'affaire avance — ardoise, cyan, bleu, ambre — puis le vert/rouge sémantique.
+ * Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir).
+ */
+export const STATUS_CHIP: Record<ProspectStatus, string> = {
+  a_appeler: "bg-slate-500/15 text-slate-300 ring-slate-400/25",
   contacte: "bg-cyan-500/15 text-cyan-300 ring-cyan-400/25",
-  qualifie: "bg-blue-500/15 text-blue-300 ring-blue-400/25",
-  proposition: "bg-indigo-500/15 text-indigo-300 ring-indigo-400/25",
-  negociation: "bg-violet-500/15 text-violet-300 ring-violet-400/25",
+  rendez_vous: "bg-blue-500/15 text-blue-300 ring-blue-400/25",
+  proposition: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
   gagne: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/25",
   perdu: "bg-rose-500/15 text-rose-300 ring-rose-400/25",
 };
 
-export const STATUS_DOT: Record<ClientStatus, string> = {
-  nouveau: "bg-slate-400",
+export const STATUS_DOT: Record<ProspectStatus, string> = {
+  a_appeler: "bg-slate-400",
   contacte: "bg-cyan-400",
-  qualifie: "bg-blue-400",
-  proposition: "bg-indigo-400",
-  negociation: "bg-violet-400",
+  rendez_vous: "bg-blue-400",
+  proposition: "bg-amber-400",
   gagne: "bg-emerald-400",
   perdu: "bg-rose-400",
 };
 
-export const ACTIVITY_LABEL: Record<ActivityType, string> = {
-  appel: "Appel",
-  email: "Email",
-  note: "Note",
-  reunion: "Réunion",
-  whatsapp: "WhatsApp",
-  linkedin: "LinkedIn",
+/** Pictogramme d'étape — la couleur ne porte jamais seule (daltonisme). */
+export const STATUS_ICON: Record<ProspectStatus, string> = {
+  a_appeler: "☎",
+  contacte: "✎",
+  rendez_vous: "◆",
+  proposition: "✉",
+  gagne: "✓",
+  perdu: "✕",
 };
 
-export const ACTIVITY_ICON: Record<ActivityType, string> = {
-  appel: "📞",
-  email: "✉",
-  note: "✎",
-  reunion: "◷",
-  whatsapp: "◍",
-  linkedin: "in",
+/** Liseré gauche des cartes du pipeline, dans la couleur de l'étape. */
+export const STATUS_EDGE: Record<ProspectStatus, string> = {
+  a_appeler: "border-l-slate-400/70",
+  contacte: "border-l-cyan-400/80",
+  rendez_vous: "border-l-blue-400/80",
+  proposition: "border-l-amber-400/80",
+  gagne: "border-l-emerald-400/80",
+  perdu: "border-l-rose-400/70",
+};
+
+/**
+ * Ramène n'importe quelle valeur de statut (y compris les anciennes, encore
+ * possibles dans des données pas encore migrées) vers l'une des six étapes.
+ * Garde-fou permanent : l'affichage ne casse jamais sur un statut inconnu.
+ */
+const LEGACY_STATUS: Record<string, ProspectStatus> = {
+  sans_reponse: "contacte",
+  contact_etabli: "contacte",
+  rappel_programme: "contacte",
+  rdv: "rendez_vous",
+  nouveau: "a_appeler",
+  qualifie: "rendez_vous",
+  negociation: "proposition",
+};
+
+export function normalizeStatus(raw: string | null | undefined): ProspectStatus {
+  if (!raw) return "a_appeler";
+  if ((STATUS_ORDER as string[]).includes(raw)) return raw as ProspectStatus;
+  return LEGACY_STATUS[raw] ?? "a_appeler";
+}
+
+// ---------------------------------------------------------------------------
+// Tri des réponses email (boîte Zoho)
+// ---------------------------------------------------------------------------
+
+export const INTENT_LABEL: Record<EmailIntent, string> = {
+  interesse: "Intéressé",
+  demande_info: "Demande d'information",
+  pas_interesse: "Pas intéressé",
+  rappel_plus_tard: "Recontacter plus tard",
+  absence: "Absence (réponse automatique)",
+  hors_sujet: "Hors sujet",
+};
+
+// ---------------------------------------------------------------------------
+
+export const ACTIVITY_LABEL: Record<ActivityType, string> = {
+  note: "Note",
+  email: "Email",
+  rendez_vous: "Rendez-vous",
 };
 
 export const PRIORITY_LABEL: Record<number, string> = {
@@ -66,8 +116,8 @@ export const PRIORITY_LABEL: Record<number, string> = {
 };
 
 export const SOURCES = [
-  "Appel sortant",
-  "Appel entrant",
+  "Prospection",
+  "Contact entrant",
   "Site web",
   "LinkedIn",
   "Recommandation",
@@ -107,6 +157,41 @@ export function fmtMoney(value?: number | null, currency = "EUR"): string {
     maximumFractionDigits: 0,
   }).format(value);
 }
+
+// ---------------------------------------------------------------------------
+// Confiance commerciale (Chaud / Tiède / Froid) — estimée par l'IA
+// ---------------------------------------------------------------------------
+
+export const CONFIDENCE_ORDER: ConfidenceLevel[] = ["chaud", "tiede", "froid"];
+
+export const CONFIDENCE_LABEL: Record<ConfidenceLevel, string> = {
+  chaud: "Chaud",
+  tiede: "Tiède",
+  froid: "Froid",
+};
+
+/**
+ * Chaud = orange/rouge (« ça brûle »), tiède = ambre, froid = bleu/ardoise.
+ * La couleur ne porte jamais seule : libellé + pictogramme l'accompagnent.
+ * Classes complètes, jamais interpolées (règle JIT).
+ */
+export const CONFIDENCE_CHIP: Record<ConfidenceLevel, string> = {
+  chaud: "bg-orange-500/15 text-orange-300 ring-orange-400/30",
+  tiede: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
+  froid: "bg-sky-500/15 text-sky-300 ring-sky-400/25",
+};
+
+export const CONFIDENCE_ICON: Record<ConfidenceLevel, string> = {
+  chaud: "♨",
+  tiede: "◐",
+  froid: "❄",
+};
+
+/** L'état honnête quand rien n'a (encore) pu être estimé. */
+export const CONFIDENCE_PENDING_LABEL = "À évaluer";
+export const CONFIDENCE_PENDING_CHIP =
+  "bg-white/[0.04] text-slate-400 ring-white/10";
+export const CONFIDENCE_PENDING_ICON = "…";
 
 /** « il y a 3 jours » / « dans 2 h » */
 export function relative(value?: string | null): string {

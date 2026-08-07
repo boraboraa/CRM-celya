@@ -68,6 +68,18 @@ export function inDaysAt9(days: number): string {
   return localInputToISO(`${localDate}T09:00`) ?? target.toISOString();
 }
 
+/**
+ * Convertit une saisie de date locale — « YYYY-MM-DD » (échéance à 09:00) ou
+ * « YYYY-MM-DDTHH:mm » (heure précise, ex. rendez-vous) — vers un ISO UTC.
+ */
+export function dateInputToISO(value?: string | null): string | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return localInputToISO(`${v}T09:00`);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return localInputToISO(v.slice(0, 16));
+  return null;
+}
+
 /** Bornes du jour courant (heure de Bruxelles) exprimées en ISO UTC. */
 export function todayBounds(): { start: string; end: string } {
   const today = isoToLocalInput(new Date().toISOString()).slice(0, 10);

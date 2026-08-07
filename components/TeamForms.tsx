@@ -72,7 +72,7 @@ export function CreateUserForm() {
             Rôle
           </label>
           <select id="role" name="role" defaultValue="commercial" className="input">
-            <option value="commercial">Commercial — voit ses clients assignés</option>
+            <option value="commercial">Commercial — voit ses prospects assignés</option>
             <option value="admin">Administrateur — voit tout</option>
           </select>
         </div>

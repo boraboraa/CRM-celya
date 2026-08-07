@@ -1,12 +1,101 @@
 import Link from "next/link";
-import type { ClientStatus } from "@/lib/types";
-import { STATUS_CHIP, STATUS_LABEL, STATUS_DOT, initials } from "@/lib/constants";
+import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
+import {
+  STATUS_CHIP,
+  STATUS_LABEL,
+  STATUS_ICON,
+  CONFIDENCE_CHIP,
+  CONFIDENCE_LABEL,
+  CONFIDENCE_ICON,
+  CONFIDENCE_PENDING_CHIP,
+  CONFIDENCE_PENDING_LABEL,
+  CONFIDENCE_PENDING_ICON,
+  initials,
+  relative,
+} from "@/lib/constants";
+import {
+  LAST_ACTION_ICON,
+  LAST_ACTION_LABEL,
+  type LastActionKind,
+} from "@/lib/crm/lastAction";
 
-export function StatusChip({ status }: { status: ClientStatus }) {
+export function StatusChip({ status }: { status: ProspectStatus }) {
   return (
     <span className={`chip ${STATUS_CHIP[status]}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
+      <span aria-hidden className="text-[10px] leading-none">
+        {STATUS_ICON[status]}
+      </span>
       {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+/**
+ * Confiance estimée par l'IA : Chaud (orange/rouge) / Tiède (ambre) /
+ * Froid (bleu-ardoise), toujours avec libellé + pictogramme — la couleur ne
+ * porte jamais seule. Sans estimation (IA indisponible, pas assez
+ * d'éléments), le badge dit honnêtement « À évaluer ».
+ */
+export function ConfidenceBadge({
+  level,
+  reason,
+  locked = false,
+}: {
+  level: ConfidenceLevel | null;
+  /** La raison courte, montrée en infobulle (les pages l'affichent en clair). */
+  reason?: string | null;
+  /** Niveau fixé à la main par Bora. */
+  locked?: boolean;
+}) {
+  const chip = level ? CONFIDENCE_CHIP[level] : CONFIDENCE_PENDING_CHIP;
+  const label = level ? CONFIDENCE_LABEL[level] : CONFIDENCE_PENDING_LABEL;
+  const icon = level ? CONFIDENCE_ICON[level] : CONFIDENCE_PENDING_ICON;
+  const title = locked
+    ? `Confiance fixée par vous : ${label}`
+    : reason
+      ? `${label} — ${reason}`
+      : level
+        ? `Confiance estimée : ${label}`
+        : "Pas encore d'estimation — l'assistant évalue après chaque échange.";
+  return (
+    <span className={`chip ${chip}`} title={title}>
+      <span aria-hidden className="text-[10px] leading-none">
+        {icon}
+      </span>
+      {label}
+      {locked && <span aria-hidden>🔒</span>}
+    </span>
+  );
+}
+
+/**
+ * La DERNIÈRE ACTION d'une fiche : canal + résultat + date relative —
+ * « 📧 Mail envoyé · il y a 2 j », « 📞 Appelé, pas de réponse · il y a 3 j ».
+ * Même ligne sur la liste et sur les cartes du pipeline, dérivée du dernier
+ * événement réel du journal (vue prospect_action_state), jamais du texte.
+ */
+export function LastActionLine({
+  kind,
+  at,
+}: {
+  kind: LastActionKind | null | undefined;
+  at: string | null | undefined;
+}) {
+  if (!kind || !at) {
+    return <span className="text-xs text-slate-600">Aucune action</span>;
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-xs text-slate-300"
+      title={`${LAST_ACTION_LABEL[kind]} — ${relative(at)}`}
+    >
+      <span aria-hidden className="text-[13px] leading-none">
+        {LAST_ACTION_ICON[kind]}
+      </span>
+      <span className="truncate">
+        {LAST_ACTION_LABEL[kind]}
+        <span className="text-slate-500"> · {relative(at)}</span>
+      </span>
     </span>
   );
 }

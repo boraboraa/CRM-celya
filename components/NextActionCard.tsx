@@ -1,13 +1,13 @@
 "use client";
 
-import { useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import {
   completeTaskAction,
   rescheduleTaskAction,
 } from "@/app/actions";
 import { relative } from "@/lib/constants";
-import { isoToLocalInput } from "@/lib/time";
-import type { NextAction } from "@/lib/crm/nextAction";
+import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { deriveNextAction, type NextAction } from "@/lib/crm/nextAction";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -35,27 +35,61 @@ export function NextActionCard({
   prospectId: string;
 }) {
   const [pending, startTransition] = useTransition();
-  const { task, context, when, overdue, isMeeting } = action;
+  const [erreur, setErreur] = useState<string>();
+
+  /**
+   * L'action telle qu'elle s'affiche MAINTENANT. Reporter ou marquer fait
+   * repeint le bloc immédiatement ; à la fin de la transition, `useOptimistic`
+   * rend la main aux données du serveur — donc en cas d'échec le bloc revient
+   * tout seul à son état d'origine.
+   */
+  const [vue, appliquer] = useOptimistic(
+    action,
+    (etat: NextAction, patch: { due_at?: string; fait?: true }): NextAction => {
+      if (!etat.task) return etat;
+      // On repasse par deriveNextAction — la même fonction que le serveur —
+      // pour que la phrase affichée soit exactement celle qui arrivera. Le
+      // contexte, lui, vient du journal : aucun de ces deux gestes ne le
+      // change, on le garde tel quel.
+      const taches = patch.fait
+        ? []
+        : [{ ...etat.task, due_at: patch.due_at ?? etat.task.due_at }];
+      return { ...deriveNextAction(taches, null, null), context: etat.context };
+    }
+  );
+
+  const { task, context, when, overdue, isMeeting } = vue;
 
   // Reporter en conservant l'heure (un RDV à 14:00 le reste).
   const dueTime = task ? isoToLocalInput(task.due_at).slice(11, 16) || "09:00" : "09:00";
 
-  function reschedule(date: string) {
-    if (!task || !date) return;
+  function champs(extra: Record<string, string>) {
     const fd = new FormData();
-    fd.set("id", task.id);
+    fd.set("id", action.task!.id);
     fd.set("prospect_id", prospectId);
-    fd.set("due_local", `${date}T${dueTime}`);
-    startTransition(() => rescheduleTaskAction(fd));
+    for (const [k, v] of Object.entries(extra)) fd.set(k, v);
+    return fd;
+  }
+
+  function reschedule(date: string) {
+    if (!action.task || !date) return;
+    const local = `${date}T${dueTime}`;
+    setErreur(undefined);
+    startTransition(async () => {
+      appliquer({ due_at: localInputToISO(local) ?? action.task!.due_at });
+      const res = await rescheduleTaskAction(champs({ due_local: local }));
+      if (res?.error) setErreur(res.error);
+    });
   }
 
   function complete() {
-    if (!task) return;
-    const fd = new FormData();
-    fd.set("id", task.id);
-    fd.set("prospect_id", prospectId);
-    fd.set("done", "1");
-    startTransition(() => completeTaskAction(fd));
+    if (!action.task) return;
+    setErreur(undefined);
+    startTransition(async () => {
+      appliquer({ fait: true });
+      const res = await completeTaskAction(champs({ done: "1" }));
+      if (res?.error) setErreur(res.error);
+    });
   }
 
   const accent = overdue
@@ -114,6 +148,15 @@ export function NextActionCard({
             faire&nbsp;».
           </p>
         </>
+      )}
+
+      {erreur && (
+        <p
+          role="alert"
+          className="mt-3 rounded-xl bg-rose-500/10 px-3.5 py-2 text-xs text-rose-300 ring-1 ring-rose-400/20"
+        >
+          {erreur}
+        </p>
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">

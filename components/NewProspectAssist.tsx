@@ -177,6 +177,7 @@ export function NewProspectAssist({
               <li key={d.id} className="text-xs text-slate-300">
                 <Link
                   href={`/prospects/${d.id}`}
+                  prefetch={false}
                   className="font-medium text-celya-cyan hover:underline"
                 >
                   {d.company_name}

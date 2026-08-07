@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import {
   setProspectStatusAction,
   unlockProspectStatusAction,
@@ -36,12 +36,37 @@ export function StatusControl({
   suggestion: { status: ProspectStatus; reason: string | null } | null;
 }) {
   const [pending, startTransition] = useTransition();
+  const [erreur, setErreur] = useState<string>();
 
-  function submit(action: (fd: FormData) => Promise<void>, fields: Record<string, string>) {
+  /**
+   * L'étape telle qu'elle s'affiche MAINTENANT. Cliquer une pastille la
+   * sélectionne à l'instant, avec son verrou : Bora n'attend plus l'aller-
+   * retour pour voir sa décision prise. Si le serveur refuse, `useOptimistic`
+   * rend la main à la valeur serveur à la fin de la transition — la pastille
+   * revient d'elle-même, et le message dit pourquoi.
+   */
+  const [vue, appliquer] = useOptimistic(
+    { status, locked },
+    (
+      etat: { status: ProspectStatus; locked: boolean },
+      patch: Partial<{ status: ProspectStatus; locked: boolean }>
+    ) => ({ ...etat, ...patch })
+  );
+
+  function submit(
+    action: (fd: FormData) => Promise<{ error?: string }>,
+    fields: Record<string, string>,
+    optimiste: Partial<{ status: ProspectStatus; locked: boolean }>
+  ) {
     const fd = new FormData();
     fd.set("id", prospectId);
     for (const [k, v] of Object.entries(fields)) fd.set(k, v);
-    startTransition(() => action(fd));
+    setErreur(undefined);
+    startTransition(async () => {
+      appliquer(optimiste);
+      const res = await action(fd);
+      if (res?.error) setErreur(res.error);
+    });
   }
 
   return (
@@ -49,13 +74,18 @@ export function StatusControl({
       {/* Les six étapes, cliquables. Un clic = une décision humaine. */}
       <div className="flex flex-wrap gap-1.5">
         {STATUS_ORDER.map((s) => {
-          const active = s === status;
+          const active = s === vue.status;
           return (
             <button
               key={s}
               type="button"
               disabled={pending || active}
-              onClick={() => submit(setProspectStatusAction, { status: s })}
+              onClick={() =>
+                submit(setProspectStatusAction, { status: s }, {
+                  status: s,
+                  locked: true,
+                })
+              }
               aria-pressed={active}
               title={active ? `Étape actuelle : ${STATUS_LABEL[s]}` : `Passer en « ${STATUS_LABEL[s]} »`}
               className={`chip transition duration-200 ${
@@ -72,7 +102,7 @@ export function StatusControl({
       </div>
 
       {/* Pourquoi l'étape a bougé toute seule — la transparence exigée. */}
-      {!locked && autoReason && (
+      {!vue.locked && autoReason && (
         <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-500">
           <span aria-hidden className="text-celya-cyan">
             ✦
@@ -82,14 +112,14 @@ export function StatusControl({
       )}
 
       {/* Fiche verrouillée : l'IA ne peut plus que proposer. */}
-      {locked && (
+      {vue.locked && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
           <span aria-hidden>🔒</span>
           <span>Étape fixée par vous — l&apos;assistant n&apos;y touchera plus.</span>
           <button
             type="button"
             disabled={pending}
-            onClick={() => submit(unlockProspectStatusAction, {})}
+            onClick={() => submit(unlockProspectStatusAction, {}, { locked: false })}
             className="underline decoration-dotted underline-offset-2 transition hover:text-slate-300"
           >
             Rendre la main à l&apos;assistant
@@ -98,7 +128,7 @@ export function StatusControl({
       )}
 
       {/* La suggestion discrète, quand les faits ont dépassé le choix figé. */}
-      {locked && suggestion && (
+      {vue.locked && suggestion && (
         <div className="rounded-xl bg-celya-blue/[0.08] px-3.5 py-2.5 ring-1 ring-celya-blue/25">
           <p className="text-[11px] leading-relaxed text-slate-300">
             {suggestion.reason
@@ -111,7 +141,11 @@ export function StatusControl({
               type="button"
               disabled={pending}
               onClick={() =>
-                submit(acceptStatusSuggestionAction, { status: suggestion.status })
+                submit(
+                  acceptStatusSuggestionAction,
+                  { status: suggestion.status },
+                  { status: suggestion.status, locked: true }
+                )
               }
               className="rounded-lg bg-white/[0.07] px-2.5 py-1 text-[11px] font-medium text-slate-100 ring-1 ring-white/15 transition hover:bg-white/[0.12]"
             >
@@ -119,6 +153,15 @@ export function StatusControl({
             </button>
           </div>
         </div>
+      )}
+
+      {erreur && (
+        <p
+          role="alert"
+          className="rounded-xl bg-rose-500/10 px-3.5 py-2 text-[11px] text-rose-300 ring-1 ring-rose-400/20"
+        >
+          {erreur}
+        </p>
       )}
     </div>
   );

@@ -5,20 +5,21 @@ import { getSession } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
 import { ProspectForm } from "@/components/ProspectForm";
-import { QuickNote } from "@/components/QuickNote";
+import { ProspectJournal } from "@/components/ProspectJournal";
 import { StatusControl } from "@/components/StatusControl";
 import { NextActionCard } from "@/components/NextActionCard";
-import { Timeline, type TimelineEntry } from "@/components/Timeline";
+import { type TimelineEntry } from "@/components/Timeline";
 import { DeleteEntryButton } from "@/components/DeleteEntryButton";
-import { EmailComposer } from "@/components/EmailComposer";
 import { DateField } from "@/components/DateField";
-import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
+import { type TaskWithProspect } from "@/components/TaskRow";
+import { TaskList } from "@/components/TaskList";
+import { RelancesSection } from "@/components/RelancesSection";
 import {
   updateProspectAction,
   deleteProspectAction,
   createTaskAction,
 } from "@/app/actions";
-import { readProspectFacts, evaluateStatus } from "@/lib/crm/status";
+import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
 import {
   normalizeStatus,
@@ -28,7 +29,6 @@ import {
 } from "@/lib/constants";
 import type { Activity, Prospect, Email, Profile } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
 
 type ActivityRow = Activity & { crm_users: { full_name: string | null } | null };
 
@@ -50,6 +50,9 @@ export default async function ProspectDetailPage({
   const supabase = await createClient();
   const session = await getSession();
 
+  // Les emails portent un corps HTML et un `raw` jsonb qui ne servent pas ici :
+  // on ne demande que ce qui s'affiche. Les activités montent à 200 parce que
+  // les faits d'étape se lisent sur la même moisson (voir plus bas).
   const [prospectRes, membersRes, activitiesRes, emailsRes, tasksRes] =
     await Promise.all([
       supabase.from("prospects").select("*").eq("id", id).maybeSingle(),
@@ -60,13 +63,15 @@ export default async function ProspectDetailPage({
         .order("full_name"),
       supabase
         .from("activities")
-        .select("*, crm_users!activities_author_id_fkey(full_name)")
+        .select(
+          "id, type, subject, body, outcome, occurred_at, is_draft, is_exchange, crm_users!activities_author_id_fkey(full_name)"
+        )
         .eq("prospect_id", id)
         .order("occurred_at", { ascending: false })
-        .limit(100),
+        .limit(200),
       supabase
         .from("emails")
-        .select("*")
+        .select("id, direction, from_email, subject, body_text, received_at")
         .eq("prospect_id", id)
         .order("received_at", { ascending: false })
         .limit(50),
@@ -83,14 +88,6 @@ export default async function ProspectDetailPage({
 
   const status = normalizeStatus(prospect.status);
 
-  // L'étape confrontée aux faits. Sur une fiche verrouillée, le verdict ne
-  // sert qu'à proposer — jamais à écrire (voir lib/crm/status.ts).
-  const facts = await readProspectFacts(supabase, id);
-  const verdict = evaluateStatus(status, Boolean(prospect.status_locked), facts);
-  const suggestion = verdict.suggest
-    ? { status: verdict.derived, reason: verdict.reason }
-    : null;
-
   const members = (membersRes.data ?? []) as Pick<
     Profile,
     "id" | "full_name" | "email"
@@ -103,9 +100,34 @@ export default async function ProspectDetailPage({
   // Chronologie — les vrais échanges seulement. Les brouillons sont écartés
   // ici et regroupés dans leur propre espace, plus bas.
   // ---------------------------------------------------------------------
-  const activities = (activitiesRes.data ?? []) as unknown as ActivityRow[];
+  const allActivities = (activitiesRes.data ?? []) as unknown as ActivityRow[];
   const emails = (emailsRes.data ?? []) as Email[];
+  const tasks = (tasksRes.data ?? []) as unknown as TaskWithProspect[];
+  // Les tâches annulées ne sont pas affichées : TaskRow les rendrait comme
+  // des relances actives en retard.
+  const openTasks = tasks.filter((t) => t.status === "a_faire");
+  const doneTasks = tasks.filter((t) => t.status === "fait");
 
+  // L'étape confrontée aux faits — déduits des lignes DÉJÀ chargées ci-dessus.
+  // C'est la même règle qu'avant (lib/crm/status.ts), simplement lue sans
+  // redemander activités, emails, relances et fiche à la base : quatre
+  // allers-retours économisés à chaque ouverture de fiche.
+  // Sur une fiche verrouillée, le verdict ne sert qu'à proposer, jamais à
+  // écrire.
+  const facts = factsFromRows({
+    activities: allActivities,
+    emails,
+    openTasks,
+    proposalSentAt: prospect.proposal_sent_at ?? null,
+  });
+  const verdict = evaluateStatus(status, Boolean(prospect.status_locked), facts);
+  const suggestion = verdict.suggest
+    ? { status: verdict.derived, reason: verdict.reason }
+    : null;
+
+  // L'affichage reste sur les 100 événements les plus récents, comme avant ;
+  // seuls les faits lisent plus loin.
+  const activities = allActivities.slice(0, 100);
   const drafts = activities.filter((a) => a.is_draft);
 
   const timeline: TimelineEntry[] = [
@@ -144,12 +166,6 @@ export default async function ProspectDetailPage({
       by: e.from_email,
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-
-  const tasks = (tasksRes.data ?? []) as unknown as TaskWithProspect[];
-  // Les tâches annulées ne sont pas affichées : TaskRow les rendrait comme
-  // des relances actives en retard.
-  const openTasks = tasks.filter((t) => t.status === "a_faire");
-  const doneTasks = tasks.filter((t) => t.status === "fait");
 
   // « Prochaine action » — dérivée sans le moindre appel à un modèle.
   const lastEvent: LastEvent = timeline[0]
@@ -229,60 +245,17 @@ export default async function ProspectDetailPage({
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ---------- Colonne principale ---------- */}
         <div className="space-y-8 lg:col-span-2">
-          {/* ---------- 2. CHRONOLOGIE ---------- */}
-          <section>
-            <h2 className="mb-4 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Chronologie
-            </h2>
-            <Timeline
-              entries={timeline}
-              renderAction={
-                isAdmin
-                  ? (entry) => (
-                      <DeleteEntryButton
-                        id={entry.id}
-                        prospectId={prospect.id}
-                        source={entry.source}
-                        isRealEmail={entry.source === "email"}
-                        label="cette entrée du journal"
-                      />
-                    )
-                  : undefined
-              }
-            />
-          </section>
-
-          {/* ---------- 3. Puis seulement les formulaires ---------- */}
-          <section id="noter-un-echange" className="scroll-mt-6">
-            <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Noter un échange
-            </h2>
-            {/* Le sélecteur d'étape part sur « ne pas changer » : aucun état
-                local ne peut plus rétrograder la fiche. */}
-            <QuickNote
-              prospectId={prospect.id}
-              companyName={prospect.company_name}
-              contactName={prospect.contact_name}
-            />
-          </section>
-
-          {prospect.email && (
-            <section>
-              <details className="card p-0">
-                <summary className="cursor-pointer px-6 py-4 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-                  Écrire un email
-                </summary>
-                <div className="px-1 pb-1">
-                  <EmailComposer
-                    prospectId={prospect.id}
-                    defaultTo={prospect.email}
-                    contactName={prospect.contact_name}
-                    companyName={prospect.company_name}
-                  />
-                </div>
-              </details>
-            </section>
-          )}
+          {/* ---------- 2. CHRONOLOGIE, puis 3. « Noter un échange » ----------
+              Les deux vivent ensemble : l'échange consigné s'inscrit dans le
+              fil à l'instant du clic, sans attendre le serveur. */}
+          <ProspectJournal
+            entries={timeline}
+            prospectId={prospect.id}
+            companyName={prospect.company_name}
+            contactName={prospect.contact_name}
+            prospectEmail={prospect.email}
+            isAdmin={Boolean(isAdmin)}
+          />
 
           <section>
             <details className="card p-6">
@@ -369,53 +342,7 @@ export default async function ProspectDetailPage({
               Relances
             </h2>
 
-            {openTasks.length === 0 ? (
-              <p className="card px-5 py-6 text-center text-sm text-slate-500">
-                Aucune relance planifiée.
-              </p>
-            ) : (
-              <ul className="card divide-y divide-white/[0.05]">
-                {openTasks.map((t) => (
-                  <TaskRow key={t.id} task={t} compact />
-                ))}
-              </ul>
-            )}
-
-            <details className="mt-3">
-              <summary className="cursor-pointer px-1 text-xs text-slate-500 transition hover:text-slate-300">
-                Planifier une relance
-              </summary>
-              <form action={createTaskAction} className="card mt-2 space-y-3 p-5">
-                <input type="hidden" name="prospect_id" value={prospect.id} />
-                <div>
-                  <label className="label" htmlFor="title">
-                    Quoi faire
-                  </label>
-                  <input
-                    id="title"
-                    name="title"
-                    required
-                    className="input"
-                    placeholder="Relancer pour le devis"
-                  />
-                </div>
-                <div>
-                  <span className="label">Quand</span>
-                  <DateField name="due_local" required compact />
-                </div>
-                <div>
-                  <label className="label" htmlFor="priority">
-                    Priorité
-                  </label>
-                  <select id="priority" name="priority" defaultValue="2" className="input">
-                    <option value="1">Haute</option>
-                    <option value="2">Normale</option>
-                    <option value="3">Basse</option>
-                  </select>
-                </div>
-                <button className="btn-primary w-full">Planifier</button>
-              </form>
-            </details>
+            <RelancesSection prospectId={prospect.id} openTasks={openTasks} />
 
             {doneTasks.length > 0 && (
               <details className="mt-3">
@@ -423,11 +350,11 @@ export default async function ProspectDetailPage({
                   {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} passée
                   {doneTasks.length > 1 ? "s" : ""}
                 </summary>
-                <ul className="card mt-2 divide-y divide-white/[0.05]">
-                  {doneTasks.map((t) => (
-                    <TaskRow key={t.id} task={t} compact />
-                  ))}
-                </ul>
+                <TaskList
+                  tasks={doneTasks}
+                  compact
+                  className="card mt-2 divide-y divide-white/[0.05]"
+                />
               </details>
             )}
           </section>

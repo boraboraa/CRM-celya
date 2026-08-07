@@ -567,14 +567,146 @@ suivre l'OAuth (se connecter avec le compte admin).
 
 ---
 
+## Vitesse et fluidité (7 août)
+
+Le CRM était lent, et surtout *mou* : chaque geste attendait le serveur avant
+que l'écran ne bouge. Mesuré, corrigé, re-mesuré — en local contre la base de
+production.
+
+Médianes sur 5 mesures, `npm start` local contre la base de production (le
+réseau du poste de mesure ajoute ~140 ms par aller-retour Supabase — c'est
+justement ce qui rend le nombre d'allers-retours lisible).
+
+| | avant | après |
+|---|---|---|
+| Rendu serveur — À faire | 725 ms | **175 ms** |
+| Rendu serveur — Prospects (liste / colonnes) | 433 / 440 ms | **164 / 164 ms** |
+| Rendu serveur — Fiche prospect | 727 ms | **165 ms** |
+| Rendu serveur — Équipe | 548 ms | **160 ms** |
+| Cocher une relance : avant que l'écran bouge | 1348 ms | **69 ms** |
+| Cocher une relance : réponse serveur | 474 ms | **241 ms** |
+| Glisser une carte : avant que l'écran bouge | 6 ms | **5 ms** (déjà optimiste) |
+| Glisser une carte : réponse serveur | 503 ms | **247 ms** |
+| Rendus serveur déclenchés par le seul affichage de la liste | **17** | **5** |
+
+S'y ajoute, non mesurable ici, le gain de la région : chaque aller-retour
+restant passe de ~100–200 ms (traversée de l'Atlantique) à quelques
+millisecondes une fois les fonctions dans `dub1`.
+
+Cinq causes, cinq corrections. **Ne pas les défaire.**
+
+**1. Deux appels réseau d'authentification par page.** `auth.getUser()`
+interroge Supabase Auth à chaque appel — une fois dans le middleware, une fois
+dans `getSession()`, une fois par server action. Or ce projet signe ses jetons
+en **ES256** (clés asymétriques) : `auth.getClaims()` vérifie la signature
+**en local** contre le JWKS, que `auth-js` met en cache pour tout le processus
+(`GLOBAL_JWKS`). Partout où l'identité est lue, c'est donc `getClaims()`.
+Le modèle de sécurité est intact : la signature est vérifiée
+cryptographiquement, **l'autorisation vient toujours de `crm_users` relu en
+base à chaque rendu** (un compte désactivé est coupé à la seconde — vérifié),
+et la RLS reste l'unique garde-fou des données. Un jeton révoqué reste valide
+jusqu'à son expiration pour la *redirection* seulement : il ne donne accès à
+aucune donnée, `is_member()` s'appuyant sur `crm_users`.
+
+**2. Le préchargement des liens de fiche.** Next précharge tout `<Link>` visible :
+la liste des prospects déclenchait **un rendu serveur complet de chaque fiche**
+— 17 rendus, ~150 requêtes SQL, pour une seule fiche que Bora finira par
+ouvrir. Les liens répétés (cartes du pipeline, lignes de la liste, `TaskRow`,
+`ReplyCard`) portent donc `prefetch={false}`. Les liens du **menu** gardent le
+préchargement : ils sont trois, et désormais bon marché (voir 3).
+
+**3. Squelettes de chargement.** `loading.tsx` sur `/dashboard`, `/prospects`,
+`/prospects/[id]`, `/equipe` (silhouettes dans `components/Skeleton.tsx`).
+Deux effets : au clic l'écran cible s'affiche tout de suite en silhouette au
+lieu de rester figé sur la page précédente, et le préchargement des liens du
+menu ne coûte plus que cette coquille. **Conséquence à connaître** : les pages
+sont maintenant *diffusées* (streaming) — le squelette arrive avant le
+contenu. Un test qui lit le DOM sur l'événement `load` verra le squelette ;
+attendre le contenu réel.
+
+**4. Requêtes en série.** La fiche prospect rechargeait activités, emails,
+relances et fiche une deuxième fois pour évaluer l'étape : `readProspectFacts`
+a été scindé en `factsFromRows` (fonction pure, la règle) et un lecteur, et la
+page déduit les faits des lignes **déjà chargées** — quatre allers-retours en
+moins. Le tableau « À faire » lançait sa cinquième requête après les quatre
+autres : les cinq partent ensemble et le croisement se fait en mémoire. Les
+`select("*")` des emails et activités sont réduits aux colonnes affichées.
+
+**5. L'IA sur le chemin critique.** `recalcConfidence` appelait le modèle
+**avant** de répondre : glisser une carte ou cocher une relance attendait une
+estimation que Bora ne regardait pas à cet instant. Elle part maintenant dans
+`after()` (réponse d'abord, estimation ensuite) — les mêmes événements la
+déclenchent, seul le moment où le badge se met à jour se décale au chargement
+suivant. **Restent synchrones** les deux gestes où Bora attend le résultat :
+« ✨ Réévaluer » et « Rendre la main à l'assistant ».
+
+### L'UI optimiste — le motif à reprendre
+
+`useOptimistic` partout, jamais `useState` + `useEffect` de resynchronisation
+(qui laissait une fenêtre où des props arrivées entre-temps écrasaient un
+geste en cours). Le motif : peindre dans la transition, appeler l'action,
+afficher l'erreur s'il y en a une — **le retour en arrière est automatique**,
+React rend la main aux données du serveur à la fin de la transition.
+
+```tsx
+const [vue, appliquer] = useOptimistic(donneesServeur, reducteur);
+startTransition(async () => {
+  appliquer(patch);                       // l'écran bouge
+  const res = await monAction(fd);        // le serveur suit
+  if (res?.error) setErreur(res.error);   // et s'il refuse, vue revient seule
+});
+```
+
+Couvert ainsi : glisser une carte (`PipelineBoard`), changer d'étape
+(`StatusControl`), corriger la confiance (`ConfidenceControl`), consigner un
+échange et envoyer un mail (`ProspectJournal` → l'entrée s'inscrit dans la
+chronologie, en retrait, marquée « Enregistrement… »), cocher / reporter /
+supprimer une relance (`TaskList`), planifier une relance sur une fiche
+(`RelancesSection`). Les server actions concernées **renvoient leur issue**
+(`ActionState`) au lieu de la garder pour elles — sans quoi il n'y a rien à
+annuler.
+
+Deux endroits volontairement NON optimistes, et c'est un choix :
+- « ✨ Réévaluer » la confiance — le niveau à afficher est justement ce qu'on
+  ignore avant la réponse ;
+- « Nouvelle relance » du tableau À faire (`NouvelleRelanceLibre`) — cet écran
+  ne montre que ce qui échoit aujourd'hui ; une relance posée au 14 octobre
+  n'y a pas sa place, l'y faire apparaître une seconde serait un mensonge.
+  Retour immédiat quand même : bouton en attente, champ vidé, confirmation.
+
+### Cache du routeur et région
+
+`next.config.mjs` — `experimental.staleTimes.dynamic = 30` : revenir sur un
+écran déjà visité est instantané. Sans risque de fraîcheur, parce que toutes
+les mutations passent par des server actions qui appellent `revalidatePath`,
+ce qui invalide aussi ce cache. Ne subsiste que la fenêtre où la donnée a
+changé **ailleurs** (relève IMAP toutes les 5 min, autre commercial) : 30 s,
+compromis assumé.
+
+`vercel.json` — `"regions": ["dub1"]`. Dublin **est** `eu-west-1`, la région du
+projet Supabase : les fonctions et la base sont dans le même datacentre au
+lieu de se parler d'un continent à l'autre (100–200 ms par aller-retour, et il
+y en a plusieurs par écran). **À vérifier une fois dans vercel.com** (Settings
+→ Functions → Function Region) : le plan Hobby n'expose qu'une région, et
+c'est elle qui gagne si elle contredit `vercel.json`. Le connecteur MCP Vercel
+ne voit pas ce projet — contrôle à faire à la main.
+
+---
+
 ## Conventions
 
 - Mutations = **server actions** dans `app/actions.ts`, jamais d'appel Supabase
   en écriture depuis un composant client.
-- Pages de données = server components avec `export const dynamic = "force-dynamic"`.
+- Pages de données = server components. **Plus de `force-dynamic`** : ces pages
+  lisent les cookies (client Supabase), elles sont donc dynamiques de toute
+  façon — la directive n'ajoutait rien et empêchait Next d'emprunter son
+  chemin normal. Elle ne reste que sur les routes OAuth. Voir « Vitesse et
+  fluidité ».
 - Composants client uniquement quand il faut de l'état local (`QuickNote`,
-  `PipelineBoard`, `DateField`, `TaskRow`, `ImportWizard`, formulaires avec
+  `PipelineBoard`, `DateField`, `TaskList`, `ImportWizard`, formulaires avec
   `useActionState`).
+- **Toute action visible doit être optimiste** : l'écran bouge au clic, le
+  serveur suit. Voir « Vitesse et fluidité » pour le motif exact.
 - Dates : tout est stocké en UTC, converti via `lib/time.ts` en heure de
   Bruxelles. Ne jamais faire `new Date(valeurDuFormulaire)` côté serveur —
   passer par `dateInputToISO` / `localInputToISO`.
@@ -588,6 +720,10 @@ suivre l'OAuth (se connecter avec le compte admin).
 Chaque push sur `main` redéploie automatiquement le projet Vercel
 `celya-accounting-app` (intégration GitHub). Aucune variable d'environnement à
 configurer. Déploiement manuel possible avec `npx vercel --prod`.
+
+`vercel.json` fixe la région des fonctions à **`dub1`** (Dublin = `eu-west-1`,
+celle de Supabase). À contrôler une fois dans l'interface Vercel — voir
+« Vitesse et fluidité ».
 
 Migrations SQL : appliquées via le MCP Supabase, copies dans
 `supabase/migrations/` — dernières en date, `009_statut_faits.sql` (verrou,
@@ -681,6 +817,28 @@ la règle des faits (`lib/crm/status.ts`) et le verrou (`status_locked`). **Si
 un jour une étape doit bouger, cherchez le fait qui la justifie ; s'il n'existe
 pas, proposez au lieu d'appliquer.**
 
+**Le préchargement des liens coûte un rendu serveur par lien.** Mesuré le
+7 août : afficher la liste des prospects déclenchait 17 rendus complets de la
+fiche prospect (chacun ~9 requêtes SQL), simplement parce que chaque ligne est
+un `<Link>`. Sur une liste de 500 fiches, c'est 500. **Règle : `prefetch={false}`
+sur tout lien répété dans une liste** ; le préchargement se garde pour les
+quelques liens du menu, et seulement parce qu'un `loading.tsx` le rend bon
+marché. Le symptôme n'est pas visible à l'œil nu — il faut compter les requêtes
+`?_rsc=` dans l'onglet réseau.
+
+**`getUser()` est un appel réseau, `getClaims()` non.** Chaque
+`supabase.auth.getUser()` interroge Supabase Auth. Avec les clés de signature
+asymétriques (ce projet : ES256), `getClaims()` vérifie la signature en local
+contre un JWKS mis en cache pour tout le processus. Ne pas revenir à
+`getUser()` « par prudence » : la sécurité ne vient pas de là, elle vient de
+`crm_users` relu en base et de la RLS.
+
+**Un squelette de chargement change ce que voit un test.** Depuis l'ajout des
+`loading.tsx`, les pages sont diffusées : l'événement `load` part quand la
+silhouette est peinte, pas quand les données sont là. Un test qui lit le DOM
+à `load` lira le squelette. Attendre le contenu réel (`networkidle`, ou un
+sélecteur du vrai contenu).
+
 **Trier sur une valeur calculée.** PostgREST ne sait pas trier sur une
 expression : `weighted_value` est une **colonne générée**, pas un calcul
 applicatif. Même réflexe pour tout futur indicateur dérivé qu'on voudra trier.
@@ -765,6 +923,12 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
 8. Supprimer le bucket Storage `documents`, vide mais toujours présent.
 9. Activer la protection contre les mots de passe compromis (tableau de bord
    Supabase → Authentication).
+10. **Confirmer la région des fonctions Vercel** : `vercel.json` demande
+    `dub1` (= `eu-west-1`, la région Supabase), mais sur le plan Hobby c'est
+    le réglage du projet qui tranche — vercel.com → Settings → Functions →
+    Function Region. Si la région affichée n'est pas Dublin, la corriger : à
+    elle seule elle vaut 100–200 ms par aller-retour base, plusieurs fois par
+    écran. Invérifiable par le MCP (le connecteur ne voit pas ce projet).
 
 ---
 

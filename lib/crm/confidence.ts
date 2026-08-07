@@ -18,6 +18,7 @@
  *      un faux niveau, et rien ne se bloque.
  */
 
+import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chatJSON, aiAvailable } from "@/lib/ai/provider";
 import { normalizeStatus, STATUS_LABEL, fmtDate } from "@/lib/constants";
@@ -280,16 +281,38 @@ export async function evaluateConfidenceCore(
  * Recalcul déclenché par un événement (échange noté, email envoyé, réponse
  * traitée, changement d'étape). Silencieux par construction : une panne
  * d'estimation ne doit jamais faire échouer le geste qui l'a déclenchée.
+ *
+ * HORS DU CHEMIN CRITIQUE (7 août). L'estimation appelle un modèle : plusieurs
+ * secondes dans le pire cas. Tant qu'elle était attendue, glisser une carte ou
+ * cocher une relance faisait patienter Bora pour un badge qu'il ne regardait
+ * même pas à cet instant. Elle part donc dans `after()` : la réponse est
+ * envoyée d'abord, l'estimation se fait ensuite, et le niveau s'affiche au
+ * chargement suivant de la fiche.
+ *
+ * Rien n'est perdu : les MÊMES événements déclenchent toujours le recalcul.
+ * Seul le moment où le badge se met à jour se décale. La ré-estimation
+ * explicite (bouton ✨) reste synchrone, elle : Bora attend son résultat.
  */
 export async function recalcConfidence(
   supabase: SupabaseClient,
   prospectId: string | null | undefined
 ): Promise<void> {
   if (!prospectId) return;
+
+  const evaluer = async () => {
+    try {
+      await evaluateConfidenceCore(supabase, prospectId);
+    } catch {
+      /* jamais bloquant */
+    }
+  };
+
   try {
-    await evaluateConfidenceCore(supabase, prospectId);
+    after(evaluer);
   } catch {
-    /* jamais bloquant */
+    // Hors contexte de requête (script, tâche planifiée) : on évalue tout de
+    // suite plutôt que de perdre l'estimation.
+    await evaluer();
   }
 }
 

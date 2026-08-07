@@ -5,7 +5,6 @@ import { PageHeader } from "@/components/ui";
 import { NewProspectAssist } from "@/components/NewProspectAssist";
 import type { Profile } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
 
 export default async function NewProspectPage() {
   const supabase = await createClient();

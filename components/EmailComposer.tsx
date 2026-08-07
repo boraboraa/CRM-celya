@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { sendProspectEmailAction } from "@/app/mail-actions";
 import type { ActionState } from "@/app/actions";
+import type { TimelineEntry } from "@/components/Timeline";
 import { FormError } from "@/components/ui";
 
 type Template = { key: string; label: string; subject: string; body: string };
@@ -55,16 +56,38 @@ export function EmailComposer({
   defaultTo,
   contactName,
   companyName,
+  onOptimistic,
 }: {
   prospectId: string;
   defaultTo: string;
   contactName: string | null;
   companyName: string;
+  /** Inscrit le message dans la chronologie pendant que le SMTP travaille. */
+  onOptimistic?: (entree: TimelineEntry) => void;
 }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+
+  // L'envoi passe par l'edge function puis par Zoho : c'est le geste le plus
+  // lent du CRM. Le message s'affiche donc tout de suite en tête du fil,
+  // marqué « Enregistrement… ». S'il échoue, l'entrée provisoire disparaît
+  // d'elle-même (useOptimistic) et l'erreur s'affiche sous le formulaire —
+  // le texte saisi reste dans le composeur, rien n'est perdu.
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
-    sendProspectEmailAction,
+    async (prev, fd) => {
+      onOptimistic?.({
+        key: `provisoire-mail-${Date.now()}`,
+        id: "",
+        source: "email",
+        kind: "email_sortant",
+        at: new Date().toISOString(),
+        title: String(fd.get("subject") ?? "") || null,
+        body: String(fd.get("body") ?? "") || null,
+        by: String(fd.get("to") ?? "") || null,
+        pending: true,
+      });
+      return sendProspectEmailAction(prev, fd);
+    },
     {}
   );
 

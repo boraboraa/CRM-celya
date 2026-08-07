@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { moveProspectAction } from "@/app/actions";
 import {
@@ -81,15 +81,26 @@ export type BoardProspect = {
  * chaude. « À évaluer » quand rien n'a pu être estimé.
  */
 export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
-  const [items, setItems] = useState(prospects);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<ProspectStatus | null>(null);
   const [justMoved, setJustMoved] = useState<string | null>(null);
+  const [enCours, setEnCours] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const [, startTransition] = useTransition();
 
-  // Resynchronise quand le serveur renvoie des données fraîches.
-  useEffect(() => setItems(prospects), [prospects]);
+  /**
+   * La carte change de colonne AU MOMENT DU DÉPÔT, pas quand le serveur
+   * répond. `useOptimistic` remplace l'ancien duo useState + useEffect de
+   * resynchronisation : c'est React qui rend la main aux données du serveur
+   * à la fin de la transition, sans fenêtre où un déplacement en cours
+   * pouvait être écrasé par des props arrivées entre-temps. Un refus du
+   * serveur ramène la carte à sa colonne d'origine tout seul.
+   */
+  const [items, appliquer] = useOptimistic(
+    prospects,
+    (liste: BoardProspect[], patch: { id: string; status: ProspectStatus }) =>
+      liste.map((c) => (c.id === patch.id ? { ...c, status: patch.status } : c))
+  );
 
   // Retire le halo « déplacé » après l'animation.
   useEffect(() => {
@@ -102,18 +113,19 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
     const current = items.find((c) => c.id === id);
     if (!current || current.status === status) return;
 
-    const previous = items;
-    setItems((list) => list.map((c) => (c.id === id ? { ...c, status } : c)));
     setJustMoved(id);
     setError(undefined);
+    setEnCours(id);
 
     startTransition(async () => {
+      appliquer({ id, status });
       try {
         await moveProspectAction(id, status);
       } catch {
-        setItems(previous);
         setJustMoved(null);
         setError("Le déplacement n'a pas pu être enregistré. Réessayez.");
+      } finally {
+        setEnCours(null);
       }
     });
   }
@@ -220,6 +232,9 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                       new Date(c.next_action_at).getTime() < Date.now();
                     const isDragged = dragId === c.id;
                     const landed = justMoved === c.id;
+                    // Le repère d'attente est sur LA carte manipulée, pas sur
+                    // l'écran entier : le reste du pipeline reste utilisable.
+                    const enregistre = enCours === c.id;
 
                     return (
                       <article
@@ -242,7 +257,22 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                             : ""
                         } ${landed ? "ring-2 ring-celya-cyan/60 shadow-glow" : ""}`}
                       >
-                        <Link href={`/prospects/${c.id}`} className="block">
+                        {enregistre && (
+                          <span
+                            aria-label="Enregistrement en cours"
+                            title="Enregistrement…"
+                            className="float-right ml-2 mt-0.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-celya-cyan/70 border-t-transparent"
+                          />
+                        )}
+                        {/* prefetch désactivé : une colonne peut porter des
+                            dizaines de cartes, et Next préchargeait la fiche
+                            de CHACUNE — autant de rendus serveur complets
+                            pour une seule que Bora finira par ouvrir. */}
+                        <Link
+                          href={`/prospects/${c.id}`}
+                          prefetch={false}
+                          className="block"
+                        >
                           <p className="truncate text-sm font-semibold text-slate-50">
                             {c.company_name}
                           </p>

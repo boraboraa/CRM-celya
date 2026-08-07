@@ -6,7 +6,6 @@ import { PageHeader } from "@/components/ui";
 import { ImportWizard } from "@/components/ImportWizard";
 import type { Profile } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
 
 export default async function ImportPage() {
   const session = await getSession();

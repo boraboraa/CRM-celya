@@ -5,7 +5,6 @@ import { PageHeader } from "@/components/ui";
 import { EmailAccountForm, SyncNowButton } from "@/components/EmailAccountForm";
 import { fmtDateTime } from "@/lib/constants";
 
-export const dynamic = "force-dynamic";
 
 /** Configuration de la boîte Zoho (admin). Le mot de passe d'application part
  *  directement dans Supabase Vault via l'edge function — il n'est jamais

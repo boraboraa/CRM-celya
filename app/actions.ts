@@ -47,13 +47,18 @@ const num = (fd: FormData, k: string): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * Qui agit — sans aller-retour réseau. Les jetons de ce projet sont signés en
+ * ES256 : `getClaims()` vérifie la signature en local (JWKS mis en cache pour
+ * tout le processus) là où `getUser()` interrogeait Supabase Auth à chaque
+ * action. La RLS reste l'unique garde-fou des données.
+ */
 async function currentUserId() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  return { supabase, userId: user.id };
+  const { data, error } = await supabase.auth.getClaims();
+  const userId = data?.claims?.sub;
+  if (error || !userId) redirect("/login");
+  return { supabase, userId };
 }
 
 function revalidateProspect(id?: string | null) {
@@ -151,35 +156,45 @@ export async function updateProspectAction(fd: FormData) {
  * Fixer l'étape à la main — depuis la fiche. Verrouille : à partir de là,
  * l'auto-classification ne réécrit plus rien, elle peut seulement suggérer.
  */
-export async function setProspectStatusAction(fd: FormData) {
+export async function setProspectStatusAction(fd: FormData): Promise<ActionState> {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
   const status = str(fd, "status");
-  if (!id || !status) return;
+  if (!id || !status) return { error: "Étape introuvable." };
 
-  await supabase
+  const { error } = await supabase
     .from("prospects")
     .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
-  await recalcConfidence(supabase, id);
+  if (error) return { error: error.message };
 
+  await recalcConfidence(supabase, id);
   revalidateProspect(id);
+  return {};
 }
 
 /**
  * Rendre la main à l'IA : l'étape redevient déductible des faits, et on la
  * ré-évalue tout de suite pour que l'effet soit visible immédiatement.
  */
-export async function unlockProspectStatusAction(fd: FormData) {
+export async function unlockProspectStatusAction(
+  fd: FormData
+): Promise<ActionState> {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  if (!id) return;
+  if (!id) return { error: "Prospect introuvable." };
 
-  await supabase.from("prospects").update(unlockStatusPatch()).eq("id", id);
+  const { error } = await supabase
+    .from("prospects")
+    .update(unlockStatusPatch())
+    .eq("id", id);
+  if (error) return { error: error.message };
+
   await applyAutoStatus(supabase, id);
   await recalcConfidence(supabase, id);
 
   revalidateProspect(id);
+  return {};
 }
 
 /**
@@ -187,19 +202,23 @@ export async function unlockProspectStatusAction(fd: FormData) {
  * posé — passer en Rendez-vous ? »). C'est un clic humain : la fiche reste
  * verrouillée sur ce nouveau choix.
  */
-export async function acceptStatusSuggestionAction(fd: FormData) {
+export async function acceptStatusSuggestionAction(
+  fd: FormData
+): Promise<ActionState> {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
   const status = str(fd, "status");
-  if (!id || !status) return;
+  if (!id || !status) return { error: "Étape introuvable." };
 
-  await supabase
+  const { error } = await supabase
     .from("prospects")
     .update(manualStatusPatch(normalizeStatus(status)))
     .eq("id", id);
-  await recalcConfidence(supabase, id);
+  if (error) return { error: error.message };
 
+  await recalcConfidence(supabase, id);
   revalidateProspect(id);
+  return {};
 }
 
 // =====================================================================
@@ -238,7 +257,13 @@ export async function unlockConfidenceAction(fd: FormData): Promise<ActionState>
     .eq("id", id);
   if (error) return { error: error.message };
 
-  await recalcConfidence(supabase, id);
+  // Geste explicite : Bora attend le nouveau niveau tout de suite, on n'en
+  // diffère pas le calcul (contrairement aux recalculs d'arrière-plan).
+  try {
+    await evaluateConfidenceCore(supabase, id);
+  } catch {
+    /* jamais bloquant */
+  }
   revalidateProspect(id);
   return {};
 }
@@ -375,7 +400,7 @@ export async function deleteEmailAction(fd: FormData): Promise<ActionState> {
 // Relances
 // =====================================================================
 
-export async function createTaskAction(fd: FormData) {
+export async function createTaskAction(fd: FormData): Promise<ActionState> {
   const { supabase, userId } = await currentUserId();
 
   const due =
@@ -394,7 +419,7 @@ export async function createTaskAction(fd: FormData) {
     assignee_id: assignee === "none" ? null : (assignee ?? userId),
     created_by: userId,
   });
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
 
   const prospectId = str(fd, "prospect_id");
   // Une relance « RDV avec … » posée à la main est un fait : l'étape peut
@@ -405,48 +430,60 @@ export async function createTaskAction(fd: FormData) {
     revalidatePath(`/prospects/${prospectId}`);
   }
   revalidatePath("/dashboard");
+  return { success: "Relance planifiée." };
 }
 
-export async function completeTaskAction(fd: FormData) {
+/**
+ * Les trois gestes sur une relance renvoient désormais leur issue au lieu de
+ * la garder pour eux : l'écran bouge tout de suite (UI optimiste) et n'a le
+ * droit de revenir en arrière que si le serveur a vraiment refusé.
+ */
+export async function completeTaskAction(fd: FormData): Promise<ActionState> {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  if (!id) return;
+  if (!id) return { error: "Relance introuvable." };
 
   const done = str(fd, "done") === "1";
-  await supabase
+  const { error } = await supabase
     .from("tasks")
     .update({ status: done ? "fait" : "a_faire" })
     .eq("id", id);
+  if (error) return { error: error.message };
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
+  return {};
 }
 
 /** Reprogramme une relance à une date précise (champ de date de TaskRow). */
-export async function rescheduleTaskAction(fd: FormData) {
+export async function rescheduleTaskAction(fd: FormData): Promise<ActionState> {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
   const due = dateInputToISO(str(fd, "due_local"));
-  if (!id || !due) return;
+  if (!id || !due) return { error: "Date invalide." };
 
-  await supabase.from("tasks").update({ due_at: due }).eq("id", id);
+  const { error } = await supabase.from("tasks").update({ due_at: due }).eq("id", id);
+  if (error) return { error: error.message };
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
+  return {};
 }
 
-export async function deleteTaskAction(fd: FormData) {
+export async function deleteTaskAction(fd: FormData): Promise<ActionState> {
   const { supabase } = await currentUserId();
   const id = str(fd, "id");
-  if (!id) return;
+  if (!id) return { error: "Relance introuvable." };
 
-  await supabase.from("tasks").delete().eq("id", id);
+  const { error } = await supabase.from("tasks").delete().eq("id", id);
+  if (error) return { error: error.message };
 
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
+  return {};
 }
 
 // =====================================================================

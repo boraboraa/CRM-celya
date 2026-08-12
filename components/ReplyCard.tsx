@@ -8,6 +8,7 @@ import {
   triageIgnoreAction,
 } from "@/app/mail-actions";
 import { INTENT_LABEL, fmtDate, relative } from "@/lib/constants";
+import { composerHref } from "@/lib/crm/composer";
 import type { EmailIntent } from "@/lib/types";
 
 export type ReplyCardEmail = {
@@ -114,6 +115,18 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
           >
             {pending ? "Analyse…" : "✨ Analyser"}
           </button>
+        )}
+        {/* Lire et classer une réponse, oui — mais il fallait aussi pouvoir y
+            RÉPONDRE. Le composeur s'ouvre sur la fiche, destinataire et objet
+            « Re: … » déjà remplis. */}
+        {email.prospects && (
+          <Link
+            href={composerHref(email.prospects.id, email.id)}
+            prefetch={false}
+            className="btn-ghost px-3.5 py-1.5 text-xs"
+          >
+            ✉ Répondre
+          </Link>
         )}
         <button
           onClick={() => run(() => triageIgnoreAction(email.id))}

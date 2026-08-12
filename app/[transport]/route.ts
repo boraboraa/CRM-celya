@@ -22,11 +22,26 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
+import { SUPABASE_URL } from "@/lib/env";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { saveExchangeCore } from "@/lib/crm/exchange";
-import { manualStatusPatch } from "@/lib/crm/status";
+import { manualStatusPatch, applyAutoStatus } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
-import { STATUS_LABEL, ACTIVITY_LABEL, STATUS_ORDER, fmtDateTime } from "@/lib/constants";
+import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
+import {
+  hasPlaceholder,
+  isEmailAddress,
+  MAX_BODY,
+  MAX_SUBJECT,
+  PLACEHOLDER,
+} from "@/lib/crm/email";
+import {
+  STATUS_LABEL,
+  ACTIVITY_LABEL,
+  STATUS_ORDER,
+  fmtDate,
+  fmtDateTime,
+} from "@/lib/constants";
 import { todayBounds } from "@/lib/time";
 import type { ProspectStatus } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -91,6 +106,72 @@ async function resolveProspect(
     return { error: `Plusieurs prospects correspondent à « ${nom} ». Précisez par identifiant :\n${liste}` };
   }
   return rows[0];
+}
+
+/**
+ * Envoi réel d'un email — délégué à l'edge function crm-mail, jamais réécrit
+ * ici. Elle seule connaît le mot de passe d'application (Vault), et elle seule
+ * écrit la ligne `emails` + l'activité `type='email'` : dupliquer nodemailer
+ * côté Next donnerait deux chemins d'envoi à tenir en phase.
+ *
+ * Le jeton du connecteur est un JWT HS256 maison, que Supabase Auth ne sait
+ * pas vérifier : l'authentification passe donc par le secret partagé du Vault
+ * (`x-internal-secret`, migration 013). Il authentifie l'appelant, il ne
+ * l'autorise à rien : crm-mail relit le rôle de `user_id` dans crm_users et
+ * réapplique la règle de `can_see_prospect`.
+ */
+async function sendViaMailFunction(
+  admin: SupabaseClient,
+  payload: {
+    prospectId: string;
+    to: string;
+    subject: string;
+    body: string;
+    userId: string;
+  }
+): Promise<{ ok: true } | { error: string }> {
+  const { data: secret } = await admin.rpc("mail_get_secret", {
+    p_name: "crm_mail_internal_secret",
+  });
+  if (typeof secret !== "string" || !secret) {
+    return {
+      error:
+        "Secret d'envoi interne absent — appliquez la migration 013_envoi_interne.sql.",
+    };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/crm-mail`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": secret,
+      },
+      body: JSON.stringify({
+        action: "send",
+        prospect_id: payload.prospectId,
+        to: payload.to,
+        subject: payload.subject,
+        body: payload.body,
+        user_id: payload.userId,
+      }),
+      cache: "no-store",
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Envoi impossible." };
+  }
+
+  let corps: Record<string, unknown> = {};
+  try {
+    corps = await res.json();
+  } catch {
+    /* réponse non JSON */
+  }
+  if (!res.ok) {
+    return { error: (corps.error as string) ?? `Erreur ${res.status}` };
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +512,165 @@ function register(server: McpServer) {
           `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
         );
       }
+      return text(bits.join(" "));
+    }
+  );
+
+  // --- envoyer_email --------------------------------------------------------
+  server.tool(
+    "envoyer_email",
+    "Envoie réellement un email à un prospect depuis la boîte Zoho du CRM, puis le consigne au journal. Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION : destinataire, objet et corps, sans rien envoyer. Repassez avec « confirmer: true » pour envoyer pour de vrai. Peut envoyer un brouillon existant via « brouillon_id » au lieu de retaper le texte. Un envoi CLÔT l'action en cours : la relance ouverte passe « fait » et une relance « si pas de réponse » est posée à +5 jours.",
+    {
+      id: z.string().optional(),
+      nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
+      brouillon_id: z
+        .string()
+        .optional()
+        .describe(
+          "Identifiant d'une activité brouillon (is_draft) : son sujet et son corps sont repris tels quels, et le brouillon est retiré après l'envoi."
+        ),
+      destinataire: z
+        .string()
+        .optional()
+        .describe("Email du destinataire. Par défaut, l'adresse de la fiche prospect."),
+      objet: z.string().max(MAX_SUBJECT).optional(),
+      message: z.string().max(MAX_BODY).optional(),
+      proposition: z
+        .boolean()
+        .optional()
+        .describe(
+          "true si ce message est une proposition / un devis (fait passer la fiche en « Proposition »)."
+        ),
+      confirmer: z
+        .boolean()
+        .optional()
+        .describe("false/absent → simulation ; true → envoi réel, irréversible."),
+    },
+    async (args, extra) => {
+      const userId = userIdFrom(extra);
+      if (!userId) return fail("Non authentifié.");
+      const admin = createAdminClient();
+
+      const resolved = await resolveProspect(admin, { id: args.id, nom: args.nom });
+      if ("error" in resolved) return fail(resolved.error);
+
+      const { data: fiche } = await admin
+        .from("prospects")
+        .select("id, company_name, email")
+        .eq("id", resolved.id)
+        .maybeSingle();
+      if (!fiche) return fail("Prospect introuvable.");
+
+      // --- Le contenu : un brouillon repris, ou le texte fourni. Les
+      //     arguments explicites l'emportent sur le brouillon.
+      let objet = args.objet?.trim() ?? "";
+      let message = args.message?.trim() ?? "";
+      let origine = "texte fourni";
+
+      if (args.brouillon_id) {
+        const { data: brouillon } = await admin
+          .from("activities")
+          .select("id, prospect_id, subject, body, is_draft")
+          .eq("id", args.brouillon_id)
+          .maybeSingle();
+        if (!brouillon) return fail(`Aucune activité ${args.brouillon_id}.`);
+        if (brouillon.prospect_id !== fiche.id) {
+          return fail(
+            `Ce brouillon appartient à un autre prospect que ${fiche.company_name}.`
+          );
+        }
+        if (!brouillon.is_draft) {
+          return fail("Cette entrée du journal n'est pas un brouillon.");
+        }
+        if (!objet) objet = (brouillon.subject ?? "").trim();
+        if (!message) message = (brouillon.body ?? "").trim();
+        origine = `brouillon ${brouillon.id}`;
+      }
+
+      // --- Le destinataire : celui demandé, sinon l'adresse de la fiche.
+      const destinataire = (args.destinataire ?? fiche.email ?? "")
+        .trim()
+        .toLowerCase();
+      if (!destinataire) {
+        return fail(
+          `Aucune adresse email sur la fiche ${fiche.company_name} — précisez « destinataire », ou ajoutez l'adresse à la fiche.`
+        );
+      }
+      if (!isEmailAddress(destinataire)) {
+        return fail(`Adresse email invalide : « ${destinataire} ».`);
+      }
+
+      // --- Les mêmes bornes que l'edge function, appliquées avant la
+      //     simulation pour que Claude voie exactement ce qui partira.
+      objet = objet.slice(0, MAX_SUBJECT);
+      message = message.slice(0, MAX_BODY);
+      if (!objet) return fail("Objet manquant.");
+      if (!message) return fail("Message manquant.");
+      if (hasPlaceholder(objet) || hasPlaceholder(message)) {
+        return fail(
+          `Le message contient encore « ${PLACEHOLDER} » : complétez-le avant de l'envoyer.`
+        );
+      }
+
+      // --- Simulation : rien n'est écrit, rien ne part.
+      if (args.confirmer !== true) {
+        return json(
+          `SIMULATION — rien n'a été envoyé. Relisez, puis repassez avec « confirmer: true » pour envoyer réellement.`,
+          {
+            prospect: fiche.company_name,
+            destinataire,
+            objet,
+            message,
+            origine,
+            proposition: args.proposition === true,
+          }
+        );
+      }
+
+      // --- Envoi réel.
+      const envoi = await sendViaMailFunction(admin, {
+        prospectId: fiche.id,
+        to: destinataire,
+        subject: objet,
+        body: message,
+        userId,
+      });
+      if ("error" in envoi) return fail(`Envoi impossible : ${envoi.error}`);
+
+      // --- Ce que l'edge function ne fait pas (elle n'écrit que l'email et
+      //     l'activité) : la proposition, la cadence, l'étape, la confiance.
+      //     Exactement la même suite que sendProspectEmailAction — un mail
+      //     parti d'ici est indiscernable d'un mail parti de l'interface.
+      if (args.proposition === true) {
+        await admin
+          .from("prospects")
+          .update({ proposal_sent_at: new Date().toISOString() })
+          .eq("id", fiche.id);
+      }
+      const cadence = await applyEmailSentCadence(admin, userId, fiche.id);
+      const auto = await applyAutoStatus(admin, fiche.id);
+      await recalcConfidence(admin, fiche.id);
+
+      // Le brouillon a vécu : l'activité « email » le remplace au journal.
+      if (args.brouillon_id) {
+        await admin.from("activities").delete().eq("id", args.brouillon_id);
+      }
+
+      const bits = [`✅ Email envoyé à ${destinataire} — « ${objet} ».`];
+      if (cadence.completedTitle) {
+        bits.push(`Relance « ${cadence.completedTitle} » marquée faite.`);
+      }
+      if (cadence.followUpAt) {
+        bits.push(
+          `Sans réponse, la fiche remonte le ${fmtDate(cadence.followUpAt)}.`
+        );
+      }
+      if (auto.changed) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[auto.status as keyof typeof STATUS_LABEL]} » : ${auto.reason}.`
+        );
+      }
+      if (args.brouillon_id) bits.push("Brouillon retiré.");
       return text(bits.join(" "));
     }
   );

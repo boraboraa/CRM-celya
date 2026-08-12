@@ -316,20 +316,51 @@ du 4 août). De haut en bas :
    retard, au bleu pour un rendez-vous. **Dérivé de façon déterministe** de la
    relance ouverte et du dernier événement du journal (`lib/crm/nextAction.ts`)
    — aucune clé IA nécessaire ;
-3. **CHRONOLOGIE** : fil vertical, du plus récent au plus ancien, chaque
+3. **AGIR** — un seul bloc à **deux onglets** (refonte du 12 août) :
+   « ✎ Consigner » (note + type + la nature de la note + la case proposition +
+   étape + prochaine action datée, bouton ✨ qui propose) et « ✉ Envoyer un
+   email » (le composeur). Ils avaient chacun leur case « proposition » et se
+   disputaient le même geste ; les onglets n'en montrent qu'un à la fois.
+   Sans adresse sur la fiche, l'onglet email dit pourquoi et propose
+   « Ajouter une adresse » (déplie « Modifier la fiche », curseur dans le
+   champ) plutôt que de disparaître sans un mot ;
+4. **CHRONOLOGIE** : fil vertical, du plus récent au plus ancien, chaque
    événement typé et daté (échange noté, note interne, email envoyé, réponse
    reçue, rendez-vous) — pastille de couleur et puce de type, la nature de
-   l'échange se lit avant le texte ;
-4. **puis seulement** les formulaires : « Noter un échange » (note + type +
-   la nature de la note + la case proposition + étape + prochaine action
-   datée, bouton ✨ qui propose), composeur email, planifier une relance,
-   modifier la fiche.
+   l'échange se lit avant le texte. **Dix entrées d'abord**, le reste d'un
+   clic ;
+5. **puis seulement** : planifier une relance, modifier la fiche.
+
+**Le bloc « Agir » passe DEVANT la chronologie** — c'est le seul point où la
+règle « la fiche se lit d'abord » a cédé, et pour une raison mesurée : le
+composeur email vivait replié tout en bas, sous un fil non paginé de plusieurs
+milliers de pixels. Claude rédigeait un brouillon, et il fallait le recopier à
+la main. La lecture reste servie par PROCHAINE ACTION, qui ouvre la fiche.
+
+**Écrire est à un clic de partout** : « ✉ Email » sur la carte PROCHAINE
+ACTION, « ✉ » en fin de ligne dans la liste des prospects et dans « À faire »
+(seulement si la fiche a une adresse), « ✉ Répondre » sur une réponse reçue
+(composeur pré-rempli, destinataire et objet « Re: … »). Ces liens pointent
+`/prospects/<id>#ecrire-un-email` (+ `?repondre=<id d'email>`) ; sur la fiche
+même, les composants clients se parlent par l'événement de fenêtre de
+`lib/crm/composer.ts` (`openComposer` / `openNote`) — un composant serveur les
+sépare, il n'y a pas d'état à faire remonter.
 
 En colonne latérale : les chiffres de l'affaire (valeur estimée seule — la
-probabilité n'est plus affichée), les relances, et l'espace **Brouillons**.
+probabilité n'est plus affichée), les relances, et l'espace **Brouillons** —
+d'où un brouillon **s'envoie maintenant d'un clic** (« ✉ Envoyer », optimiste :
+il quitte la liste tout de suite et revient si le serveur refuse) ou se
+reprend dans le composeur (« Modifier »).
 En tête de fiche, sous le contact : la **confiance** (badge + raison +
 correction manuelle, voir la section Confiance IA). Toute l'interface est en
 **français**, vouvoiement.
+
+Le composeur, enfin, ne piège plus : il se **vide après un envoi réussi** (le
+texte envoyé restait affiché sous le bandeau vert — invitation au double
+envoi), refuse un message qui contient encore le trou « [À compléter] » d'un
+gabarit (garde-fou posé aux trois endroits d'où un mail peut partir —
+composeur, server action, outil MCP : `lib/crm/email.ts`), et s'envoie au
+clavier par **⌘/Ctrl + Entrée**.
 
 ### Les brouillons ne sont pas des échanges
 
@@ -436,6 +467,18 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
   accessible uniquement par les RPC `mail_store_credentials` /
   `mail_get_credentials` / `mail_get_secret` (security definer, `execute`
   réservé à `service_role`).
+- **Deux voies d'authentification pour `send`** (migration `013`, 12 août) :
+  le JWT Supabase Auth de la session (interface), **ou** le secret partagé du
+  Vault `crm_mail_internal_secret` en en-tête `x-internal-secret` +
+  `payload.user_id` (appel serveur-à-serveur du connecteur MCP, dont le jeton
+  OAuth HS256 maison n'est pas vérifiable par Supabase Auth — c'est ce qui
+  empêchait tout outil MCP d'envoyer un mail). Même motif que `x-cron-secret`
+  pour la relève. Le secret **authentifie, il n'autorise pas** : le rôle est
+  relu dans `crm_users` et le contrôle d'accès au prospect (règle de
+  `can_see_prospect`) est réappliqué à l'identique. Vérifié en production le
+  12 août : mauvais secret → 401, utilisateur inconnu → 401, commercial sur un
+  prospect qui ne lui appartient pas → **403**, admin sur prospect inexistant
+  → 404, envoi réel → 200 + lignes `emails` et `activities` (author_id correct).
 - **Envoi** : `smtppro.zoho.com|eu:465` SSL via nodemailer — ligne `emails`
   `direction='sortant'` avec `message_id`, activité `type='email'`. **Un mail
   envoyé CLÔT l'action en cours** (correctif du 7 août,
@@ -489,14 +532,14 @@ du projet Supabase.
 désactivé, streamable HTTP sans état, sans Redis). L'URL du connecteur à coller
 dans Claude est donc `https://<domaine-de-prod>/mcp`.
 
-**Les neuf outils** (noms français, descriptions lues par Claude pour décider) :
+**Les dix outils** (noms français, descriptions lues par Claude pour décider) :
 `lister_prospects`, `obtenir_prospect`, `a_faire`, `creer_prospect`,
-`mettre_a_jour_statut`, `ajouter_note`, `planifier_relance`,
+`mettre_a_jour_statut`, `ajouter_note`, `envoyer_email`, `planifier_relance`,
 `supprimer_activite`, `importer_prospects`.
-Toute opération destructrice ou en lot (`importer_prospects`,
-`supprimer_activite`) est d'abord une **simulation** ; l'écriture réelle exige
-`confirmer: true`. `creer_prospect` **avertit** en cas de doublon au lieu de
-créer (forçable par `forcer: true`).
+Toute opération destructrice, irréversible ou en lot (`envoyer_email`,
+`importer_prospects`, `supprimer_activite`) est d'abord une **simulation** ;
+l'écriture réelle exige `confirmer: true`. `creer_prospect` **avertit** en cas
+de doublon au lieu de créer (forçable par `forcer: true`).
 
 Trois précautions dictées par la règle des faits (4 août) :
 
@@ -510,6 +553,18 @@ Trois précautions dictées par la règle des faits (4 août) :
   d'un prospect d'un coup (`brouillons: true`) — c'est l'outil de nettoyage du
   journal depuis Claude. De fait réservé à l'admin, puisque le jeton OAuth
   n'est délivré qu'à lui.
+
+**`envoyer_email` (12 août) — Claude envoie pour de vrai.** Rédiger un mail et
+le laisser en brouillon ne servait à rien tant qu'il fallait le recopier à la
+main. L'outil envoie depuis la boîte Zoho, ou reprend un brouillon existant
+(`brouillon_id` : sujet et corps repris tels quels, brouillon retiré après
+l'envoi — sinon il ferait doublon avec l'activité `email`). Sans `confirmer`,
+il renvoie la simulation complète (destinataire, objet, corps) et n'écrit rien.
+Il **ne duplique pas nodemailer** : l'envoi reste au seul endroit qui le fait
+déjà, l'edge function `crm-mail`. Après l'envoi, il rejoue exactement la suite
+de `sendProspectEmailAction` — proposition, `applyEmailSentCadence` (relance
+close, +5 j), `applyAutoStatus`, `recalcConfidence` — pour qu'un mail parti de
+Claude soit indiscernable d'un mail parti de l'interface.
 
 **Réutilise la logique existante, ne la duplique pas.** Chaque outil est une
 enveloppe fine au-dessus du **cœur partagé `lib/crm/`** (extrait le 4 août sans
@@ -739,18 +794,22 @@ Migrations SQL : appliquées via le MCP Supabase, copies dans
 `supabase/migrations/` — dernières en date, `009_statut_faits.sql` (verrou,
 traçabilité, `is_exchange` / `is_draft`), `010_probabilite.sql` (probabilité +
 colonne générée, interface retirée depuis), `011_confiance.sql` (les quatre
-colonnes de confiance) et `012_derniere_action.sql` (vue
+colonnes de confiance), `012_derniere_action.sql` (vue
 `prospect_action_state`, index `emails(prospect_id, received_at)`, et la
 correction unique des relances laissées « en retard » par l'ancienne cadence
-d'envoi — re-datées à envoi + 5 j). Toutes **additives**, donc applicables
-avant le déploiement du code sans rien casser en production — `011` a été
-appliquée ainsi le 4 août au soir, `012` le 7 août (vérifiée en local sur la
-base de prod avant fusion : envoi réel → relance faite + relance +5 j, zones
-du tableau de bord, cartes ; prospects réels intacts).
+d'envoi — re-datées à envoi + 5 j) et `013_envoi_interne.sql` (le secret Vault
+`crm_mail_internal_secret` de l'envoi serveur-à-serveur). Toutes **additives**,
+donc applicables avant le déploiement du code sans rien casser en production —
+`011` a été appliquée ainsi le 4 août au soir, `012` le 7 août (vérifiée en
+local sur la base de prod avant fusion : envoi réel → relance faite + relance
++5 j, zones du tableau de bord, cartes ; prospects réels intacts), `013` le
+12 août (elle ne fait que créer un secret : rien à casser).
 
-L'edge function `crm-mail` est en ligne en **v3** (4 août au soir) : correctif
-`status_locked` + remise « à évaluer » de la confiance sur vraie réponse —
-identique au dépôt.
+L'edge function `crm-mail` est en ligne en **v4** (12 août) : seconde voie
+d'authentification `x-internal-secret` sur `send`, pour que le connecteur MCP
+puisse envoyer (voir « Boîte Zoho »). Identique au dépôt. La v3 (4 août au
+soir) portait le correctif `status_locked` + la remise « à évaluer » de la
+confiance sur vraie réponse.
 
 Edge functions : déployées via le MCP Supabase —
 `crm-admin` avec `verify_jwt: true`, `crm-mail` avec `verify_jwt: false`
@@ -876,25 +935,13 @@ a été relue le 3 août — elle ne renvoie aucun secret, seulement un booléen
 
 ## Reste à faire
 
-0. **Activer le connecteur MCP** (le code est en production) : poser la variable
-   d'environnement Vercel **`SUPABASE_SERVICE_ROLE_KEY`** (Settings → Environment
-   Variables — jamais `NEXT_PUBLIC_*`, jamais dans le dépôt) ; c'est la seule
-   config requise. Puis, dans Claude : Personnaliser → Connecteurs → « + » →
-   coller `https://<domaine-de-prod>/mcp` → OAuth avec le compte admin.
-   Vérification : demander à Claude de créer un prospect de test, contrôler dans
-   le CRM le `+32` normalisé et le statut « À appeler », puis le supprimer.
-   (Optionnel : `MCP_OAUTH_SECRET` pour découpler la signature des jetons de la
-   clé service_role — sinon elle en est dérivée, ce qui suffit.)
+*(Les points 0 et 1 — connecteur MCP et boîte Zoho — sont FAITS, constaté le
+12 août : `SUPABASE_SERVICE_ROLE_KEY` est bien posée sur Vercel, le connecteur
+répond, la boîte `boradogrul@celya.be` est configurée, relevée sans erreur, et
+des mails sont partis. Optionnel qui reste : `MCP_OAUTH_SECRET`, pour découpler
+la signature des jetons de la clé service_role — sinon elle en est dérivée, ce
+qui suffit.)*
 
-1. **Activer la boîte Zoho** (le code est en production) :
-   dans Zoho Mail, créer un mot de passe d'application (Sécurité → Mots de
-   passe d'application) et vérifier qu'IMAP est activé (Paramètres → Comptes
-   mail) ; puis Mon compte → Réglages de la boîte → adresse, mot de passe,
-   centre de données (`.eu` ou `.com` — il se lit dans l'URL de la boîte). La
-   connexion est testée immédiatement. Vérification : envoyer depuis une fiche
-   vers une adresse à soi, répondre, contrôler que la réponse remonte sur la
-   fiche en moins de 5 minutes ; tester un message sans correspondance (→ Non
-   rattachés) et une réponse d'absence (→ relance décalée, pas annulée).
 2. **Classification automatique à la relève** (optionnel) : poser les secrets
    IA sur l'edge function — `AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=…`
    (ou `AGENT_PROVIDER=minimax MINIMAX_*=…`), via `supabase secrets set` ou le

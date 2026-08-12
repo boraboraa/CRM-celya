@@ -1,10 +1,12 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { sendProspectEmailAction } from "@/app/mail-actions";
 import type { ActionState } from "@/app/actions";
 import type { TimelineEntry } from "@/components/Timeline";
 import { FormError } from "@/components/ui";
+import { hasPlaceholder, PLACEHOLDER_ERROR } from "@/lib/crm/email";
+import type { ComposerPrefill } from "@/lib/crm/composer";
 
 type Template = { key: string; label: string; subject: string; body: string };
 
@@ -57,6 +59,8 @@ export function EmailComposer({
   contactName,
   companyName,
   onOptimistic,
+  prefill,
+  autoFocus = false,
 }: {
   prospectId: string;
   defaultTo: string;
@@ -64,9 +68,25 @@ export function EmailComposer({
   companyName: string;
   /** Inscrit le message dans la chronologie pendant que le SMTP travaille. */
   onOptimistic?: (entree: TimelineEntry) => void;
+  /**
+   * Texte versé au composeur à l'ouverture — un brouillon repris, une réponse
+   * à écrire. Le parent remonte le composant (clé) quand il change : pas
+   * d'effet de resynchronisation, donc pas de fenêtre où une frappe en cours
+   * se ferait écraser.
+   */
+  prefill?: ComposerPrefill;
+  /** Place le curseur dans le premier champ vide (ouverture explicite). */
+  autoFocus?: boolean;
 }) {
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [to, setTo] = useState(prefill?.to ?? defaultTo);
+  const [subject, setSubject] = useState(prefill?.subject ?? "");
+  const [body, setBody] = useState(prefill?.body ?? "");
+  const [proposition, setProposition] = useState(false);
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const toRef = useRef<HTMLInputElement>(null);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   // L'envoi passe par l'edge function puis par Zoho : c'est le geste le plus
   // lent du CRM. Le message s'affiche donc tout de suite en tête du fil,
@@ -75,21 +95,49 @@ export function EmailComposer({
   // le texte saisi reste dans le composeur, rien n'est perdu.
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     async (prev, fd) => {
+      const objet = String(fd.get("subject") ?? "");
+      const corps = String(fd.get("body") ?? "");
+      // Le trou du gabarit ne part pas : on refuse AVANT le serveur, sans
+      // inscrire quoi que ce soit dans la chronologie.
+      if (hasPlaceholder(objet) || hasPlaceholder(corps)) {
+        return { error: PLACEHOLDER_ERROR };
+      }
+
       onOptimistic?.({
         key: `provisoire-mail-${Date.now()}`,
         id: "",
         source: "email",
         kind: "email_sortant",
         at: new Date().toISOString(),
-        title: String(fd.get("subject") ?? "") || null,
-        body: String(fd.get("body") ?? "") || null,
+        title: objet || null,
+        body: corps || null,
         by: String(fd.get("to") ?? "") || null,
         pending: true,
       });
-      return sendProspectEmailAction(prev, fd);
+      const res = await sendProspectEmailAction(prev, fd);
+      if (!res.error) {
+        // Le message est parti : le composeur se vide, et seule la
+        // confirmation reste à l'écran. Le laisser rempli, c'est inviter au
+        // double envoi — c'était le cas jusqu'ici, le texte envoyé restait
+        // affiché sous le bandeau vert.
+        setSubject("");
+        setBody("");
+        setProposition(false);
+      }
+      return res;
     },
     {}
   );
+
+  // Ouverture explicite (bouton « ✉ Email », brouillon repris) : le curseur
+  // se pose dans le premier champ qui reste à remplir.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const cible = !to ? toRef : !subject ? subjectRef : bodyRef;
+    cible.current?.focus();
+    // Au montage seulement : le composeur est remonté à chaque ouverture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function applyTemplate(key: string) {
     const t = TEMPLATES.find((x) => x.key === key);
@@ -101,10 +149,24 @@ export function EmailComposer({
         .replace(/^Bonjour ,/m, "Bonjour,");
     setSubject(fill(t.subject));
     setBody(fill(t.body));
+    bodyRef.current?.focus();
+  }
+
+  /** Cmd/Ctrl + Entrée envoie — le composeur reste utilisable sans souris. */
+  function raccourci(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      formRef.current?.requestSubmit();
+    }
   }
 
   return (
-    <form action={formAction} className="card space-y-3 p-5">
+    <form
+      ref={formRef}
+      action={formAction}
+      onKeyDown={raccourci}
+      className="card space-y-3 p-5"
+    >
       <input type="hidden" name="prospect_id" value={prospectId} />
 
       <div className="flex flex-wrap gap-1.5">
@@ -125,11 +187,13 @@ export function EmailComposer({
           À
         </label>
         <input
+          ref={toRef}
           id="to"
           name="to"
           type="email"
           required
-          defaultValue={defaultTo}
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
           className="input"
         />
       </div>
@@ -139,6 +203,7 @@ export function EmailComposer({
           Sujet
         </label>
         <input
+          ref={subjectRef}
           id="subject"
           name="subject"
           required
@@ -154,6 +219,7 @@ export function EmailComposer({
           Message
         </label>
         <textarea
+          ref={bodyRef}
           id="body"
           name="body"
           required
@@ -172,6 +238,8 @@ export function EmailComposer({
           type="checkbox"
           name="is_proposal"
           value="1"
+          checked={proposition}
+          onChange={(e) => setProposition(e.target.checked)}
           className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
         />
         <span>
@@ -189,12 +257,13 @@ export function EmailComposer({
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <button type="submit" disabled={pending} className="btn-primary">
           {pending ? "Envoi…" : "Envoyer"}
         </button>
         <span className="text-xs text-slate-500">
           Envoyé depuis votre boîte Zoho, copie dans l&apos;historique.
+          <span className="ml-1 text-slate-600">(⌘/Ctrl + Entrée)</span>
         </span>
       </div>
     </form>

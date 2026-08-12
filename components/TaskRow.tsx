@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { fmtDateTime, relative } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { composerHref } from "@/lib/crm/composer";
 
 export type TaskWithProspect = {
   id: string;
@@ -17,6 +18,7 @@ export type TaskWithProspect = {
     company_name: string;
     contact_name: string | null;
     phone?: string | null;
+    email?: string | null;
   } | null;
 };
 
@@ -131,6 +133,19 @@ export function TaskRow({
                 >
                   {task.prospects.phone}
                 </a>
+              )}
+              {/* Écrire depuis « À faire » : le composeur s'ouvre déplié sur
+                  la fiche, sans chercher où il se cache. */}
+              {task.prospects.email && (
+                <Link
+                  href={composerHref(task.prospects.id)}
+                  prefetch={false}
+                  title={`Écrire à ${task.prospects.email}`}
+                  aria-label={`Écrire à ${task.prospects.company_name}`}
+                  className="text-slate-500 transition hover:text-violet-300"
+                >
+                  ✉
+                </Link>
               )}
               <span aria-hidden>·</span>
             </>

@@ -8,6 +8,7 @@ import {
 import { relative } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { deriveNextAction, type NextAction } from "@/lib/crm/nextAction";
+import { openComposer, openNote } from "@/lib/crm/composer";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -30,9 +31,12 @@ function shiftedDate(days: number): string {
 export function NextActionCard({
   action,
   prospectId,
+  canEmail = false,
 }: {
   action: NextAction;
   prospectId: string;
+  /** La fiche porte une adresse : proposer d'écrire tout de suite. */
+  canEmail?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
@@ -160,9 +164,25 @@ export function NextActionCard({
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <a href="#noter-un-echange" className="btn-primary px-3.5 py-2 text-xs">
+        {/* Les deux gestes qui font avancer une fiche, côte à côte : ils
+            déplient le bloc « Agir » sur le bon onglet et y font défiler. */}
+        <button
+          type="button"
+          onClick={() => openNote()}
+          className="btn-primary px-3.5 py-2 text-xs"
+        >
           Consigner un échange
-        </a>
+        </button>
+
+        {canEmail && (
+          <button
+            type="button"
+            onClick={() => openComposer()}
+            className="btn-ghost px-3.5 py-2 text-xs"
+          >
+            ✉ Email
+          </button>
+        )}
 
         {task && (
           <>

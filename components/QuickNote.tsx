@@ -220,22 +220,31 @@ export function QuickNote({
   return (
     <div className="card space-y-4 p-5">
       {/* Type d'échange */}
-      <div className="flex flex-wrap gap-1.5">
-        {TYPES.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => pickType(t)}
-            aria-pressed={type === t}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 transition duration-200 ${
-              type === t
-                ? "bg-celya-gradient text-slate-950 ring-transparent shadow-glow"
-                : "bg-white/[0.04] text-slate-400 ring-white/10 hover:bg-white/[0.08] hover:text-slate-200"
-            }`}
-          >
-            {ACTIVITY_LABEL[t]}
-          </button>
-        ))}
+      <div>
+        <div className="flex flex-wrap gap-1.5">
+          {TYPES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => pickType(t)}
+              aria-pressed={type === t}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 transition duration-200 ${
+                type === t
+                  ? "bg-celya-gradient text-slate-950 ring-transparent shadow-glow"
+                  : "bg-white/[0.04] text-slate-400 ring-white/10 hover:bg-white/[0.08] hover:text-slate-200"
+              }`}
+            >
+              {ACTIVITY_LABEL[t]}
+            </button>
+          ))}
+        </div>
+        {type === "email" && (
+          <p className="mt-2 text-[11px] text-slate-500">
+            On consigne ici un email déjà échangé (parti de votre boîte Zoho,
+            par exemple). Pour en <strong className="font-medium text-slate-400">envoyer</strong>{" "}
+            un, passez par l&apos;onglet « ✉ Envoyer un email ».
+          </p>
+        )}
       </div>
 
       {/* Note + assistant */}

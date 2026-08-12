@@ -43,7 +43,7 @@ export default async function TodoPage() {
   const { start, end } = todayBounds();
 
   const TASK_SELECT =
-    "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name, phone)";
+    "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name, phone, email)";
 
   // Les cinq requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un

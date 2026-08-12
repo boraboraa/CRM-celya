@@ -21,6 +21,7 @@ import {
   mapLastActions,
   type LastActionRow,
 } from "@/lib/crm/lastAction";
+import { composerHref } from "@/lib/crm/composer";
 import type { ConfidenceLevel } from "@/lib/types";
 
 
@@ -299,6 +300,9 @@ export default async function ProspectsPage({
                 </th>
                 {filtreEmails && <th className="th">Dernier mail</th>}
                 <th className="th">Responsable</th>
+                <th className="th">
+                  <span className="sr-only">Écrire</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
@@ -357,6 +361,21 @@ export default async function ProspectsPage({
                     )}
                     <td className="td">
                       <Avatar name={p.crm_users?.full_name ?? null} />
+                    </td>
+                    {/* Écrire sans passer par la fiche puis par le composeur :
+                        le lien ouvre la fiche, composeur déplié. */}
+                    <td className="td text-right">
+                      {p.email && (
+                        <Link
+                          href={composerHref(p.id)}
+                          prefetch={false}
+                          title={`Écrire à ${p.email}`}
+                          aria-label={`Écrire à ${p.company_name}`}
+                          className="rounded-lg px-2 py-1 text-slate-500 transition hover:bg-white/[0.06] hover:text-violet-300"
+                        >
+                          ✉
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 );

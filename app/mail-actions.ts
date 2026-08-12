@@ -17,6 +17,7 @@ import { fmtDate } from "@/lib/constants";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
 import { recalcConfidence } from "@/lib/crm/confidence";
+import { hasPlaceholder, PLACEHOLDER_ERROR } from "@/lib/crm/email";
 import type { ActionState } from "@/app/actions";
 import type { Email, EmailIntent } from "@/lib/types";
 
@@ -118,22 +119,31 @@ export async function syncNowAction(): Promise<ActionState> {
 // C3 — Envoi depuis la fiche prospect
 // ---------------------------------------------------------------------------
 
-export async function sendProspectEmailAction(
-  _prev: ActionState,
-  fd: FormData
+/**
+ * Le chemin d'envoi, écrit une seule fois : SMTP par l'edge function, puis
+ * tout ce que l'edge function ne fait PAS — la proposition, la cadence de
+ * relance, l'étape et la confiance. Partagé par l'envoi depuis le composeur
+ * et par l'envoi d'un brouillon en un clic.
+ */
+async function sendAndFollowUp(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  input: {
+    prospectId: string;
+    to: string;
+    subject: string;
+    body: string;
+    isProposal?: boolean;
+  }
 ): Promise<ActionState> {
-  const { supabase, userId } = await currentUser();
-
-  const prospectId = String(fd.get("prospect_id") ?? "");
-  const to = String(fd.get("to") ?? "").trim();
-  const subject = String(fd.get("subject") ?? "").trim();
-  const body = String(fd.get("body") ?? "").trim();
-  // Signal explicite : ce message EST la proposition. Jamais deviné dans
-  // le texte — c'est la case cochée qui fait foi.
-  const isProposal = fd.get("is_proposal") === "1";
-
+  const { prospectId, to, subject, body } = input;
   if (!prospectId || !to || !subject || !body) {
     return { error: "Destinataire, sujet et message requis." };
+  }
+  // Le trou laissé par un gabarit n'est pas un message : mieux vaut le dire
+  // ici que de l'envoyer. Même garde côté composeur et côté connecteur MCP.
+  if (hasPlaceholder(body) || hasPlaceholder(subject)) {
+    return { error: PLACEHOLDER_ERROR };
   }
 
   const res = await callMail({
@@ -145,7 +155,7 @@ export async function sendProspectEmailAction(
   });
   if (res.error) return { error: res.error };
 
-  if (isProposal) {
+  if (input.isProposal) {
     await supabase
       .from("prospects")
       .update({ proposal_sent_at: new Date().toISOString() })
@@ -178,6 +188,92 @@ export async function sendProspectEmailAction(
       ? `Email envoyé.${done}${next} Étape avancée automatiquement — ${auto.reason}.`
       : `Email envoyé.${done}${next}`,
   };
+}
+
+export async function sendProspectEmailAction(
+  _prev: ActionState,
+  fd: FormData
+): Promise<ActionState> {
+  const { supabase, userId } = await currentUser();
+
+  return sendAndFollowUp(supabase, userId, {
+    prospectId: String(fd.get("prospect_id") ?? ""),
+    to: String(fd.get("to") ?? "").trim(),
+    subject: String(fd.get("subject") ?? "").trim(),
+    body: String(fd.get("body") ?? "").trim(),
+    // Signal explicite : ce message EST la proposition. Jamais deviné dans
+    // le texte — c'est la case cochée qui fait foi.
+    isProposal: fd.get("is_proposal") === "1",
+  });
+}
+
+/**
+ * Envoyer un BROUILLON en un clic — le maillon qui manquait.
+ *
+ * Claude rédige, le texte atterrit dans « Brouillons » ; il fallait jusqu'ici
+ * le sélectionner, le copier, dérouler le composeur et le coller. Ce geste-ci
+ * l'envoie tel quel, à l'adresse de la fiche, puis retire le brouillon : la
+ * chronologie garde l'email réellement parti, et rien ne reste en double.
+ */
+export async function sendDraftAction(
+  _prev: ActionState,
+  fd: FormData
+): Promise<ActionState> {
+  const { supabase, userId } = await currentUser();
+
+  const prospectId = String(fd.get("prospect_id") ?? "");
+  const draftId = String(fd.get("draft_id") ?? "");
+  if (!prospectId || !draftId) return { error: "Brouillon introuvable." };
+
+  const { data: draft } = await supabase
+    .from("activities")
+    .select("id, prospect_id, subject, body, is_draft")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (!draft || draft.prospect_id !== prospectId) {
+    return { error: "Brouillon introuvable." };
+  }
+  if (!draft.is_draft) {
+    return { error: "Cette entrée n'est pas un brouillon." };
+  }
+
+  const { data: prospect } = await supabase
+    .from("prospects")
+    .select("id, email")
+    .eq("id", prospectId)
+    .maybeSingle();
+  const to = (prospect?.email ?? "").trim();
+  if (!to) {
+    return {
+      error: "Aucune adresse email sur la fiche — ajoutez-la avant d'envoyer.",
+    };
+  }
+
+  const subject = (draft.subject ?? "").trim();
+  const body = (draft.body ?? "").trim();
+  if (!subject) {
+    return {
+      error:
+        "Ce brouillon n'a pas d'objet — ouvrez-le avec « Modifier » pour en donner un.",
+    };
+  }
+  if (!body) return { error: "Ce brouillon est vide." };
+
+  const result = await sendAndFollowUp(supabase, userId, {
+    prospectId,
+    to,
+    subject,
+    body,
+  });
+  if (result.error) return result;
+
+  // Le brouillon a vécu : l'activité « email » créée par l'edge function le
+  // remplace dans la chronologie. Le garder ferait doublon. Un échec de
+  // suppression ne fait pas échouer l'envoi (le mail, lui, est parti).
+  await supabase.from("activities").delete().eq("id", draftId);
+  revalidatePath(`/prospects/${prospectId}`);
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,18 +9,15 @@ import { ProspectJournal } from "@/components/ProspectJournal";
 import { StatusControl } from "@/components/StatusControl";
 import { NextActionCard } from "@/components/NextActionCard";
 import { type TimelineEntry } from "@/components/Timeline";
-import { DeleteEntryButton } from "@/components/DeleteEntryButton";
-import { DateField } from "@/components/DateField";
+import { DraftsSection } from "@/components/DraftsSection";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { RelancesSection } from "@/components/RelancesSection";
-import {
-  updateProspectAction,
-  deleteProspectAction,
-  createTaskAction,
-} from "@/app/actions";
+import { updateProspectAction, deleteProspectAction } from "@/app/actions";
 import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
+import { replySubject } from "@/lib/crm/email";
+import type { ComposerPrefill } from "@/lib/crm/composer";
 import {
   normalizeStatus,
   fmtDateTime,
@@ -43,10 +40,14 @@ type ActivityRow = Activity & { crm_users: { full_name: string | null } | null }
  */
 export default async function ProspectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  /** `?repondre=<id d'email>` : le composeur s'ouvre en réponse à ce message. */
+  searchParams: Promise<{ repondre?: string }>;
 }) {
   const { id } = await params;
+  const { repondre } = await searchParams;
   const supabase = await createClient();
   const session = await getSession();
 
@@ -177,6 +178,16 @@ export default async function ProspectDetailPage({
     prospect.contact_name
   );
 
+  // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur
+  // s'ouvre pré-rempli, destinataire et objet repris du message reçu. Le
+  // message est cherché parmi ceux déjà chargés — pas une requête de plus.
+  const replyTo = repondre
+    ? emails.find((e) => e.id === repondre && e.direction === "entrant")
+    : undefined;
+  const composerPrefill: ComposerPrefill | undefined = replyTo
+    ? { to: replyTo.from_email, subject: replySubject(replyTo.subject) }
+    : undefined;
+
   return (
     <>
       {/* ---------- En-tête : qui, et où on en est ---------- */}
@@ -239,15 +250,21 @@ export default async function ProspectDetailPage({
 
       {/* ---------- 1. PROCHAINE ACTION, tout en tête ---------- */}
       <div className="mb-6">
-        <NextActionCard action={nextAction} prospectId={prospect.id} />
+        <NextActionCard
+          action={nextAction}
+          prospectId={prospect.id}
+          canEmail={Boolean(prospect.email)}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ---------- Colonne principale ---------- */}
         <div className="space-y-8 lg:col-span-2">
-          {/* ---------- 2. CHRONOLOGIE, puis 3. « Noter un échange » ----------
-              Les deux vivent ensemble : l'échange consigné s'inscrit dans le
-              fil à l'instant du clic, sans attendre le serveur. */}
+          {/* ---------- 2. AGIR (consigner / envoyer), puis 3. CHRONOLOGIE ----
+              Les deux vivent ensemble : l'échange consigné ou le mail envoyé
+              s'inscrit dans le fil à l'instant du clic, sans attendre le
+              serveur. Le bloc « Agir » passe devant le fil — écrire à un
+              prospect ne doit plus demander de scroller des mois d'historique. */}
           <ProspectJournal
             entries={timeline}
             prospectId={prospect.id}
@@ -255,10 +272,12 @@ export default async function ProspectDetailPage({
             contactName={prospect.contact_name}
             prospectEmail={prospect.email}
             isAdmin={Boolean(isAdmin)}
+            initialTab={composerPrefill ? "email" : "consigner"}
+            initialPrefill={composerPrefill}
           />
 
           <section>
-            <details className="card p-6">
+            <details id="modifier-la-fiche" className="card scroll-mt-6 p-6">
               <summary className="cursor-pointer font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
                 Modifier la fiche
               </summary>
@@ -361,52 +380,19 @@ export default async function ProspectDetailPage({
 
           {/* Brouillons — hors chronologie, clairement séparés. Un texte
               jamais envoyé n'est pas un échange : il ne compte pour aucun
-              fait, ne touche pas au dernier contact, et se supprime d'un clic. */}
-          {drafts.length > 0 && (
-            <section>
-              <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-                Brouillons
-                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] font-normal normal-case tracking-normal text-slate-400">
-                  {drafts.length}
-                </span>
-              </h2>
-              <p className="mb-2 text-[11px] text-slate-600">
-                Textes non envoyés — hors chronologie.
-              </p>
-              <ul className="card divide-y divide-white/[0.05]">
-                {drafts.map((d) => (
-                  <li key={d.id} className="px-4 py-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="min-w-0 flex-1 text-xs font-medium text-slate-300">
-                        {d.subject ?? "Brouillon"}
-                      </p>
-                      {isAdmin && (
-                        <DeleteEntryButton
-                          id={d.id}
-                          prospectId={prospect.id}
-                          source="activity"
-                          label="ce brouillon"
-                        />
-                      )}
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-600">
-                      {fmtDateTime(d.occurred_at)}
-                    </p>
-                    {d.body && (
-                      <details className="mt-1.5">
-                        <summary className="cursor-pointer text-[11px] text-slate-500 transition hover:text-slate-300">
-                          Voir le texte
-                        </summary>
-                        <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-500">
-                          {d.body.slice(0, 2000)}
-                        </p>
-                      </details>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+              fait, ne touche pas au dernier contact, se supprime d'un clic —
+              et depuis le 12 août, s'ENVOIE d'un clic. */}
+          <DraftsSection
+            drafts={drafts.map((d) => ({
+              id: d.id,
+              subject: d.subject,
+              body: d.body,
+              occurred_at: d.occurred_at,
+            }))}
+            prospectId={prospect.id}
+            prospectEmail={prospect.email}
+            isAdmin={Boolean(isAdmin)}
+          />
 
           {prospect.notes && (
             <section>

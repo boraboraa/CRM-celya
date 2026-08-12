@@ -145,14 +145,24 @@ export function EmptyState({
   hint,
   href,
   cta,
+  action,
+  compact = false,
 }: {
   title: string;
   hint?: string;
   href?: string;
   cta?: string;
+  /** Un geste sur place (bouton client) plutôt qu'un lien. */
+  action?: React.ReactNode;
+  /** Version resserrée, quand l'espace vide n'a pas à être spectaculaire. */
+  compact?: boolean;
 }) {
   return (
-    <div className="card grid place-items-center px-6 py-14 text-center">
+    <div
+      className={`card grid place-items-center px-6 text-center ${
+        compact ? "py-8" : "py-14"
+      }`}
+    >
       <p className="font-display text-base font-medium text-slate-300">{title}</p>
       {hint && <p className="mt-1.5 max-w-md text-sm text-slate-500">{hint}</p>}
       {href && cta && (
@@ -160,6 +170,7 @@ export function EmptyState({
           {cta}
         </Link>
       )}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }

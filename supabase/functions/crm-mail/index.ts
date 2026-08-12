@@ -143,6 +143,33 @@ Deno.serve(async (req: Request) => {
 
       // ---------------------------------------------------------------
       case "send": {
+        // Seconde voie d'authentification : appel serveur-à-serveur depuis le
+        // connecteur MCP. Son jeton OAuth est un JWT HS256 signé par l'app —
+        // Supabase Auth ne sait pas le vérifier, l'appel était donc rejeté et
+        // aucun outil MCP ne pouvait envoyer d'email. Même motif que la relève
+        // planifiée : un secret partagé du Vault, connu du seul service_role.
+        //
+        // Il AUTHENTIFIE l'appelant, il ne l'autorise à rien de plus : le rôle
+        // est relu dans crm_users, et le contrôle d'accès au prospect (juste
+        // en dessous) reste identique.
+        if (!callerId) {
+          const internalSecret = req.headers.get("x-internal-secret");
+          const expected = internalSecret ? await getInternalSecret(admin) : null;
+          if (internalSecret && expected && internalSecret === expected) {
+            const uid = String(payload.user_id ?? "");
+            if (uid) {
+              const { data: me } = await admin
+                .from("crm_users")
+                .select("id, role, is_active")
+                .eq("id", uid)
+                .maybeSingle();
+              if (me?.is_active) {
+                callerId = me.id;
+                callerRole = me.role;
+              }
+            }
+          }
+        }
         if (!callerId) return json({ error: "Non authentifié" }, 401);
 
         const prospectId = String(payload.prospect_id ?? "");
@@ -300,6 +327,14 @@ async function getPassword(admin: SupabaseClient, account: Account): Promise<str
 async function getCronSecret(admin: SupabaseClient): Promise<string | null> {
   const { data } = await admin.rpc("mail_get_secret", { p_name: "crm_mail_cron_secret" });
   return typeof data === "string" ? data : null;
+}
+
+/** Secret partagé de l'envoi serveur-à-serveur (connecteur MCP → send). */
+async function getInternalSecret(admin: SupabaseClient): Promise<string | null> {
+  const { data } = await admin.rpc("mail_get_secret", {
+    p_name: "crm_mail_internal_secret",
+  });
+  return typeof data === "string" && data.length > 0 ? data : null;
 }
 
 /** Relève un compte : nouveaux messages depuis le curseur UID, rattachement,

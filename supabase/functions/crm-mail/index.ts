@@ -1,7 +1,9 @@
 // Celya CRM — boîte Zoho dans les deux sens.
 // - save_account : enregistre le compte (mot de passe d'application → Vault)
-// - send         : envoi SMTP depuis la boîte de Bora + journalisation
+// - send         : envoi SMTP depuis la boîte de Bora + journalisation,
+//                  accroché au fil de discussion du prospect (RFC 5322)
 // - sync         : relève IMAP (pg_cron toutes les 5 min, ou bouton admin)
+// - probe        : diagnostic en lecture seule de la boîte
 //
 // Le mot de passe d'application ne quitte jamais Supabase : Vault + RPC
 // réservées à service_role. Analyse MIME par mailparser, IMAP par imapflow,
@@ -40,6 +42,126 @@ type Account = {
   imap_host: string;
   credentials_secret_id: string | null;
   sync_cursor: { uidValidity?: number; lastUid?: number };
+};
+
+// ---------------------------------------------------------------------------
+// Bornes de la relève — la panne du 16 août 2026 vient de leur absence.
+//
+// L'ancienne boucle lisait `${lastUid + 1}:*` : tout l'arriéré d'un coup,
+// simpleParser sur chaque message, et le curseur écrit SEULEMENT après la
+// boucle. Le worker mourait sur son quota CPU avant d'y arriver, le curseur
+// restait à 20, le tour suivant re-téléchargeait le même paquet — en pire,
+// puisqu'il grossissait de tout ce qui arrivait entre-temps. Auto-aggravant :
+// ça ne se serait jamais débloqué tout seul.
+//
+// Les quatre bornes ci-dessous, plus le curseur écrit APRÈS CHAQUE MESSAGE
+// (voir syncAccount), garantissent qu'une relève progresse toujours, même
+// tuée en plein vol.
+// ---------------------------------------------------------------------------
+
+/** Fenêtre UID lue par relève. Jamais de plage ouverte. */
+const BATCH = 25;
+
+/** Budget de temps d'une relève, tous comptes confondus. Le cron accorde 45 s.
+ *  La borne est à 15 s pour qu'un dernier message déjà engagé (téléchargement
+ *  du corps, jusqu'à MAX_PARSE_BYTES) puisse finir sans jamais faire dépasser
+ *  25 s à la réponse. Le tour suivant (5 min) reprend au curseur — une boîte
+ *  en retard se rattrape en quelques cycles au lieu de mourir en boucle. */
+const SYNC_BUDGET_MS = 15_000;
+
+/** En dessous de ce reliquat, on n'appelle plus le classifieur : l'email est
+ *  inséré tel quel (`triage='a_traiter'`, `intent=null`) et le bouton
+ *  « ✨ Analyser » de la carte fera le tri. Voir classifyBudget(). */
+const CLASSIFY_RESERVE_MS = 8_000;
+
+/**
+ * Au-delà de cette taille, le corps n'est NI téléchargé NI analysé.
+ *
+ * C'est la vraie cause de la panne, mesurée le 19 août : UID 21 pesait
+ * 6,3 Mo (et deux autres ~3 Mo). simpleParser décode les pièces jointes en
+ * mémoire, et un seul message de cette taille consomme tout le quota CPU du
+ * worker — avant même la première écriture de curseur. Borner le NOMBRE de
+ * messages n'y pouvait rien : le premier suffisait à tuer la relève.
+ *
+ * Le message n'est pas perdu pour autant : son enveloppe (expéditeur, sujet,
+ * date, fil de réponse) suffit à créer la ligne `emails`, à la rattacher au
+ * prospect et à faire remonter la fiche. Seul le corps manque, et il est dans
+ * Zoho. Voir un email sans son corps vaut infiniment mieux que ne pas le voir.
+ *
+ * 1 Mo sépare proprement le réel du monstrueux : les vraies réponses de
+ * prospects mesurées ce jour-là allaient de 11 Ko à 290 Ko.
+ */
+const MAX_PARSE_BYTES = 1024 * 1024;
+
+/** Volume total réellement analysé par relève — le reste roule au tour
+ *  suivant. Ne compte que ce qui passe par simpleParser : c'est là qu'est le
+ *  CPU, pas dans les enveloppes. */
+const PARSE_BUDGET_BYTES = 4 * 1024 * 1024;
+
+// ---------------------------------------------------------------------------
+// Fil de discussion — un prospect, un seul fil, à vie.
+//
+// `send` n'a longtemps posé aucun en-tête de fil : chaque relance arrivait chez
+// le prospect comme une sollicitation neuve, ce que les filtres anti-spam
+// sanctionnent précisément. In-Reply-To et References ne sont pas des
+// heuristiques, c'est le mécanisme normatif (RFC 5322) — sans eux Gmail et
+// Outlook n'ont AUCUN moyen de rattacher le message.
+//
+// La règle qui couvre les trois cas (1re prise de contact, relance sans
+// réponse, réponse à sa réponse) tient en une phrase : on s'accroche au
+// DERNIER message du fil, toutes directions confondues. Chercher « mon dernier
+// envoi » raterait le troisième cas, le plus important.
+// ---------------------------------------------------------------------------
+
+/** Préfixes de réponse/transfert à ne jamais empiler. `objet` est là pour une
+ *  raison précise : un ancien envoi a laissé la chaîne littérale « Objet : »
+ *  en tête d'un sujet stocké en base. */
+const SUBJECT_PREFIX = /^\s*(?:re|ré|rep|rép|reponse|réponse|fw|fwd|tr|objet)\s*:\s*/i;
+
+/** Retire tous les préfixes empilés — « RE : TR: Objet : x » → « x ». */
+function stripSubjectPrefixes(subject: string | null | undefined): string {
+  let out = (subject ?? "").trim();
+  for (let i = 0; i < 10; i++) {
+    const next = out.replace(SUBJECT_PREFIX, "").trim();
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/** Sujet d'une réponse : « Re: » + le sujet de la RACINE du fil, jamais celui
+ *  passé en paramètre. Un vrai client mail ne change pas le sujet en
+ *  répondant, et Outlook regroupe encore par sujet. */
+function threadSubject(rootSubject: string | null | undefined): string {
+  const base = stripSubjectPrefixes(rootSubject);
+  return base ? `Re: ${base}` : "Re:";
+}
+
+/** Un message du fil, tel qu'on en a besoin pour s'y accrocher. */
+type ThreadRow = {
+  direction: string;
+  to_email: string | null;
+  from_email: string | null;
+  subject: string | null;
+  message_id: string | null;
+  thread_key: string | null;
+  received_at: string;
+};
+
+/** Pourquoi la relève s'est arrêtée. Aucune de ces valeurs n'est une erreur :
+ *  `sync_error` reste null, la raison se lit dans la réponse JSON. */
+type StopReason =
+  | "caught_up" // plus rien à lire : le curseur touche uidNext - 1
+  | "batch_done" // fenêtre BATCH épuisée, il en reste — le prochain cron suit
+  | "deadline" // budget de temps atteint
+  | "bytes_budget" // budget d'octets analysés atteint
+  | "cursor_reset"; // première relève (ou uidValidity changée) : curseur posé
+
+type SyncOutcome = {
+  imported: number;
+  scanned: number;
+  stopped_reason: StopReason;
+  last_uid: number | null;
 };
 
 Deno.serve(async (req: Request) => {
@@ -212,6 +334,31 @@ Deno.serve(async (req: Request) => {
         const domain = account.email_address.split("@")[1] ?? "celya.be";
         const messageId = `<crm-${crypto.randomUUID()}@${domain}>`;
 
+        // ---- Fil de discussion (voir « Fil de discussion » en tête de fichier)
+        // `new_thread` est l'échappatoire explicite : une offre vraiment
+        // différente ne doit pas s'enterrer dans un vieux fil.
+        const newThread = payload.new_thread === true;
+        const { parent, rows } = newThread
+          ? { parent: null, rows: [] as ThreadRow[] }
+          : await findThreadParent(admin, prospect.id, to);
+
+        let inReplyTo: string | null = null;
+        let references: string[] = [];
+        let threadKey = messageId; // racine par défaut : le message qu'on envoie
+        let subjectUsed = subject;
+
+        if (parent?.message_id) {
+          inReplyTo = parent.message_id;
+          const root = parent.thread_key ?? parent.message_id;
+          threadKey = root;
+          // References : la racine puis le parent, dédupliqués.
+          references = root === parent.message_id ? [root] : [root, parent.message_id];
+          // Le sujet du fil est celui de sa RACINE, pas celui du parent ni
+          // celui passé en paramètre.
+          const rootRow = rows.find((r) => r.message_id === root);
+          subjectUsed = threadSubject(rootRow?.subject ?? parent.subject).slice(0, 300);
+        }
+
         const transport = nodemailer.createTransport({
           host: account.smtp_host,
           port: 465,
@@ -224,9 +371,12 @@ Deno.serve(async (req: Request) => {
             ? `"${sender.full_name.replace(/"/g, "")}" <${account.email_address}>`
             : account.email_address,
           to,
-          subject,
+          subject: subjectUsed,
           text: body,
           messageId,
+          ...(inReplyTo
+            ? { inReplyTo, references: references.join(" ") }
+            : {}),
         });
         // Zoho range automatiquement le message dans « Envoyés » : la boîte
         // reste la source de vérité, le CRM n'en garde qu'une copie.
@@ -238,9 +388,11 @@ Deno.serve(async (req: Request) => {
           from_name: sender?.full_name ?? null,
           from_email: account.email_address,
           to_email: to,
-          subject,
+          subject: subjectUsed,
           body_text: body,
           message_id: messageId,
+          in_reply_to: inReplyTo,
+          thread_key: threadKey,
           mailbox: account.email_address,
           received_at: now,
           is_read: true,
@@ -251,12 +403,21 @@ Deno.serve(async (req: Request) => {
           prospect_id: prospect.id,
           author_id: callerId,
           type: "email",
-          subject,
+          subject: subjectUsed,
           body: body.slice(0, 2000),
           occurred_at: now,
         });
 
-        return json({ ok: true, message_id: messageId });
+        // `subject_used` : l'appelant doit savoir ce qui est réellement parti,
+        // puisqu'une réponse reprend le sujet du fil et ignore le sien.
+        return json({
+          ok: true,
+          message_id: messageId,
+          subject_used: subjectUsed,
+          in_reply_to: inReplyTo,
+          thread_key: threadKey,
+          new_thread: inReplyTo === null,
+        });
       }
 
       // ---------------------------------------------------------------
@@ -274,25 +435,85 @@ Deno.serve(async (req: Request) => {
           return json({ ok: true, accounts: 0, imported: 0 });
         }
 
+        // Budget partagé par tous les comptes : c'est la durée de la RÉPONSE
+        // qui doit tenir sous le timeout du cron, pas celle d'un compte.
+        const deadline = Date.now() + SYNC_BUDGET_MS;
+
         let imported = 0;
+        let scanned = 0;
+        const details: Array<Record<string, unknown>> = [];
+
         for (const account of accounts as Account[]) {
+          let outcome: SyncOutcome | null = null;
+          let failure: string | null = null;
           try {
-            imported += await syncAccount(admin, account);
-            await admin
-              .from("email_accounts")
-              .update({ last_sync_at: new Date().toISOString(), sync_error: null })
-              .eq("id", account.id);
+            outcome = await syncAccount(admin, account, deadline);
+            imported += outcome.imported;
+            scanned += outcome.scanned;
           } catch (e) {
+            failure = e instanceof Error ? e.message : String(e);
+          } finally {
+            // Observabilité honnête : la table dit ce qui s'est réellement
+            // passé, et le try/finally garantit qu'elle est écrite même sur
+            // échec. Une sortie sur budget n'est PAS une erreur — sync_error
+            // reste null, la raison se lit dans la réponse.
             await admin
               .from("email_accounts")
-              .update({
-                last_sync_at: new Date().toISOString(),
-                sync_error: e instanceof Error ? e.message : String(e),
-              })
+              .update({ last_sync_at: new Date().toISOString(), sync_error: failure })
               .eq("id", account.id);
           }
+          details.push({
+            email: account.email_address,
+            imported: outcome?.imported ?? 0,
+            scanned: outcome?.scanned ?? 0,
+            stopped_reason: outcome?.stopped_reason ?? "error",
+            last_uid: outcome?.last_uid ?? null,
+            error: failure,
+          });
         }
-        return json({ ok: true, accounts: accounts.length, imported });
+
+        // Les compteurs du premier compte remontent à la racine : en pratique
+        // il n'y en a qu'un (la boîte de Bora), et c'est ce qu'on lit au
+        // déclenchement manuel.
+        const head = details[0] ?? {};
+        return json({
+          ok: true,
+          accounts: accounts.length,
+          imported,
+          scanned,
+          stopped_reason: head.stopped_reason ?? null,
+          last_uid: head.last_uid ?? null,
+          comptes: details,
+        });
+      }
+
+      // ---------------------------------------------------------------
+      // Diagnostic en lecture seule : état de la boîte et TAILLE des
+      // prochains messages, sans télécharger ni analyser un seul corps.
+      // Les erreurs Zoho sont opaques et une relève qui meurt ne dit rien ;
+      // c'est le pendant du test de connexion de save_account.
+      case "probe": {
+        const authorized =
+          callerRole === "admin" ||
+          (cronSecret !== null && cronSecret === (await getCronSecret(admin)));
+        if (!authorized) return json({ error: "Non autorisé" }, 401);
+
+        const { data: accounts } = await admin
+          .from("email_accounts")
+          .select("id, user_id, email_address, smtp_host, imap_host, credentials_secret_id, sync_cursor");
+
+        const out: Array<Record<string, unknown>> = [];
+        for (const account of (accounts ?? []) as Account[]) {
+          try {
+            out.push(await probeAccount(admin, account));
+          } catch (e) {
+            out.push({
+              email: account.email_address,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+        return json({ ok: true, comptes: out });
       }
 
       default:
@@ -337,9 +558,93 @@ async function getInternalSecret(admin: SupabaseClient): Promise<string | null> 
   return typeof data === "string" && data.length > 0 ? data : null;
 }
 
-/** Relève un compte : nouveaux messages depuis le curseur UID, rattachement,
- *  insertion idempotente (message_id unique), classification si configurée. */
-async function syncAccount(admin: SupabaseClient, account: Account): Promise<number> {
+/**
+ * Le dernier message échangé avec CE destinataire sur CETTE fiche, toutes
+ * directions confondues — le message auquel on doit s'accrocher.
+ *
+ * Le filtre porte sur l'adresse et pas seulement sur `prospect_id` : une fiche
+ * peut avoir plusieurs interlocuteurs, et répondre au message d'une autre
+ * personne casserait le fil chez le destinataire.
+ *
+ * Le tri et le filtrage se font en mémoire volontairement : exprimer ce `or`
+ * en PostgREST demanderait d'inliner l'adresse dans la chaîne de filtre, où un
+ * `+` (adresse plus-taguée) se décode en espace. Le volume par fiche est de
+ * quelques dizaines de lignes.
+ */
+async function findThreadParent(
+  admin: SupabaseClient,
+  prospectId: string,
+  counterpart: string
+): Promise<{ parent: ThreadRow | null; rows: ThreadRow[] }> {
+  const { data } = await admin
+    .from("emails")
+    .select("direction, to_email, from_email, subject, message_id, thread_key, received_at")
+    .eq("prospect_id", prospectId)
+    .not("message_id", "is", null)
+    .order("received_at", { ascending: false })
+    .limit(100);
+
+  const rows = (data ?? []) as ThreadRow[];
+  const wanted = counterpart.toLowerCase();
+  const parent =
+    rows.find((r) =>
+      r.direction === "sortant"
+        ? (r.to_email ?? "").toLowerCase() === wanted
+        : (r.from_email ?? "").toLowerCase() === wanted
+    ) ?? null;
+  return { parent, rows };
+}
+
+/** Le `thread_key` qu'un nouveau message doit porter : celui de son parent, à
+ *  défaut le `message_id` du parent, à défaut le sien (c'est une racine). */
+async function resolveThreadKey(
+  admin: SupabaseClient,
+  inReplyTo: string | null,
+  ownMessageId: string
+): Promise<string> {
+  if (!inReplyTo) return ownMessageId;
+  const { data } = await admin
+    .from("emails")
+    .select("thread_key, message_id")
+    .eq("message_id", inReplyTo)
+    .limit(1)
+    .maybeSingle();
+  if (!data) return ownMessageId;
+  return data.thread_key ?? data.message_id ?? ownMessageId;
+}
+
+/** Écrit le curseur UID. Appelé après CHAQUE message : c'est ce qui empêche un
+ *  worker tué de faire reperdre le travail déjà fait. */
+async function writeCursor(
+  admin: SupabaseClient,
+  accountId: string,
+  uidValidity: number,
+  lastUid: number
+): Promise<void> {
+  await admin
+    .from("email_accounts")
+    .update({ sync_cursor: { uidValidity, lastUid } })
+    .eq("id", accountId);
+}
+
+/**
+ * Relève un compte : une fenêtre bornée de nouveaux messages depuis le curseur
+ * UID, rattachement, insertion idempotente (message_id unique), classification
+ * si le budget le permet.
+ *
+ * Trois garanties, dans cet ordre d'importance :
+ *  1. le curseur avance après chaque message traité — un message analysé n'est
+ *     jamais re-analysé, même si le worker meurt à l'itération suivante ;
+ *  2. un message qui fait planter l'analyse est journalisé, le curseur avance
+ *     QUAND MÊME : un mail malformé ne bloque pas la file pour toujours ;
+ *  3. la boucle rend la main sur `deadline` — ce n'est pas une erreur, le tour
+ *     de cron suivant reprend là où on s'est arrêté.
+ */
+async function syncAccount(
+  admin: SupabaseClient,
+  account: Account,
+  deadline: number
+): Promise<SyncOutcome> {
   const password = await getPassword(admin, account);
   if (!password) throw new Error("Identifiants introuvables dans le Vault");
 
@@ -354,6 +659,12 @@ async function syncAccount(admin: SupabaseClient, account: Account): Promise<num
 
   await client.connect();
   let imported = 0;
+  let scanned = 0;
+  let parsedBytes = 0;
+  let lastUid: number | null = null;
+  let stopped: StopReason = "caught_up";
+  let brokeEarly = false;
+
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
@@ -364,82 +675,341 @@ async function syncAccount(admin: SupabaseClient, account: Account): Promise<num
       // Premier passage (ou boîte réinitialisée) : on pose le curseur sans
       // importer l'historique — le CRM ne lit que ce qui arrive ensuite.
       if (cursor.uidValidity !== uidValidity || typeof cursor.lastUid !== "number") {
-        await admin
-          .from("email_accounts")
-          .update({ sync_cursor: { uidValidity, lastUid: mailbox.uidNext - 1 } })
-          .eq("id", account.id);
-        return 0;
+        const start = mailbox.uidNext - 1;
+        await writeCursor(admin, account.id, uidValidity, start);
+        return { imported: 0, scanned: 0, stopped_reason: "cursor_reset", last_uid: start };
       }
 
+      lastUid = cursor.lastUid;
+      const highest = mailbox.uidNext - 1; // plus grand UID possible dans la boîte
       const from = cursor.lastUid + 1;
-      let maxUid = cursor.lastUid;
+      if (from > highest) {
+        return { imported: 0, scanned: 0, stopped_reason: "caught_up", last_uid: lastUid };
+      }
 
+      // Fenêtre FERMÉE, jamais `${from}:*`.
+      const to = Math.min(from + BATCH - 1, highest);
+      stopped = to >= highest ? "caught_up" : "batch_done";
+
+      // Chargé une seule fois par relève, et seulement si un message en a
+      // besoin — l'ancien code rechargeait jusqu'à 2000 prospects PAR MESSAGE.
+      let websites: WebsiteRow[] | null = null;
+      const loadWebsites = async (): Promise<WebsiteRow[]> =>
+        (websites ??= await loadProspectWebsites(admin));
+
+      // --- Temps 1 : les enveloppes seules (uid, taille, expéditeur, fil).
+      // Aucun corps ne traverse le réseau : c'est quasi gratuit, et c'est ce
+      // qui permet de décider AVANT de télécharger quoi que ce soit.
+      const heads: Head[] = [];
       for await (const msg of client.fetch(
-        `${from}:*`,
-        { uid: true, source: true },
+        `${from}:${to}`,
+        { uid: true, size: true, envelope: true },
         { uid: true }
       )) {
-        if (msg.uid < from) continue; // quirk IMAP : x:* renvoie le dernier message
-        maxUid = Math.max(maxUid, msg.uid);
+        if (msg.uid < from || msg.uid > to) continue; // quirk imapflow
+        const sender = msg.envelope?.from?.[0];
+        heads.push({
+          uid: msg.uid,
+          size: msg.size ?? 0,
+          messageId: msg.envelope?.messageId ?? null,
+          inReplyTo: msg.envelope?.inReplyTo ?? null,
+          subject: msg.envelope?.subject ?? null,
+          date: msg.envelope?.date ?? null,
+          fromAddress: (sender?.address ?? "").toLowerCase() || null,
+          fromName: sender?.name || null,
+        });
+      }
+      heads.sort((a, b) => a.uid - b.uid); // curseur strictement croissant
 
-        const parsed = await simpleParser(msg.source);
-        const fromAddr = parsed.from?.value?.[0];
-        const senderEmail = (fromAddr?.address ?? "").toLowerCase();
-        if (!senderEmail) continue;
-        // On ignore ce que la boîte s'envoie à elle-même.
-        if (senderEmail === account.email_address.toLowerCase()) continue;
+      // --- Temps 2 : message par message, dans l'ordre des UID.
+      for (const head of heads) {
+        if (Date.now() > deadline) {
+          stopped = "deadline";
+          brokeEarly = true;
+          break;
+        }
+        // Un message trop gros ne consomme pas le budget d'analyse : il n'est
+        // jamais analysé. On ne s'arrête que si un message ANALYSABLE ferait
+        // déborder — et jamais avant d'en avoir traité au moins un, sinon un
+        // gros message analysable bloquerait la file pour toujours.
+        const parseable = head.size <= MAX_PARSE_BYTES;
+        if (parseable && parsedBytes > 0 && parsedBytes + head.size > PARSE_BUDGET_BYTES) {
+          stopped = "bytes_budget";
+          brokeEarly = true;
+          break;
+        }
 
-        const prospectId = await matchProspect(
-          admin,
-          senderEmail,
-          parsed.inReplyTo ?? null
-        );
-
-        const { data: inserted } = await admin
-          .from("emails")
-          .upsert(
-            {
-              prospect_id: prospectId,
-              direction: "entrant",
-              from_name: fromAddr?.name || null,
-              from_email: senderEmail,
-              to_email: account.email_address,
-              subject: parsed.subject ?? null,
-              body_text: parsed.text ?? null,
-              body_html: typeof parsed.html === "string" ? parsed.html : null,
-              message_id: parsed.messageId ?? `<crm-sans-id-${uidValidity}-${msg.uid}@${account.email_address}>`,
-              in_reply_to: parsed.inReplyTo ?? null,
-              mailbox: account.email_address,
-              received_at: (parsed.date ?? new Date()).toISOString(),
-              is_read: false,
-              triage: "a_traiter",
-            },
-            { onConflict: "message_id", ignoreDuplicates: true }
-          )
-          .select("id")
-          .maybeSingle();
-
-        if (inserted?.id) {
-          imported++;
-          if (prospectId) {
-            await handleIncomingReply(admin, inserted.id, prospectId, parsed);
+        scanned++;
+        try {
+          let parsed: ParsedMail | null = null;
+          if (parseable) {
+            const full = await client.fetchOne(
+              String(head.uid),
+              { uid: true, source: true },
+              { uid: true }
+            );
+            const source = full ? full.source : null;
+            if (source) {
+              parsedBytes += source.length;
+              // skipTextToHtml / skipTextLinks : mailparser construirait
+              // `textAsHtml` et linkifierait le corps — du CPU pour un champ
+              // que le CRM ne lit jamais. `skipHtmlToText` reste par défaut :
+              // c'est lui qui donne `parsed.text` sur un message HTML seul,
+              // et ce texte-là, on l'affiche.
+              parsed = await simpleParser(source, {
+                skipTextToHtml: true,
+                skipTextLinks: true,
+              });
+            }
+          } else {
+            console.log(
+              `crm-mail: uid=${head.uid} (${head.size} octets) trop gros — importé depuis son enveloppe, sans corps`
+            );
           }
+
+          if (await ingestMessage(admin, account, head, parsed, uidValidity, deadline, loadWebsites)) {
+            imported++;
+          }
+        } catch (e) {
+          // Un message illisible ne doit pas bloquer la file : on le trace et
+          // on avance le curseur quand même, juste en dessous.
+          console.error(
+            `crm-mail: message uid=${head.uid} ignoré — ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+
+        lastUid = Math.max(lastUid ?? 0, head.uid);
+        await writeCursor(admin, account.id, uidValidity, lastUid);
+      }
+
+      // Plage parcourue jusqu'au bout : toute la fenêtre est examinée, même si
+      // des UID y manquaient (messages supprimés). Sans ce rattrapage, un trou
+      // de plus de BATCH UID bloquerait la file indéfiniment.
+      if (!brokeEarly && (lastUid ?? 0) < to) {
+        lastUid = to;
+        await writeCursor(admin, account.id, uidValidity, to);
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    // Sortir d'un fetch en cours laisse la connexion à mi-course : on tente un
+    // logout poli, mais sans jamais laisser le budget partir dedans.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      client.logout().catch(() => {}),
+      new Promise((r) => (timer = setTimeout(r, 3000))),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+    try {
+      client.close();
+    } catch {
+      /* déjà fermée */
+    }
+  }
+
+  return { imported, scanned, stopped_reason: stopped, last_uid: lastUid };
+}
+
+/** État de la boîte + taille des prochains messages, sans rien télécharger.
+ *  `size` et `envelope` viennent de FETCH RFC822.SIZE / ENVELOPE : le serveur
+ *  répond sans que le corps traverse le réseau, donc aucun coût CPU. */
+async function probeAccount(
+  admin: SupabaseClient,
+  account: Account
+): Promise<Record<string, unknown>> {
+  const password = await getPassword(admin, account);
+  if (!password) throw new Error("Identifiants introuvables dans le Vault");
+
+  const client = new ImapFlow({
+    host: account.imap_host,
+    port: 993,
+    secure: true,
+    auth: { user: account.email_address, pass: password },
+    logger: false,
+    socketTimeout: 20000,
+  });
+
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const mailbox = client.mailbox as {
+        uidValidity: bigint;
+        uidNext: number;
+        exists: number;
+      };
+      const uidValidity = Number(mailbox.uidValidity);
+      const cursor = account.sync_cursor ?? {};
+      const highest = mailbox.uidNext - 1;
+      const from = typeof cursor.lastUid === "number" ? cursor.lastUid + 1 : highest;
+      const to = Math.min(from + BATCH - 1, highest);
+
+      const messages: Array<Record<string, unknown>> = [];
+      if (from <= highest) {
+        for await (const msg of client.fetch(
+          `${from}:${to}`,
+          { uid: true, size: true, envelope: true },
+          { uid: true }
+        )) {
+          if (msg.uid < from) continue;
+          messages.push({
+            uid: msg.uid,
+            size: msg.size,
+            date: msg.envelope?.date ?? null,
+            from: msg.envelope?.from?.[0]?.address ?? null,
+            subject: (msg.envelope?.subject ?? "").slice(0, 120),
+          });
         }
       }
 
-      if (maxUid > cursor.lastUid) {
-        await admin
-          .from("email_accounts")
-          .update({ sync_cursor: { uidValidity, lastUid: maxUid } })
-          .eq("id", account.id);
-      }
+      return {
+        email: account.email_address,
+        uidValidity,
+        uidNext: mailbox.uidNext,
+        exists: mailbox.exists,
+        cursor,
+        window: { from, to, highest },
+        messages,
+      };
     } finally {
       lock.release();
     }
   } finally {
     await client.logout().catch(() => {});
   }
-  return imported;
+}
+
+/** Ce que l'enveloppe IMAP donne à elle seule — assez pour identifier,
+ *  rattacher et dater un message sans en télécharger le corps. */
+type Head = {
+  uid: number;
+  size: number;
+  messageId: string | null;
+  inReplyTo: string | null;
+  subject: string | null;
+  date: Date | null;
+  fromAddress: string | null;
+  fromName: string | null;
+};
+
+/** Ce que le CRM lit d'un message analysé. */
+type ParsedMail = {
+  from?: { value?: Array<{ address?: string; name?: string }> };
+  subject?: string;
+  text?: string;
+  html?: string | false;
+  messageId?: string;
+  inReplyTo?: string;
+  date?: Date;
+  headers?: { get(name: string): unknown; has(name: string): boolean };
+};
+
+/**
+ * Insère un message. `parsed` est null quand le corps a été volontairement
+ * laissé de côté (message trop gros) : l'enveloppe prend alors le relais pour
+ * tout ce qui compte — qui écrit, à quel fil ça répond, quand.
+ *
+ * `true` si une ligne `emails` a été créée (l'idempotence par `message_id`
+ * fait que rien n'est réinséré).
+ */
+async function ingestMessage(
+  admin: SupabaseClient,
+  account: Account,
+  head: Head,
+  parsed: ParsedMail | null,
+  uidValidity: number,
+  deadline: number,
+  loadWebsites: () => Promise<WebsiteRow[]>
+): Promise<boolean> {
+  const fromAddr = parsed?.from?.value?.[0];
+  const senderEmail = (fromAddr?.address ?? head.fromAddress ?? "").toLowerCase();
+  if (!senderEmail) return false;
+  // On ignore ce que la boîte s'envoie à elle-même.
+  if (senderEmail === account.email_address.toLowerCase()) return false;
+
+  const inReplyTo = parsed?.inReplyTo ?? head.inReplyTo ?? null;
+  const prospectId = await matchProspect(admin, senderEmail, inReplyTo, loadWebsites);
+
+  const messageId =
+    parsed?.messageId ??
+    head.messageId ??
+    `<crm-sans-id-${uidValidity}-${head.uid}@${account.email_address}>`;
+  // Même héritage que le chemin sortant : une conversation entière porte la
+  // même racine côté CRM comme côté boîte mail.
+  const threadKey = await resolveThreadKey(admin, inReplyTo, messageId);
+
+  const receivedAt = (parsed?.date ?? head.date ?? new Date()).toISOString();
+  // Corps absent : on le DIT, au lieu de laisser une fiche vide qui ferait
+  // croire à un message sans contenu.
+  const bodyText = parsed
+    ? parsed.text ?? null
+    : `[Corps non importé — message de ${(head.size / 1024 / 1024).toFixed(1)} Mo. À ouvrir dans Zoho.]`;
+
+  const { data: inserted } = await admin
+    .from("emails")
+    .upsert(
+      {
+        prospect_id: prospectId,
+        direction: "entrant",
+        from_name: fromAddr?.name || head.fromName || null,
+        from_email: senderEmail,
+        to_email: account.email_address,
+        subject: parsed?.subject ?? head.subject ?? null,
+        body_text: bodyText,
+        body_html: typeof parsed?.html === "string" ? parsed.html : null,
+        message_id: messageId,
+        in_reply_to: inReplyTo,
+        thread_key: threadKey,
+        mailbox: account.email_address,
+        received_at: receivedAt,
+        is_read: false,
+        triage: "a_traiter",
+      },
+      { onConflict: "message_id", ignoreDuplicates: true }
+    )
+    .select("id")
+    .maybeSingle();
+
+  if (!inserted?.id) return false;
+  if (prospectId) {
+    await handleIncomingReply(
+      admin,
+      inserted.id,
+      prospectId,
+      {
+        subject: parsed?.subject ?? head.subject ?? null,
+        text: parsed?.text ?? null,
+        date: parsed?.date ?? head.date ?? null,
+        headers: parsed?.headers,
+      },
+      deadline
+    );
+  }
+  return true;
+}
+
+type WebsiteRow = { id: string; domain: string };
+
+/** Les domaines des prospects, normalisés une bonne fois. Chargé au plus une
+ *  fois par relève (voir `loadWebsites` dans syncAccount) : cette requête
+ *  partait auparavant pour CHAQUE message reçu. */
+async function loadProspectWebsites(admin: SupabaseClient): Promise<WebsiteRow[]> {
+  const { data } = await admin
+    .from("prospects")
+    .select("id, website")
+    .not("website", "is", null)
+    .limit(2000);
+  const rows: WebsiteRow[] = [];
+  for (const c of data ?? []) {
+    const domain = String(c.website ?? "")
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split(/[/?#]/)[0];
+    if (domain) rows.push({ id: c.id, domain });
+  }
+  return rows;
 }
 
 /** Rattachement, dans l'ordre : email exact du prospect → fil de réponse
@@ -448,7 +1018,8 @@ async function syncAccount(admin: SupabaseClient, account: Account): Promise<num
 async function matchProspect(
   admin: SupabaseClient,
   senderEmail: string,
-  inReplyTo: string | null
+  inReplyTo: string | null,
+  loadWebsites: () => Promise<WebsiteRow[]>
 ): Promise<string | null> {
   // 1. adresse exacte
   const { data: byEmail } = await admin
@@ -475,19 +1046,9 @@ async function matchProspect(
   const domain = senderEmail.split("@")[1] ?? "";
   if (!domain || PUBLIC_DOMAINS.has(domain)) return null;
 
-  const { data: candidates } = await admin
-    .from("prospects")
-    .select("id, website")
-    .not("website", "is", null)
-    .limit(2000);
-  for (const c of candidates ?? []) {
-    const site = String(c.website ?? "")
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split(/[/?#]/)[0];
-    if (site && (site === domain || site.endsWith(`.${domain}`) || domain.endsWith(`.${site}`) || site === `www.${domain}`)) {
-      return c.id;
+  for (const { id, domain: site } of await loadWebsites()) {
+    if (site === domain || site.endsWith(`.${domain}`) || domain.endsWith(`.${site}`) || site === `www.${domain}`) {
+      return id;
     }
   }
   return null;
@@ -507,6 +1068,28 @@ async function matchProspect(
 // Les tâches « RDV … » ne sont jamais touchées.
 // ---------------------------------------------------------------------------
 
+/**
+ * Combien de temps le classifieur a le droit de prendre, ou 0 s'il ne doit pas
+ * être appelé du tout.
+ *
+ * Option (a) du cahier des charges — plutôt qu'une seconde fonction/queue (b).
+ * Justification : le repli existe déjà et il est gratuit. Un email inséré sans
+ * intent porte `triage='a_traiter'` et la carte « Réponses reçues » offre son
+ * bouton « ✨ Analyser », qui refait exactement ce tri via le fournisseur
+ * configuré sur Vercel (lib/ai/triage.ts). Une queue ajouterait une fonction,
+ * un déclencheur et une sémantique de réessai pour le même résultat. Ici, il
+ * n'y a qu'un budget à respecter.
+ *
+ * Le plafond dynamique compte autant que la réserve : le SDK Anthropic était
+ * réglé sur 25 s de timeout, soit plus que le budget entier de la relève — un
+ * seul appel lent suffisait à faire sauter la réponse.
+ */
+function classifyBudget(deadline: number): number {
+  const left = deadline - Date.now();
+  if (left < CLASSIFY_RESERVE_MS) return 0;
+  return Math.min(15_000, left - 1_000);
+}
+
 async function handleIncomingReply(
   admin: SupabaseClient,
   emailId: string,
@@ -516,12 +1099,24 @@ async function handleIncomingReply(
     text?: string | null;
     date?: Date | null;
     headers?: { get(name: string): unknown; has(name: string): boolean };
-  }
+  },
+  deadline: number
 ) {
-  const proposal = await classifyReply(admin, emailId, {
-    subject: parsed.subject ?? "",
-    text: (parsed.text ?? "").slice(0, 4000),
-  });
+  // L'insertion de l'email est déjà faite : la classification ne peut plus
+  // empêcher Bora de voir la réponse, elle ne fait que l'enrichir.
+  // Sans corps (message trop gros pour être analysé), il n'y a rien à classer :
+  // la fiche remonte quand même, avec la carte « à trier ».
+  const text = (parsed.text ?? "").slice(0, 4000);
+  const budget = text ? classifyBudget(deadline) : 0;
+  const proposal =
+    budget > 0
+      ? await classifyReply(
+          admin,
+          emailId,
+          { subject: parsed.subject ?? "", text },
+          budget
+        )
+      : null;
 
   if (proposal?.intent === "absence") {
     const due = proposal.dueAtISO ?? new Date(Date.now() + 7 * 86400000).toISOString();
@@ -663,14 +1258,19 @@ const INTENTS = [
 ] as const;
 
 /** Appelle le fournisseur configuré. null si absent, en panne ou hors format. */
-async function callClassifier(system: string, user: string): Promise<string | null> {
+async function callClassifier(
+  system: string,
+  user: string,
+  timeoutMs: number
+): Promise<string | null> {
   const name = (Deno.env.get("AGENT_PROVIDER") ?? "minimax").trim();
 
   if (name.toLowerCase() === "anthropic") {
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) return null;
     try {
-      const client = new Anthropic({ apiKey, timeout: 25000, maxRetries: 1 });
+      // maxRetries: 0 — un réessai doublerait le temps réservé.
+      const client = new Anthropic({ apiKey, timeout: timeoutMs, maxRetries: 0 });
       const response = await client.messages.create({
         model: Deno.env.get("ANTHROPIC_MODEL") ?? "claude-opus-5",
         max_tokens: 300,
@@ -696,7 +1296,7 @@ async function callClassifier(system: string, user: string): Promise<string | nu
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 25000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -730,7 +1330,8 @@ async function callClassifier(system: string, user: string): Promise<string | nu
 async function classifyReply(
   admin: SupabaseClient,
   emailId: string,
-  mail: { subject: string; text: string }
+  mail: { subject: string; text: string },
+  timeoutMs: number
 ): Promise<{ intent: (typeof INTENTS)[number]; dueAtISO: string | null } | null> {
   const today = new Date().toISOString().slice(0, 10);
   const system = `Tu tries la réponse email d'un prospect belge à un email de prospection. Nous sommes le ${today}.
@@ -746,7 +1347,8 @@ Réponds UNIQUEMENT avec un objet JSON :
   try {
     const content = await callClassifier(
       system,
-      `Sujet : ${mail.subject}\n\n${mail.text}`
+      `Sujet : ${mail.subject}\n\n${mail.text}`,
+      timeoutMs
     );
     if (!content) return null; // pas configuré ou en panne : tri manuel
 

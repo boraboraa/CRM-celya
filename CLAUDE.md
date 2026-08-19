@@ -494,6 +494,31 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
   impossible sur Vercel → **pg_cron + pg_net toutes les 5 min** (job
   `crm-mail-sync`, secret partagé dans le Vault). Curseur UID par compte,
   premier passage sans import d'historique, idempotence par `message_id`.
+  **Bornée de partout depuis le 19 août** (voir la panne du 16 août dans les
+  Pièges) — les quatre garde-fous, à ne pas défaire :
+  1. **fenêtre UID fermée** `${from}:${from + BATCH - 1}` (`BATCH = 25`),
+     jamais `${from}:*` ;
+  2. **curseur écrit après CHAQUE message** — un worker tué ne fait jamais
+     reperdre le travail déjà fait, et un message illisible avance quand même
+     le curseur (sinon il bloque la file pour toujours) ;
+  3. **budget de temps** (`SYNC_BUDGET_MS = 15 s`, partagé par tous les
+     comptes) : la boucle sort proprement, ce n'est pas une erreur, le tour
+     suivant reprend ;
+  4. **lecture en deux temps** : les *enveloppes* d'abord (uid, taille,
+     expéditeur, fil — quasi gratuit), et le corps n'est téléchargé et analysé
+     que sous `MAX_PARSE_BYTES` (1 Mo), avec `PARSE_BUDGET_BYTES` (4 Mo) par
+     relève. Au-delà, la ligne `emails` est créée **depuis l'enveloppe seule**,
+     rattachée et datée, `body_text` portant « [Corps non importé — … Mo] ».
+  La réponse JSON dit ce qui s'est passé : `imported`, `scanned`,
+  `stopped_reason` (`caught_up` / `batch_done` / `deadline` / `bytes_budget` /
+  `cursor_reset`), `last_uid`. `last_sync_at` / `sync_error` sont écrits dans
+  un `try/finally` — une sortie sur budget n'est **pas** une erreur et laisse
+  `sync_error` à null.
+- **`probe`** (action de `crm-mail`, admin ou cron, lecture seule) : état de la
+  boîte (`uidValidity`, `uidNext`, `exists`, curseur, fenêtre) et **taille**
+  des prochains messages, sans télécharger un seul corps. C'est elle qui a
+  identifié la panne du 16 août en une seconde là où les logs ne disaient que
+  « CPU Time exceeded ». À dégainer avant toute spéculation sur la boîte.
 - **Rattachement**, dans l'ordre : email exact du prospect → `in_reply_to`
   (fil de réponse CRM) → domaine du site web (liste `PUBLIC_DOMAINS` exclue).
   Sans correspondance → `prospect_id null`, vue `/emails` où l'admin associe
@@ -805,11 +830,13 @@ local sur la base de prod avant fusion : envoi réel → relance faite + relance
 +5 j, zones du tableau de bord, cartes ; prospects réels intacts), `013` le
 12 août (elle ne fait que créer un secret : rien à casser).
 
-L'edge function `crm-mail` est en ligne en **v4** (12 août) : seconde voie
+L'edge function `crm-mail` est en ligne en **v8** (19 août) : relève bornée
+(fenêtre UID fermée, curseur par message, budget de temps, lecture enveloppe
+d'abord) + action `probe` — voir « Boîte Zoho » et le piège du gros email.
+Identique au dépôt. La v4 (12 août) avait apporté la seconde voie
 d'authentification `x-internal-secret` sur `send`, pour que le connecteur MCP
-puisse envoyer (voir « Boîte Zoho »). Identique au dépôt. La v3 (4 août au
-soir) portait le correctif `status_locked` + la remise « à évaluer » de la
-confiance sur vraie réponse.
+puisse envoyer ; la v3 (4 août au soir) le correctif `status_locked` + la
+remise « à évaluer » de la confiance sur vraie réponse.
 
 Edge functions : déployées via le MCP Supabase —
 `crm-admin` avec `verify_jwt: true`, `crm-mail` avec `verify_jwt: false`
@@ -886,6 +913,31 @@ la règle des faits (`lib/crm/status.ts`) et le verrou (`status_locked`). **Si
 un jour une étape doit bouger, cherchez le fait qui la justifie ; s'il n'existe
 pas, proposez au lieu d'appliquer.**
 
+**Un seul gros email suffit à tuer la relève — et à la tuer POUR TOUJOURS.**
+Du 16 au 19 août 2026, plus aucun email entrant n'est arrivé dans le CRM.
+Symptômes : `net._http_response` en `Timeout of 45000 ms`, HTTP **546**,
+`CPU Time exceeded` ~70 s après le boot, `last_sync_at` figé, `sync_error`
+bloqué sur un vieux « Command failed ». Deux fautes se combinaient :
+
+- la boucle lisait `${lastUid + 1}:*` — **toute** la file d'un coup — et
+  passait `simpleParser` sur chaque message ; le premier de la file pesait
+  **6,3 Mo** (deux autres ~3 Mo), et décoder ses pièces jointes consommait à
+  lui seul tout le quota CPU du worker ;
+- le curseur n'était écrit **qu'après** la boucle. Le worker mourait avant →
+  `lastUid` inchangé → le tour suivant re-téléchargeait le même paquet, plus
+  gros de tout ce qui était arrivé entre-temps. **Auto-aggravant : ça ne se
+  serait jamais débloqué tout seul.**
+
+Trois leçons, valables bien au-delà de l'email. **Toute boucle qui consomme
+une file distante doit (a) lire par fenêtres fermées, (b) persister son
+curseur après chaque élément — pas à la fin —, et (c) porter un budget de
+temps ET de volume.** Borner le *nombre* d'éléments ne suffit pas quand un
+seul élément peut être énorme : c'est la *taille* qu'il faut regarder, et la
+regarder **avant** de télécharger (enveloppe IMAP, `HEAD`, `Content-Length`…).
+Enfin, un élément qu'on renonce à traiter en entier ne doit pas disparaître :
+l'enveloppe suffit à créer la ligne, la rattacher et la dater — **voir un
+email sans son corps vaut infiniment mieux que ne pas le voir**.
+
 **Le préchargement des liens coûte un rendu serveur par lien.** Mesuré le
 7 août : afficher la liste des prospects déclenchait 17 rendus complets de la
 fiche prospect (chacun ~9 requêtes SQL), simplement parce que chaque ligne est
@@ -942,6 +994,19 @@ des mails sont partis. Optionnel qui reste : `MCP_OAUTH_SECRET`, pour découpler
 la signature des jetons de la clé service_role — sinon elle en est dérivée, ce
 qui suffit.)*
 
+1bis. **Les mails sortants ne sont pas threadés au sens RFC** (constaté le
+   19 août, non corrigé — hors périmètre du ticket qui interdisait de toucher
+   à `send`). L'action `send` de `crm-mail` ne pose **ni `In-Reply-To` ni
+   `References`** sur le message SMTP, et n'écrit pas `emails.in_reply_to`
+   pour un sortant : les 12 lignes `direction='sortant'` ont toutes
+   `in_reply_to = null`. Seul le sujet « Re: … » (`replySubject`,
+   `lib/crm/email.ts`) rattache visuellement la relance au fil — ce qui suffit
+   à Gmail/Zoho la plupart du temps, mais pas toujours, et prive le CRM du
+   rattachement par fil dans l'autre sens (`matchProspect` étape 2 ne peut
+   alors s'appuyer que sur les réponses citant notre `message_id`, ce qui
+   fonctionne, l'en-tête étant posé à l'envoi). **Le correctif est petit** :
+   passer `inReplyTo` / `references` à `nodemailer.sendMail` et renseigner
+   `emails.in_reply_to`, en reprenant le `message_id` du dernier email du fil.
 2. **Classification automatique à la relève** (optionnel) : poser les secrets
    IA sur l'edge function — `AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=…`
    (ou `AGENT_PROVIDER=minimax MINIMAX_*=…`), via `supabase secrets set` ou le

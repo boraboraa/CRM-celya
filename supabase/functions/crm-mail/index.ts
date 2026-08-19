@@ -1,7 +1,9 @@
 // Celya CRM — boîte Zoho dans les deux sens.
 // - save_account : enregistre le compte (mot de passe d'application → Vault)
-// - send         : envoi SMTP depuis la boîte de Bora + journalisation
+// - send         : envoi SMTP depuis la boîte de Bora + journalisation,
+//                  accroché au fil de discussion du prospect (RFC 5322)
 // - sync         : relève IMAP (pg_cron toutes les 5 min, ou bouton admin)
+// - probe        : diagnostic en lecture seule de la boîte
 //
 // Le mot de passe d'application ne quitte jamais Supabase : Vault + RPC
 // réservées à service_role. Analyse MIME par mailparser, IMAP par imapflow,
@@ -95,6 +97,56 @@ const MAX_PARSE_BYTES = 1024 * 1024;
  *  suivant. Ne compte que ce qui passe par simpleParser : c'est là qu'est le
  *  CPU, pas dans les enveloppes. */
 const PARSE_BUDGET_BYTES = 4 * 1024 * 1024;
+
+// ---------------------------------------------------------------------------
+// Fil de discussion — un prospect, un seul fil, à vie.
+//
+// `send` n'a longtemps posé aucun en-tête de fil : chaque relance arrivait chez
+// le prospect comme une sollicitation neuve, ce que les filtres anti-spam
+// sanctionnent précisément. In-Reply-To et References ne sont pas des
+// heuristiques, c'est le mécanisme normatif (RFC 5322) — sans eux Gmail et
+// Outlook n'ont AUCUN moyen de rattacher le message.
+//
+// La règle qui couvre les trois cas (1re prise de contact, relance sans
+// réponse, réponse à sa réponse) tient en une phrase : on s'accroche au
+// DERNIER message du fil, toutes directions confondues. Chercher « mon dernier
+// envoi » raterait le troisième cas, le plus important.
+// ---------------------------------------------------------------------------
+
+/** Préfixes de réponse/transfert à ne jamais empiler. `objet` est là pour une
+ *  raison précise : un ancien envoi a laissé la chaîne littérale « Objet : »
+ *  en tête d'un sujet stocké en base. */
+const SUBJECT_PREFIX = /^\s*(?:re|ré|rep|rép|reponse|réponse|fw|fwd|tr|objet)\s*:\s*/i;
+
+/** Retire tous les préfixes empilés — « RE : TR: Objet : x » → « x ». */
+function stripSubjectPrefixes(subject: string | null | undefined): string {
+  let out = (subject ?? "").trim();
+  for (let i = 0; i < 10; i++) {
+    const next = out.replace(SUBJECT_PREFIX, "").trim();
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/** Sujet d'une réponse : « Re: » + le sujet de la RACINE du fil, jamais celui
+ *  passé en paramètre. Un vrai client mail ne change pas le sujet en
+ *  répondant, et Outlook regroupe encore par sujet. */
+function threadSubject(rootSubject: string | null | undefined): string {
+  const base = stripSubjectPrefixes(rootSubject);
+  return base ? `Re: ${base}` : "Re:";
+}
+
+/** Un message du fil, tel qu'on en a besoin pour s'y accrocher. */
+type ThreadRow = {
+  direction: string;
+  to_email: string | null;
+  from_email: string | null;
+  subject: string | null;
+  message_id: string | null;
+  thread_key: string | null;
+  received_at: string;
+};
 
 /** Pourquoi la relève s'est arrêtée. Aucune de ces valeurs n'est une erreur :
  *  `sync_error` reste null, la raison se lit dans la réponse JSON. */
@@ -282,6 +334,31 @@ Deno.serve(async (req: Request) => {
         const domain = account.email_address.split("@")[1] ?? "celya.be";
         const messageId = `<crm-${crypto.randomUUID()}@${domain}>`;
 
+        // ---- Fil de discussion (voir « Fil de discussion » en tête de fichier)
+        // `new_thread` est l'échappatoire explicite : une offre vraiment
+        // différente ne doit pas s'enterrer dans un vieux fil.
+        const newThread = payload.new_thread === true;
+        const { parent, rows } = newThread
+          ? { parent: null, rows: [] as ThreadRow[] }
+          : await findThreadParent(admin, prospect.id, to);
+
+        let inReplyTo: string | null = null;
+        let references: string[] = [];
+        let threadKey = messageId; // racine par défaut : le message qu'on envoie
+        let subjectUsed = subject;
+
+        if (parent?.message_id) {
+          inReplyTo = parent.message_id;
+          const root = parent.thread_key ?? parent.message_id;
+          threadKey = root;
+          // References : la racine puis le parent, dédupliqués.
+          references = root === parent.message_id ? [root] : [root, parent.message_id];
+          // Le sujet du fil est celui de sa RACINE, pas celui du parent ni
+          // celui passé en paramètre.
+          const rootRow = rows.find((r) => r.message_id === root);
+          subjectUsed = threadSubject(rootRow?.subject ?? parent.subject).slice(0, 300);
+        }
+
         const transport = nodemailer.createTransport({
           host: account.smtp_host,
           port: 465,
@@ -294,9 +371,12 @@ Deno.serve(async (req: Request) => {
             ? `"${sender.full_name.replace(/"/g, "")}" <${account.email_address}>`
             : account.email_address,
           to,
-          subject,
+          subject: subjectUsed,
           text: body,
           messageId,
+          ...(inReplyTo
+            ? { inReplyTo, references: references.join(" ") }
+            : {}),
         });
         // Zoho range automatiquement le message dans « Envoyés » : la boîte
         // reste la source de vérité, le CRM n'en garde qu'une copie.
@@ -308,9 +388,11 @@ Deno.serve(async (req: Request) => {
           from_name: sender?.full_name ?? null,
           from_email: account.email_address,
           to_email: to,
-          subject,
+          subject: subjectUsed,
           body_text: body,
           message_id: messageId,
+          in_reply_to: inReplyTo,
+          thread_key: threadKey,
           mailbox: account.email_address,
           received_at: now,
           is_read: true,
@@ -321,12 +403,21 @@ Deno.serve(async (req: Request) => {
           prospect_id: prospect.id,
           author_id: callerId,
           type: "email",
-          subject,
+          subject: subjectUsed,
           body: body.slice(0, 2000),
           occurred_at: now,
         });
 
-        return json({ ok: true, message_id: messageId });
+        // `subject_used` : l'appelant doit savoir ce qui est réellement parti,
+        // puisqu'une réponse reprend le sujet du fil et ignore le sien.
+        return json({
+          ok: true,
+          message_id: messageId,
+          subject_used: subjectUsed,
+          in_reply_to: inReplyTo,
+          thread_key: threadKey,
+          new_thread: inReplyTo === null,
+        });
       }
 
       // ---------------------------------------------------------------
@@ -465,6 +556,61 @@ async function getInternalSecret(admin: SupabaseClient): Promise<string | null> 
     p_name: "crm_mail_internal_secret",
   });
   return typeof data === "string" && data.length > 0 ? data : null;
+}
+
+/**
+ * Le dernier message échangé avec CE destinataire sur CETTE fiche, toutes
+ * directions confondues — le message auquel on doit s'accrocher.
+ *
+ * Le filtre porte sur l'adresse et pas seulement sur `prospect_id` : une fiche
+ * peut avoir plusieurs interlocuteurs, et répondre au message d'une autre
+ * personne casserait le fil chez le destinataire.
+ *
+ * Le tri et le filtrage se font en mémoire volontairement : exprimer ce `or`
+ * en PostgREST demanderait d'inliner l'adresse dans la chaîne de filtre, où un
+ * `+` (adresse plus-taguée) se décode en espace. Le volume par fiche est de
+ * quelques dizaines de lignes.
+ */
+async function findThreadParent(
+  admin: SupabaseClient,
+  prospectId: string,
+  counterpart: string
+): Promise<{ parent: ThreadRow | null; rows: ThreadRow[] }> {
+  const { data } = await admin
+    .from("emails")
+    .select("direction, to_email, from_email, subject, message_id, thread_key, received_at")
+    .eq("prospect_id", prospectId)
+    .not("message_id", "is", null)
+    .order("received_at", { ascending: false })
+    .limit(100);
+
+  const rows = (data ?? []) as ThreadRow[];
+  const wanted = counterpart.toLowerCase();
+  const parent =
+    rows.find((r) =>
+      r.direction === "sortant"
+        ? (r.to_email ?? "").toLowerCase() === wanted
+        : (r.from_email ?? "").toLowerCase() === wanted
+    ) ?? null;
+  return { parent, rows };
+}
+
+/** Le `thread_key` qu'un nouveau message doit porter : celui de son parent, à
+ *  défaut le `message_id` du parent, à défaut le sien (c'est une racine). */
+async function resolveThreadKey(
+  admin: SupabaseClient,
+  inReplyTo: string | null,
+  ownMessageId: string
+): Promise<string> {
+  if (!inReplyTo) return ownMessageId;
+  const { data } = await admin
+    .from("emails")
+    .select("thread_key, message_id")
+    .eq("message_id", inReplyTo)
+    .limit(1)
+    .maybeSingle();
+  if (!data) return ownMessageId;
+  return data.thread_key ?? data.message_id ?? ownMessageId;
 }
 
 /** Écrit le curseur UID. Appelé après CHAQUE message : c'est ce qui empêche un
@@ -785,6 +931,14 @@ async function ingestMessage(
   const inReplyTo = parsed?.inReplyTo ?? head.inReplyTo ?? null;
   const prospectId = await matchProspect(admin, senderEmail, inReplyTo, loadWebsites);
 
+  const messageId =
+    parsed?.messageId ??
+    head.messageId ??
+    `<crm-sans-id-${uidValidity}-${head.uid}@${account.email_address}>`;
+  // Même héritage que le chemin sortant : une conversation entière porte la
+  // même racine côté CRM comme côté boîte mail.
+  const threadKey = await resolveThreadKey(admin, inReplyTo, messageId);
+
   const receivedAt = (parsed?.date ?? head.date ?? new Date()).toISOString();
   // Corps absent : on le DIT, au lieu de laisser une fiche vide qui ferait
   // croire à un message sans contenu.
@@ -804,11 +958,9 @@ async function ingestMessage(
         subject: parsed?.subject ?? head.subject ?? null,
         body_text: bodyText,
         body_html: typeof parsed?.html === "string" ? parsed.html : null,
-        message_id:
-          parsed?.messageId ??
-          head.messageId ??
-          `<crm-sans-id-${uidValidity}-${head.uid}@${account.email_address}>`,
+        message_id: messageId,
         in_reply_to: inReplyTo,
+        thread_key: threadKey,
         mailbox: account.email_address,
         received_at: receivedAt,
         is_read: false,

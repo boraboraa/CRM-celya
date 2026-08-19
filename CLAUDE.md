@@ -489,6 +489,32 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
   « En attente de réponse » — plus jamais « en retard » juste après un envoi
   (c'était le bug : la relance n'était créée que « si aucune n'existait »,
   l'ancienne restait ouverte).
+- **Un prospect = un seul fil, à vie** (19 août). Tout envoi s'accroche au
+  **dernier message échangé avec ce destinataire sur cette fiche, toutes
+  directions confondues** — formulation choisie exprès : chercher « mon dernier
+  envoi » raterait le cas qui compte le plus, *ma réponse à sa réponse*, qui
+  doit se ranger sous SON message et non ouvrir un troisième fil.
+  - `In-Reply-To` = `message_id` du parent, `References` = racine puis parent
+    (dédupliqués). Ce n'est pas une heuristique : sans ces en-têtes, Gmail et
+    Outlook n'ont aucun moyen de rattacher le message (RFC 5322). Avant ce
+    correctif, les 12 sortants avaient tous `in_reply_to = null` et chaque
+    relance arrivait comme une sollicitation neuve — le motif exact que les
+    filtres anti-spam sanctionnent.
+  - Le **sujet est celui de la RACINE** du fil, préfixé une seule fois
+    (`stripSubjectPrefixes` mange `Re:`/`RE :`/`TR:`/`Fwd:`/`Rép:` **et** la
+    chaîne littérale `Objet : ` laissée par un ancien envoi). Le sujet passé en
+    paramètre est **ignoré** dès qu'il y a un parent — un vrai client mail ne
+    change pas le sujet en répondant, et Outlook regroupe encore par sujet.
+    `send` renvoie `subject_used` pour que l'appelant sache ce qui est parti.
+  - En base : `emails.in_reply_to` (null pour une racine) et `emails.thread_key`
+    (celui du parent, à défaut son `message_id`, à défaut le sien). Le chemin
+    **entrant** hérite pareil (`resolveThreadKey` dans `ingestMessage`), pour
+    qu'une conversation porte la même racine côté CRM et côté boîte mail.
+  - **`new_thread: true`** force une racine neuve, sujet tel quel : l'offre
+    vraiment différente qui ne doit pas s'enterrer dans un vieux fil.
+  - Le filtre porte sur **l'adresse**, pas seulement `prospect_id` : une fiche
+    peut avoir plusieurs interlocuteurs, et répondre au message d'un autre
+    casserait le fil chez le destinataire.
 - **Relève** : `imappro.zoho.com|eu:993` via imapflow + mailparser (jamais
   d'analyseur MIME maison). IMAP IDLE exigerait une connexion permanente,
   impossible sur Vercel → **pg_cron + pg_net toutes les 5 min** (job
@@ -828,11 +854,17 @@ donc applicables avant le déploiement du code sans rien casser en production �
 `011` a été appliquée ainsi le 4 août au soir, `012` le 7 août (vérifiée en
 local sur la base de prod avant fusion : envoi réel → relance faite + relance
 +5 j, zones du tableau de bord, cartes ; prospects réels intacts), `013` le
-12 août (elle ne fait que créer un secret : rien à casser).
+12 août (elle ne fait que créer un secret : rien à casser) et
+`014_fil_de_discussion.sql` le 19 août — **données seulement, aucun schéma** :
+elle remplit les `emails.thread_key` restés null, en héritant du parent via
+`in_reply_to` plutôt qu'en posant bêtement `thread_key = message_id` (une
+réponse appartient au fil de son parent, pas à un fil à elle). Idempotente.
 
-L'edge function `crm-mail` est en ligne en **v8** (19 août) : relève bornée
-(fenêtre UID fermée, curseur par message, budget de temps, lecture enveloppe
-d'abord) + action `probe` — voir « Boîte Zoho » et le piège du gros email.
+L'edge function `crm-mail` est en ligne en **v9** (19 août) : fil de discussion
+sur `send` (`In-Reply-To`/`References`, sujet de la racine, `thread_key`,
+`new_thread`). La **v8** du même jour portait la relève bornée (fenêtre UID
+fermée, curseur par message, budget de temps, lecture enveloppe d'abord) et
+l'action `probe` — voir « Boîte Zoho » et le piège du gros email.
 Identique au dépôt. La v4 (12 août) avait apporté la seconde voie
 d'authentification `x-internal-secret` sur `send`, pour que le connecteur MCP
 puisse envoyer ; la v3 (4 août au soir) le correctif `status_locked` + la
@@ -912,6 +944,17 @@ avait été appliquée sans confirmation. Deux garde-fous permanents en découle
 la règle des faits (`lib/crm/status.ts`) et le verrou (`status_locked`). **Si
 un jour une étape doit bouger, cherchez le fait qui la justifie ; s'il n'existe
 pas, proposez au lieu d'appliquer.**
+
+**Un correctif déployé à la main est un correctif perdu.** Le threading des
+mails sortants avait été posé directement en edge function (v5), sans passer
+par le dépôt. Le déploiement suivant depuis `supabase/functions/` — parfaitement
+légitime — l'a écrasé sans bruit, et personne ne l'a vu : `send` ne lève pas
+d'erreur quand il n'envoie pas d'`In-Reply-To`, il envoie juste un mail hors
+fil. **Le dépôt est la source de vérité : on déploie DEPUIS lui, jamais à côté.**
+Corollaire pratique, vérifié le 19 août : après tout déploiement, relire la
+fonction en ligne (`get_edge_function`) et la comparer au fichier du dépôt —
+c'est ainsi qu'a été repérée une dérive d'une ligne de commentaire entre les
+deux.
 
 **Un seul gros email suffit à tuer la relève — et à la tuer POUR TOUJOURS.**
 Du 16 au 19 août 2026, plus aucun email entrant n'est arrivé dans le CRM.
@@ -994,19 +1037,12 @@ des mails sont partis. Optionnel qui reste : `MCP_OAUTH_SECRET`, pour découpler
 la signature des jetons de la clé service_role — sinon elle en est dérivée, ce
 qui suffit.)*
 
-1bis. **Les mails sortants ne sont pas threadés au sens RFC** (constaté le
-   19 août, non corrigé — hors périmètre du ticket qui interdisait de toucher
-   à `send`). L'action `send` de `crm-mail` ne pose **ni `In-Reply-To` ni
-   `References`** sur le message SMTP, et n'écrit pas `emails.in_reply_to`
-   pour un sortant : les 12 lignes `direction='sortant'` ont toutes
-   `in_reply_to = null`. Seul le sujet « Re: … » (`replySubject`,
-   `lib/crm/email.ts`) rattache visuellement la relance au fil — ce qui suffit
-   à Gmail/Zoho la plupart du temps, mais pas toujours, et prive le CRM du
-   rattachement par fil dans l'autre sens (`matchProspect` étape 2 ne peut
-   alors s'appuyer que sur les réponses citant notre `message_id`, ce qui
-   fonctionne, l'en-tête étant posé à l'envoi). **Le correctif est petit** :
-   passer `inReplyTo` / `references` à `nodemailer.sendMail` et renseigner
-   `emails.in_reply_to`, en reprenant le `message_id` du dernier email du fil.
+*(Le point 1bis — mails sortants non threadés — est FAIT le 19 août : voir
+« Un prospect = un seul fil, à vie » dans Boîte Zoho. Les 12 sortants
+historiques gardent `in_reply_to = null` : ces fils-là sont réellement séparés
+dans la boîte de leurs destinataires, les rattacher après coup serait un
+mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
+
 2. **Classification automatique à la relève** (optionnel) : poser les secrets
    IA sur l'edge function — `AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=…`
    (ou `AGENT_PROVIDER=minimax MINIMAX_*=…`), via `supabase secrets set` ou le

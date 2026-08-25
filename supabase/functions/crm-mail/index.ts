@@ -375,12 +375,12 @@ Deno.serve(async (req: Request) => {
           .eq("id", prospectId)
           .maybeSingle();
         if (!prospect) return json({ error: "Prospect introuvable" }, 404);
-        // Même règle que can_see_prospect : admin, propriétaire, ou vivier.
-        if (
-          callerRole !== "admin" &&
-          prospect.owner_id !== null &&
-          prospect.owner_id !== callerId
-        ) {
+        // Même règle que can_see_prospect : admin, ou propriétaire. Le vivier
+        // (owner_id null) a été fermé le 25 août (migration 016) — la branche
+        // qui le laissait passer est retirée ici aussi. Cette fonction est en
+        // Deno et ne peut pas importer lib/crm/access.ts : toute évolution de
+        // la règle doit être répercutée aux deux endroits.
+        if (callerRole !== "admin" && prospect.owner_id !== callerId) {
           return json({ error: "Prospect non accessible" }, 403);
         }
 

@@ -128,10 +128,16 @@ export async function updateProspectAction(fd: FormData) {
     city: str(fd, "city"),
     source: str(fd, "source"),
     value_estimate: num(fd, "value_estimate"),
-    owner_id: assign === "none" ? null : assign,
     notes: str(fd, "notes"),
     lost_reason: str(fd, "lost_reason"),
   };
+
+  // Le vivier est fermé (migration 016) : une fiche a toujours un propriétaire.
+  // Un formulaire qui n'en envoie pas (ou l'ancienne valeur « none » d'un
+  // onglet resté ouvert) ne DÉSASSIGNE pas la fiche — il laisse le
+  // propriétaire en place. Désassigner rendrait la fiche invisible à son
+  // commercial, et à lui seul : exactement le contraire du geste attendu.
+  if (assign && assign !== "none") patch.owner_id = assign;
 
   // Changer l'étape depuis le formulaire est une décision humaine : elle
   // verrouille. La laisser telle quelle ne verrouille rien.

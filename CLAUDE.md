@@ -137,9 +137,22 @@ MCP, edge functions, SQL direct), et **lève** (`23502`) s'il n'y a ni l'un ni
 l'autre. Une cloison étanche ne peut pas dépendre de la discipline du code
 appelant ; une fiche orpheline ne doit jamais passer en silence.
 
-Le trigger ne couvre que l'`INSERT`. **Le vivier reste atteignable par UPDATE** —
-c'est l'option « Non assigné (visible par tous) » du formulaire et de l'import,
-délibérée et conservée. Voir « Le sort du vivier » dans Reste à faire.
+**Le vivier est FERMÉ** (migration `016`, 25 août, décision de Bora).
+`can_see_prospect` ne comporte plus `or p_owner is null` : une fiche appartient
+toujours à quelqu'un, et seul l'admin voit celles des autres. C'était la
+dernière brèche d'une cloison par ailleurs étanche, et la seule *silencieuse* —
+un clic sur « Non assigné (visible par tous) » publiait la fiche à toute
+l'équipe sans le dire. Avec deux commerciaux sur deux marchés différents, un
+vivier partagé n'avait aucun sens métier.
+
+Retiré partout dans le même geste : l'option des formulaires
+(`ProspectForm`, `ImportWizard`), la valeur `"none"` des server actions et du
+cœur partagé (elle vaut désormais « moi », plus « personne »), la branche
+correspondante de `lib/crm/access.ts` et celle du contrôle d'accès de `send`
+dans `crm-mail`. **Le geste est réversible** : remettre `or p_owner is null`
+restaure l'ancien comportement à l'identique. Si l'usage « fichier à se
+partager » revient un jour, il se traitera par une colonne `pool` explicite,
+jamais par l'absence de propriétaire.
 
 Garde-fous supplémentaires : un trigger `guard_profile_privileges` empêche un
 non-admin de modifier son propre `role` ou `is_active` ; le rôle `anon` n'a
@@ -1218,36 +1231,6 @@ qui suffit.)*
 historiques gardent `in_reply_to = null` : ces fils-là sont réellement séparés
 dans la boîte de leurs destinataires, les rattacher après coup serait un
 mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
-
-0. **Le sort du vivier — décision à prendre par Bora.** Le trigger de la
-   migration `015` ferme la porte à l'`INSERT` : plus aucune fiche ne naît sans
-   propriétaire (constaté : 19 fiches, 0 orpheline). **Le vivier
-   (`owner_id is null`, visible par tous via `can_see_prospect`) reste ouvert
-   par UPDATE** — c'est l'option « Non assigné (visible par tous) » du
-   formulaire et « Personne (vivier partagé) » de l'import. Rien n'a été retiré :
-   la branche `owner IS NULL` est intacte, comme demandé.
-
-   **Pour le garder** : c'est le seul moyen de poser des fiches « à prendre »
-   sans les attribuer d'avance, utile si Bora achète un fichier et laisse
-   l'équipe se servir ; le retirer supprimerait une fonctionnalité de
-   l'interface ; et il est vide aujourd'hui, donc il ne coûte rien.
-
-   **Pour le fermer** : c'est la seule brèche restante dans une cloison par
-   ailleurs étanche, et elle est *silencieuse* — un clic sur « Non assigné »
-   dans un formulaire publie la fiche à toute l'équipe sans le dire. Avec deux
-   commerciaux sur **deux marchés différents**, un vivier partagé n'a aucun sens
-   métier : une fiche du marché de Bora n'intéresse pas le commercial, et
-   réciproquement. Et la règle « un commercial ne voit que ses prospects
-   assignés » est décrite comme **non négociable** en tête de ce fichier — le
-   vivier en est l'exception permanente.
-
-   **Ma recommandation : le fermer**, en deux gestes réversibles — retirer
-   `or p_owner is null` de `can_see_prospect` (un admin voit tout de toute
-   façon, donc rien ne devient invisible) et remplacer l'option « Non assigné »
-   par « Assigner à… » obligatoire. Si l'usage « fichier à se partager »
-   apparaît un jour, il se traite mieux par une vraie corbeille d'affectation
-   (une colonne `pool` explicite) que par l'absence de propriétaire.
-   **Non fait — attend le feu vert de Bora**, conformément à la consigne.
 
 2. **Classification automatique à la relève** (optionnel) : poser les secrets
    IA sur l'edge function — `AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=…`

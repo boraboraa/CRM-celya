@@ -13,11 +13,19 @@
  * Ce module rejoue donc la règle en TypeScript, à l'identique :
  *
  *   can_see_prospect(owner) =
- *     is_member() AND (is_admin() OR owner = auth.uid() OR owner IS NULL)
+ *     is_member() AND (is_admin() OR owner = auth.uid())
  *
  * Toute évolution de la policy SQL doit être répercutée ici — et inversement.
  * C'est le prix de l'exception, et la raison pour laquelle elle tient en un
  * seul fichier plutôt qu'éparpillée dans dix outils.
+ *
+ * Le vivier (`owner_id is null`, visible par tous) a été FERMÉ le 25 août,
+ * migration `016` — décision de Bora. Avec deux commerciaux sur deux marchés
+ * différents il n'avait pas de sens métier, et il était la dernière brèche
+ * d'une cloison par ailleurs étanche : un clic sur « Non assigné » publiait la
+ * fiche à toute l'équipe sans le dire. Une fiche a désormais toujours un
+ * propriétaire (trigger `prospects_set_owner`, migration `015`), et seul
+ * l'admin voit celles des autres.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -66,7 +74,7 @@ export async function loadViewer(
  * regarde pas l'appelant ne franchit pas cette porte.
  */
 export function canSeeProspect(viewer: Viewer, ownerId: string | null): boolean {
-  return viewer.isAdmin || ownerId === null || ownerId === viewer.userId;
+  return viewer.isAdmin || (ownerId !== null && ownerId === viewer.userId);
 }
 
 /**
@@ -76,12 +84,15 @@ export function canSeeProspect(viewer: Viewer, ownerId: string | null): boolean 
  *
  * L'admin n'est pas filtré : il voit tout, comme `is_admin()` dans la policy.
  */
-export function scopeProspects<T extends { or: (f: string) => T }>(
-  query: T,
-  viewer: Viewer
-): T {
+// `T` n'est volontairement PAS contraint par `{ eq(...): T }` : les types de
+// PostgrestFilterBuilder se ré-instancient à chaque filtre, et la contrainte
+// récursive fait exploser le compilateur (TS2589). Le transtypage local est
+// borné à l'appel et le type de retour reste celui de la requête d'entrée.
+type Filterable<T> = { eq: (column: string, value: string) => T };
+
+export function scopeProspects<T>(query: T, viewer: Viewer): T {
   if (viewer.isAdmin) return query;
-  return query.or(`owner_id.eq.${viewer.userId},owner_id.is.null`);
+  return (query as Filterable<T>).eq("owner_id", viewer.userId);
 }
 
 /**
@@ -94,13 +105,16 @@ export function scopeProspects<T extends { or: (f: string) => T }>(
  * plus — mais la vérification en mémoire garantit que « moins » soit aussi
  * « rien qui ne nous regarde pas ».
  */
-export function scopeJoinedProspects<
-  T extends { or: (f: string, opts: { referencedTable: string }) => T },
->(query: T, viewer: Viewer, referencedTable = "prospects"): T {
+export function scopeJoinedProspects<T>(
+  query: T,
+  viewer: Viewer,
+  referencedTable = "prospects"
+): T {
   if (viewer.isAdmin) return query;
-  return query.or(`owner_id.eq.${viewer.userId},owner_id.is.null`, {
-    referencedTable,
-  });
+  return (query as Filterable<T>).eq(
+    `${referencedTable}.owner_id`,
+    viewer.userId
+  );
 }
 
 /** Le message unique du refus — même formulation partout. */

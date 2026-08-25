@@ -233,7 +233,8 @@ export function ImportWizard({
                 onChange={(e) => setOwner(e.target.value)}
                 className="input max-w-sm"
               >
-                <option value="none">Personne (vivier partagé)</option>
+                {/* Le vivier partagé est fermé (migration 016) : un import
+                    appartient à quelqu'un, comme une fiche créée à la main. */}
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.full_name ?? m.email}

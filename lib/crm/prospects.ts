@@ -103,7 +103,10 @@ export async function createProspectCore(
           ? input.value_estimate
           : null,
       probability: cleanProbability(input.probability),
-      owner_id: owner === "none" ? null : (trimOrNull(owner) ?? userId),
+      // Vivier fermé : « none » ne vaut plus « personne » mais « moi ». Le
+      // trigger en base rattraperait un null de toute façon (migration 015),
+      // mais mieux vaut que le propriétaire soit posé ici, sciemment.
+      owner_id: owner === "none" ? userId : (trimOrNull(owner) ?? userId),
       notes: trimOrNull(input.notes, 4000),
       created_by: userId,
     })
@@ -282,7 +285,9 @@ export async function importProspectsCore(
       source: clean(row.source) ?? "Import CSV",
       value_estimate: toNumber(row.value_estimate),
       notes: clean(row.notes),
-      owner_id: ownerId === "none" || ownerId === null ? null : ownerId,
+      // Idem : un import appartient à quelqu'un. « none »/null retombent sur
+      // l'auteur de l'import plutôt que dans un vivier qui n'existe plus.
+      owner_id: ownerId === "none" || ownerId === null ? userId : ownerId,
       created_by: userId,
     });
   });

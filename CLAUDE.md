@@ -1026,28 +1026,32 @@ elle remplit les `emails.thread_key` restés null, en héritant du parent via
 `in_reply_to` plutôt qu'en posant bêtement `thread_key = message_id` (une
 réponse appartient au fil de son parent, pas à un fil à elle). Idempotente.
 
-⚠️ **Le dépôt est EN AVANCE sur `crm-mail` déployée** (25 août). La v10 —
-`save_account` ouvert aux membres, `pickAccount` sans repli, les deux familles
-d'hôtes Zoho, `imapHint`, et la fermeture du vivier dans le contrôle d'accès de
-`send` — est **committée sur `main` mais pas déployée**. Le conteneur de la
-session n'avait pas de `SUPABASE_ACCESS_TOKEN` (donc pas de `supabase functions
-deploy`), et le déploiement par le MCP Supabase exige de retransmettre le
-fichier entier (1541 lignes) alors que le delta ne fait que 172 lignes — trop
-de risque de coquille sur la boucle de relève réparée le 19 août. À déployer
-depuis le dépôt, en une commande :
+L'edge function `crm-mail` est en ligne en **v11** (25 août) : `save_account`
+ouvert à tout membre actif (avec le garde-fou 409 sur une adresse déjà prise et
+le refus 403 d'un `user_id` visé par un non-admin), `pickAccount` sans repli,
+les deux familles d'hôtes Zoho, `imapHint`, et la fermeture du vivier dans le
+contrôle d'accès de `send`. La **v10** portait la même chose sans le correctif
+`imapHint` (« Command failed », voir Pièges).
 
+**Comment on l'a déployée, et comment vérifier.** Le conteneur de la session
+n'avait pas de `SUPABASE_ACCESS_TOKEN`, donc `supabase functions deploy` échoue
+en `LegacyPlatformAuthRequiredError` ; le déploiement est passé par le MCP
+Supabase (`deploy_edge_function`), qui exige le fichier entier. Le contrôle
+d'après-coup n'est donc pas facultatif — il est **automatisable** : `get_edge_function`
+dépasse la limite de contexte et son résultat est écrit sur disque, ce qui
+permet d'extraire le contenu et de le diffèrer sans repasser par le modèle :
+
+```bash
+python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));open(sys.argv[2],"w").write(d["files"][0]["content"])' \
+  <fichier-resultat>.txt /tmp/deployed.ts
+diff -u supabase/functions/crm-mail/index.ts /tmp/deployed.ts   # doit être vide
 ```
-supabase functions deploy crm-mail --no-verify-jwt --project-ref wyqgbihwkfvzxlzoxvvf
-```
 
-Tant que ce n'est pas fait : un commercial ne peut pas connecter sa boîte
-(l'ancienne v9 réserve `save_account` à l'admin) et le repli `?? list[0]` de
-`pickAccount` est encore en ligne. **C'est sans danger aujourd'hui** — le seul
-compte doté d'une boîte est celui de Bora, donc le repli ne se déclenche pas —
-mais ça le deviendrait dès que Rémi enverrait un mail. Vérifier après
-déploiement : `list_edge_functions` doit annoncer **version 10**.
+Fait le 25 août pour v10 puis v11 : diff vide, SHA256 identiques
+(`e1857c9f…` pour v11). **Toujours refaire ce diff après un déploiement**, quel
+que soit le chemin utilisé.
 
-L'edge function `crm-mail` est en ligne en **v9** (19 août) : fil de discussion
+L'edge function était en **v9** (19 août) : fil de discussion
 sur `send` (`In-Reply-To`/`References`, sujet de la racine, `thread_key`,
 `new_thread`). La **v8** du même jour portait la relève bornée (fenêtre UID
 fermée, curseur par message, budget de temps, lecture enveloppe d'abord) et
@@ -1142,6 +1146,17 @@ Corollaire pratique, vérifié le 19 août : après tout déploiement, relire la
 fonction en ligne (`get_edge_function`) et la comparer au fichier du dépôt —
 c'est ainsi qu'a été repérée une dérive d'une ligne de commentaire entre les
 deux.
+
+**« Command failed » est une erreur d'authentification, pas un mystère.**
+`imapHint` cherchait `auth` / `credential` / `login` pour reconnaître un refus
+Zoho. Or imapflow remonte exactement **« Command failed »** quand Zoho rejette
+l'AUTHENTICATE — mesuré le 25 août contre un vrai compte. Le message affiché
+retombait donc sur le générique, et envoyait le commercial vérifier son centre
+de données pendant que le vrai blocage était son abonnement Zoho. **Un
+traducteur d'erreurs doit être testé contre l'erreur RÉELLE du fournisseur, pas
+contre celle qu'on imagine** : sans le test de bout en bout, la fonction
+paraissait juste. `command failed`, `535` et `no permission` sont désormais
+dans le filet, et la branche réseau passe devant (plus spécifique).
 
 **Un repli « à défaut, prends le premier » est une usurpation d'identité qui
 dort.** `pickAccount` finissait par `?? list[0]`. Écrit à une époque où Bora

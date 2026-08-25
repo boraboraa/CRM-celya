@@ -5,6 +5,22 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 25 août 2026
+
+L'équipe est **réellement à deux** : `dogrulbora@gmail.com` (admin) et
+`remi.perezweber@zohomail.eu` (commercial, actif) — ce dernier n'a **ni boîte
+email ni connecteur MCP** configurés à ce jour, et zéro prospect. Son adresse
+est un compte Zoho **personnel** (`@zohomail.eu`), donc les hôtes `imap`/`smtp`
+sans `pro` — et Zoho n'ouvre plus IMAP sur le plan gratuit : prévoir Mail Lite
+(~1 €/mois) ou une adresse `@celya.be`. 19 prospects, tous à Bora, 0 dans le
+vivier.
+
+**Note d'exploitation** : quelle que soit l'adresse retenue pour le commercial,
+elle est **neuve et sans historique d'envoi**. Elle doit monter en volume
+progressivement — quelques mails par jour la première semaine — et non démarrer
+à trente mails froids quotidiens, sous peine de finir en spam et d'abîmer au
+passage la réputation du domaine `celya.be`.
+
 ## Ce que c'est
 
 CRM personnel de **Bora Dogrul** (Celya), construit le 1–2 août 2026 et
@@ -69,11 +85,33 @@ page oublie un filtre, la base refuse. C'est le choix structurant du projet ;
 ne le contourne jamais en passant par le service_role côté serveur Next.
 
 **Unique exception sanctionnée : le connecteur MCP** (voir « Connecteur MCP »
-plus bas). Il agit en `service_role` — c'est structurellement nécessaire — mais
-l'exception est encapsulée : le jeton OAuth n'est délivré qu'au compte **admin**
-(un commercial verrait sinon tous les prospects, RLS contournée), et le serveur
-MCP n'ouvre que les tables CRM. Aucune autre partie du code Next ne doit toucher
-au `service_role`.
+plus bas). Il agit en `service_role` — c'est structurellement nécessaire — et
+le serveur MCP n'ouvre que les tables CRM. Aucune autre partie du code Next ne
+doit toucher au `service_role`.
+
+Jusqu'au 25 août, l'exception était encapsulée par un garde-fou grossier : le
+jeton OAuth n'était délivré qu'à l'**admin**. C'était nécessaire, parce que les
+dix outils lisaient les tables **sans le moindre filtre de propriété** — ouvrir
+le connecteur à un commercial lui aurait donné les 19 fiches de Bora. Le
+garde-fou tenait, mais il interdisait au commercial d'avoir le même outillage
+que Bora.
+
+Depuis, la règle est **écrite en TypeScript dans `lib/crm/access.ts`**, calquée
+sur `can_see_prospect`, et chaque outil s'y réfère :
+
+```ts
+loadViewer(admin, userId)   // relu dans crm_users À CHAQUE APPEL
+canSeeProspect(viewer, owner)  // admin | propriétaire | vivier
+scopeProspects(query, viewer)  // le filtre, poussé EN BASE avant le limit
+scopeJoinedProspects(q, viewer) // idem via une jointure prospects!inner
+```
+
+Deux verrous plutôt qu'un : le filtre part dans la requête (pour que le `limit`
+ne tronque pas les bonnes lignes), **et** les lignes revenues repassent par
+`canSeeProspect`. Si le filtre ne mordait pas, on obtiendrait moins de lignes,
+jamais plus. **Toute évolution de la policy SQL doit être répercutée dans
+`access.ts`, et inversement** — c'est le prix de l'exception, et la raison pour
+laquelle elle tient dans un seul fichier.
 
 Trois fonctions `security definer` portent la logique :
 
@@ -89,11 +127,36 @@ Règles effectives :
 - **commercial** — ses prospects assignés + le vivier non assigné (`owner_id is null`)
 - **inactif** — peut se connecter, ne voit rien
 
+**Le propriétaire d'une fiche est garanti EN BASE** (migration `015`, 25 août).
+`prospects.owner_id` n'avait ni `DEFAULT` ni trigger : c'est l'applicatif qui le
+renseignait, et il finit toujours par l'oublier quelque part — `importer_prospects`
+du connecteur MCP passait `null`, donc **tout un import tombait dans le vivier**,
+visible par tous les commerciaux. Le trigger `prospects_set_owner` remplit
+`auth.uid()`, à défaut le **premier admin actif** (insertions `service_role` :
+MCP, edge functions, SQL direct), et **lève** (`23502`) s'il n'y a ni l'un ni
+l'autre. Une cloison étanche ne peut pas dépendre de la discipline du code
+appelant ; une fiche orpheline ne doit jamais passer en silence.
+
+Le trigger ne couvre que l'`INSERT`. **Le vivier reste atteignable par UPDATE** —
+c'est l'option « Non assigné (visible par tous) » du formulaire et de l'import,
+délibérée et conservée. Voir « Le sort du vivier » dans Reste à faire.
+
 Garde-fous supplémentaires : un trigger `guard_profile_privileges` empêche un
 non-admin de modifier son propre `role` ou `is_active` ; le rôle `anon` n'a
 aucun droit sur les tables ; `email_accounts` n'a **aucune policy** (fermée à
-`anon` et `authenticated`, seule l'edge function `crm-mail` y accède) et les
-emails non rattachés ne sont visibles que par l'admin.
+`anon` et `authenticated`, seule l'edge function `crm-mail` y accède).
+
+**Les emails non rattachés suivent la BOÎTE** (migration `015`). `emails_select`
+ne les montrait qu'à l'admin : quand `prospect_id is null`, l'`EXISTS` sur
+`prospects` est faux. L'écran « Non rattachés » d'un commercial serait donc resté
+vide en permanence — alors que ce sont **ses** messages, arrivés dans **sa**
+boîte. Une branche a été ajoutée (aucune retirée) : `owns_mailbox(emails.mailbox)`,
+fonction `security definer` qui rapproche `emails.mailbox` de
+`email_accounts.user_id` et ne renvoie **qu'un booléen sur sa propre boîte**.
+Elle existe parce qu'une sous-requête directe sur `email_accounts` depuis une
+policy serait bloquée par la RLS fermée de cette table — qu'il ne faut surtout
+pas ouvrir. `emails_update` reçoit la même branche (sans quoi il verrait ses
+messages sans pouvoir les rattacher) ; `emails_delete` reste admin.
 
 Vérifié empiriquement le 2 août : un compte commercial ne voit pas les fiches
 d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
@@ -301,7 +364,27 @@ et en périphérie : `/compte` (avec les liens admin vers `/reglages-email` et
   Bouton-filtre « **📧 Emails envoyés** » (`?filtre=emails`) : seulement les
   fiches à qui un mail est parti, triées par date du dernier envoi, colonne
   « Dernier mail » ajoutée.
-- **Équipe** — inchangé.
+- **Équipe** — refonte du 25 août : le seul écran qui dise **qui est en ordre de
+  marche**. Une carte par compte : identité, rôle, actif, dernière connexion,
+  mot de passe provisoire ; **état de la configuration** (boîte email connectée
+  + état de sa relève, connecteur MCP branché + date du dernier jeton) ; et
+  **l'activité sur une période choisie** (7 j / 30 j / tout) — prospects
+  détenus, notes, appels sans réponse, mails envoyés, réponses reçues,
+  rendez-vous, relances faites, **relances en retard**, dernière action. Une
+  ligne se déplie sur les huit dernières actions, horodatées, avec le prospect.
+  Trois partis pris :
+  · **les relances en retard sont mises en évidence et volontairement HORS
+    période** — un retard est un état, pas un événement ; les compteurs
+    d'appels et de mails flattent l'activité, c'est le retard qui dit si le
+    pipeline fuit ;
+  · **un compte incomplet est signalé** (liseré ambre + bandeau de comptage),
+    jamais noyé dans un tableau uniforme ;
+  · **aucun secret** n'y figure — ni mot de passe d'application, ni jeton :
+    « connecté / pas connecté » suffit.
+  Tout vient d'**un seul agrégat**, `admin_team_overview(p_since)`, qui **lève
+  `42501` hors admin** : masquer le lien ne suffirait pas, un appel direct à la
+  route est refusé en base. La gestion des rôles reste ici, et nulle part
+  ailleurs.
 
 **La fiche se lit d'abord — elle ne s'ouvre pas sur des formulaires** (refonte
 du 4 août). De haut en bas :
@@ -463,10 +546,35 @@ cold mailing. Resend reste réservé à l'agent vocal.
 
 Architecture (edge function `crm-mail`, service_role jamais côté Next) :
 
+- **Chacun connecte SA boîte** (25 août). `save_account` commençait par
+  `if (callerRole !== "admin") → 403` : Bora aurait dû manipuler le mot de passe
+  d'application de ses commerciaux. C'est ouvert à **tout membre actif**, et
+  c'est le `user_id` **écrit** qui tient la cloison — il vaut `callerId`, jamais
+  une valeur du payload ; seul un admin peut viser quelqu'un d'autre en passant
+  un `user_id` explicite. Garde-fou ajouté : `email_accounts.email_address` est
+  **UNIQUE** et l'écriture est un `upsert` — enregistrer l'adresse déjà connectée
+  par un collègue lui aurait **volé sa boîte** (son `user_id` réécrit, et l'envoi
+  sous son nom). C'est un **409** désormais. `/reglages-email` est ouvert à tous
+  et ne montre que sa propre boîte (`mail_account_status` filtre par
+  `user_id`, l'admin voit tout).
+- **Deux familles de comptes Zoho**, déduites du domaine (`zohoHosts`) :
+  domaine propre (`@celya.be`) → `imappro`/`smtppro` ; compte personnel
+  (`zoho.*`, `zohomail.*` — dont `@zohomail.eu`) → `imap`/`smtp`. Se tromper de
+  jeu donne une erreur d'authentification **indiscernable d'un mauvais mot de
+  passe**. La déduction est forçable à la main (« Type de compte » dans le
+  formulaire) pour les cas qu'elle raterait. Le `datacenter` (`.eu`/`.com`)
+  s'applique aux deux jeux, inchangé.
+- **L'erreur Zoho est traduite** (`imapHint`). Zoho **n'ouvre plus IMAP sur le
+  plan gratuit** aux nouveaux inscrits : un compte personnel gratuit échoue au
+  test, et le message brut (« Invalid credentials ») fait croire à une faute de
+  frappe. Le message dit maintenant les trois causes réelles, dans l'ordre :
+  IMAP non activé (plan payant requis sur un compte perso), mot de passe qui
+  n'est pas un mot de passe d'application, mauvais centre de données.
 - **Credentials** : mot de passe d'application dans **Supabase Vault**,
   accessible uniquement par les RPC `mail_store_credentials` /
   `mail_get_credentials` / `mail_get_secret` (security definer, `execute`
-  réservé à `service_role`).
+  réservé à `service_role`). Il ne ressort d'aucune réponse et n'est jamais
+  journalisé.
 - **Deux voies d'authentification pour `send`** (migration `013`, 12 août) :
   le JWT Supabase Auth de la session (interface), **ou** le secret partagé du
   Vault `crm_mail_internal_secret` en en-tête `x-internal-secret` +
@@ -479,6 +587,12 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
   12 août : mauvais secret → 401, utilisateur inconnu → 401, commercial sur un
   prospect qui ne lui appartient pas → **403**, admin sur prospect inexistant
   → 404, envoi réel → 200 + lignes `emails` et `activities` (author_id correct).
+- **Envoi depuis SA boîte, ou pas d'envoi.** `pickAccount` se terminait par
+  `?? list[0]` : sans boîte configurée, l'appelant envoyait **depuis celle de
+  Bora**, signé de son nom, avec les réponses revenant chez lui et sa réputation
+  d'expéditeur engagée par la prospection d'un autre. Tant que Bora était seul,
+  le repli ne se voyait pas. Il est supprimé : `send` échoue avec un message qui
+  dit quoi faire. **Ne jamais le rétablir « pour que ça marche quand même ».**
 - **Envoi** : `smtppro.zoho.com|eu:465` SSL via nodemailer — ligne `emails`
   `direction='sortant'` avec `message_id`, activité `type='email'`. **Un mail
   envoyé CLÔT l'action en cours** (correctif du 7 août,
@@ -639,6 +753,31 @@ jamais les tables comptables du même projet, jamais d'exécution SQL libre. C'e
 sa raison d'être face au connecteur Supabase brut. (Vérifié : les seuls
 `.from(...)` du serveur MCP sont ces tables ; aucun `rpc`/`execute_sql`.)
 
+**Chaque membre a son connecteur** (25 août). Le jeton n'est plus réservé à
+l'admin : `authenticateMember` le délivre à tout compte **actif**, et la cloison
+est portée par `lib/crm/access.ts` (voir « Modèle de sécurité »). Concrètement,
+dans les outils :
+
+- `lister_prospects`, `a_faire`, `obtenir_prospect`, `resolveProspect` — bornés
+  au portefeuille du porteur du jeton. Une fiche hors portefeuille se comporte
+  comme une fiche **inexistante** (même message), pour ne pas révéler son
+  existence ;
+- `creer_prospect` pose `owner_id = porteur`, et `findDuplicates` reçoit le même
+  scope — sinon l'avertissement de doublon **nommerait les sociétés des autres**,
+  une fuite par le canal le plus discret qui soit ;
+- `importer_prospects` passait `ownerId: null` : **tout l'import partait au
+  vivier**. Il passe le porteur ;
+- `supprimer_activite` vérifie que l'entrée appartient à une fiche visible.
+
+Le compte est **relu dans `crm_users` à chaque appel** : désactiver un
+commercial dans `/equipe` coupe son connecteur à la seconde, sans attendre
+l'expiration de son jeton (1 h) ni de son `refresh_token` (90 jours).
+
+**Aucun outil n'expose de paramètre « utilisateur ».** L'identité vient
+exclusivement du `sub` du jeton OAuth, signé côté serveur — c'est ce qui rend
+l'usurpation impossible, y compris sur le chemin `envoyer_email` → `crm-mail`
+(voir la note sur `x-internal-secret` plus bas).
+
 **Authentification OAuth 2.1** (l'UI des connecteurs Claude l'exige ; un simple
 Bearer n'y est pas configurable proprement). Serveur d'autorisation minimal mais
 conforme, dans l'app :
@@ -652,10 +791,17 @@ conforme, dans l'app :
   **JWT HS256 sans état** (`lib/mcp/jwt.ts`), signés avec une clé dérivée de
   `MCP_OAUTH_SECRET` ou, à défaut, de `SUPABASE_SERVICE_ROLE_KEY`. Vérification
   via `withMcpAuth`.
-- **Garde-fou capital** : le jeton n'est délivré qu'à un compte **actif ET
-  admin**. Le connecteur agissant en `service_role` (RLS contournée), l'ouvrir à
-  un commercial lui donnerait tous les prospects. Mono-utilisateur (Bora) par
-  conception.
+- **Garde-fou** : le jeton n'est délivré qu'à un compte **actif**. Il l'était
+  autrefois au seul admin, faute de cloison dans les outils ; c'est
+  `lib/crm/access.ts` qui joue ce rôle désormais. **Ne jamais ouvrir un nouvel
+  outil sans le passer par `context()` + `resolveProspect`/`scopeProspects`** :
+  ce serait rouvrir exactement le trou que le garde-fou admin bouchait.
+
+**Marche à suivre pour connecter un commercial** (à transmettre tel quel) :
+Claude → Personnaliser → Connecteurs → « + » → Ajouter un connecteur
+personnalisé → coller `https://celya-accounting-app.vercel.app/mcp` → se
+connecter avec **ses** identifiants CRM habituels (les mêmes que pour le site).
+Il n'aura accès qu'à ses propres fiches.
 
 **`service_role` côté serveur uniquement.** Le serveur MCP l'utilise pour agir
 (via `lib/supabase/admin.ts`, qui jette si la clé manque) et **impose** que tout
@@ -855,6 +1001,13 @@ donc applicables avant le déploiement du code sans rien casser en production �
 local sur la base de prod avant fusion : envoi réel → relance faite + relance
 +5 j, zones du tableau de bord, cartes ; prospects réels intacts), `013` le
 12 août (elle ne fait que créer un secret : rien à casser) et
+`015_equipe_multi_utilisateur.sql` le 25 août (trigger `prospects_set_owner`,
+`owns_mailbox` + branche « ma boîte » sur `emails_select`/`emails_update`,
+`mail_account_status` par utilisateur, `admin_team_overview`) — **additive, et
+compatible avec le code alors en production** : le trigger ne fait que combler
+un `owner_id` nul, la branche `emails` s'ajoute sans en retirer aucune, et
+`mail_account_status` ne gagne que deux colonnes en fin de liste (les noms déjà
+lus sont inchangés). Et
 `014_fil_de_discussion.sql` le 19 août — **données seulement, aucun schéma** :
 elle remplit les `emails.thread_key` restés null, en héritant du parent via
 `in_reply_to` plutôt qu'en posant bêtement `thread_key = message_id` (une
@@ -956,6 +1109,29 @@ fonction en ligne (`get_edge_function`) et la comparer au fichier du dépôt —
 c'est ainsi qu'a été repérée une dérive d'une ligne de commentaire entre les
 deux.
 
+**Un repli « à défaut, prends le premier » est une usurpation d'identité qui
+dort.** `pickAccount` finissait par `?? list[0]`. Écrit à une époque où Bora
+était seul, le repli était invisible et même commode. À deux, il fait partir le
+mail d'un commercial **depuis la boîte de Bora, signé de son nom**, ramène les
+réponses chez la mauvaise personne et engage la réputation d'expéditeur de Bora.
+**Règle générale : quand une ressource est nominative (boîte, signature, clé),
+« pas de ressource » doit échouer, jamais emprunter celle du voisin.**
+
+**Une colonne UNIQUE + un upsert = une prise de contrôle.** `email_accounts.
+email_address` est unique, et `save_account` fait un `upsert(onConflict:
+email_address)`. Ouvrir ce geste aux non-admins sans garde-fou permettait
+d'enregistrer l'adresse d'un collègue : l'upsert réécrivait son `user_id`, et
+sa boîte changeait de propriétaire. **Tout upsert sur une clé naturelle que
+l'appelant fournit doit d'abord vérifier à qui appartient la ligne existante.**
+
+**Le service_role ne fuit pas que par les listes — il fuit par les
+avertissements.** `findDuplicates` renvoyait les fiches proches en clair. Appelé
+depuis le connecteur MCP (service_role, RLS contournée), il aurait annoncé à un
+commercial « doublon possible : Garage Boetendael » — le nom d'un prospect de
+Bora, servi par un message d'aide. **Quand du code partagé passe du client
+utilisateur au service_role, relire non seulement ce qu'il RENVOIE, mais ce
+qu'il RACONTE.**
+
 **Un seul gros email suffit à tuer la relève — et à la tuer POUR TOUJOURS.**
 Du 16 au 19 août 2026, plus aucun email entrant n'est arrivé dans le CRM.
 Symptômes : `net._http_response` en `Timeout of 45000 ms`, HTTP **546**,
@@ -1042,6 +1218,36 @@ qui suffit.)*
 historiques gardent `in_reply_to = null` : ces fils-là sont réellement séparés
 dans la boîte de leurs destinataires, les rattacher après coup serait un
 mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
+
+0. **Le sort du vivier — décision à prendre par Bora.** Le trigger de la
+   migration `015` ferme la porte à l'`INSERT` : plus aucune fiche ne naît sans
+   propriétaire (constaté : 19 fiches, 0 orpheline). **Le vivier
+   (`owner_id is null`, visible par tous via `can_see_prospect`) reste ouvert
+   par UPDATE** — c'est l'option « Non assigné (visible par tous) » du
+   formulaire et « Personne (vivier partagé) » de l'import. Rien n'a été retiré :
+   la branche `owner IS NULL` est intacte, comme demandé.
+
+   **Pour le garder** : c'est le seul moyen de poser des fiches « à prendre »
+   sans les attribuer d'avance, utile si Bora achète un fichier et laisse
+   l'équipe se servir ; le retirer supprimerait une fonctionnalité de
+   l'interface ; et il est vide aujourd'hui, donc il ne coûte rien.
+
+   **Pour le fermer** : c'est la seule brèche restante dans une cloison par
+   ailleurs étanche, et elle est *silencieuse* — un clic sur « Non assigné »
+   dans un formulaire publie la fiche à toute l'équipe sans le dire. Avec deux
+   commerciaux sur **deux marchés différents**, un vivier partagé n'a aucun sens
+   métier : une fiche du marché de Bora n'intéresse pas le commercial, et
+   réciproquement. Et la règle « un commercial ne voit que ses prospects
+   assignés » est décrite comme **non négociable** en tête de ce fichier — le
+   vivier en est l'exception permanente.
+
+   **Ma recommandation : le fermer**, en deux gestes réversibles — retirer
+   `or p_owner is null` de `can_see_prospect` (un admin voit tout de toute
+   façon, donc rien ne devient invisible) et remplacer l'option « Non assigné »
+   par « Assigner à… » obligatoire. Si l'usage « fichier à se partager »
+   apparaît un jour, il se traite mieux par une vraie corbeille d'affectation
+   (une colonne `pool` explicite) que par l'absence de propriétaire.
+   **Non fait — attend le feu vert de Bora**, conformément à la consigne.
 
 2. **Classification automatique à la relève** (optionnel) : poser les secrets
    IA sur l'edge function — `AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=…`

@@ -1,14 +1,17 @@
 /**
  * Serveur d'autorisation OAuth 2.1 minimal mais conforme, pour le connecteur
- * MCP « Celya CRM ». Un seul utilisateur (Bora, l'administrateur), donc le flux
- * est réduit à l'essentiel : découverte → enregistrement dynamique (DCR) →
- * autorisation avec PKCE → jeton Bearer.
+ * MCP « Celya CRM ». Le flux est réduit à l'essentiel : découverte →
+ * enregistrement dynamique (DCR) → autorisation avec PKCE → jeton Bearer.
  *
- * L'identité s'appuie sur Supabase Auth : Bora se connecte avec son email et
- * son mot de passe habituels sur la page d'autorisation ; on ne délivre un
- * jeton qu'à un compte crm_users actif ET admin — car le connecteur agit en
- * service_role (contournant la RLS), il ne doit jamais être ouvert à un
- * commercial qui verrait alors tous les prospects.
+ * L'identité s'appuie sur Supabase Auth : chacun se connecte avec l'email et
+ * le mot de passe qu'il utilise déjà pour le CRM, sur la page d'autorisation.
+ * Un jeton n'est délivré qu'à un compte `crm_users` ACTIF, et le sujet du
+ * jeton (`sub`) est le seul porteur d'identité pour tout le connecteur —
+ * aucun outil n'accepte d'identifiant d'utilisateur venu du client.
+ *
+ * Chaque membre a donc son propre jeton, lié à son compte. La cloison entre
+ * les portefeuilles est tenue par `lib/crm/access.ts`, puisque le serveur MCP
+ * agit en service_role et ne bénéficie pas de la RLS.
  */
 
 import { randomBytes, createHash, timingSafeEqual } from "crypto";
@@ -213,17 +216,29 @@ export async function getRefreshToken(token: string): Promise<RefreshRow | null>
   return row;
 }
 
-// --- Identité : Supabase Auth + garde-fou admin ---
+// --- Identité : Supabase Auth + garde-fou d'appartenance ---
 
 /**
- * Vérifie les identifiants Supabase de Bora, puis exige un compte crm_users
- * actif ET admin. Le connecteur agit en service_role (RLS contournée) : il ne
- * doit s'ouvrir qu'à l'administrateur, jamais à un commercial.
+ * Vérifie les identifiants Supabase, puis exige un compte `crm_users` ACTIF.
+ *
+ * Le connecteur était réservé à l'administrateur, et il fallait qu'il le soit :
+ * il agit en `service_role` (RLS contournée) et ses outils lisaient les tables
+ * sans le moindre filtre de propriété — un jeton remis à un commercial lui
+ * aurait donné tous les prospects de Bora.
+ *
+ * Depuis le 25 août, la cloison est portée par `lib/crm/access.ts` : chaque
+ * outil borne ses lectures au portefeuille du porteur du jeton, et le compte
+ * est relu dans `crm_users` à chaque appel. Le connecteur peut donc s'ouvrir à
+ * tout membre actif — c'est ce qui permet au commercial d'avoir la même
+ * configuration que Bora, sur son seul fichier.
+ *
+ * Ce qui reste vrai : un compte désactivé n'obtient aucun jeton, et n'en
+ * conserve aucun (la relecture par appel le coupe immédiatement).
  */
-export async function authenticateAdmin(
+export async function authenticateMember(
   email: string,
   password: string
-): Promise<{ userId: string } | { error: string }> {
+): Promise<{ userId: string; role: string } | { error: string }> {
   const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -237,10 +252,11 @@ export async function authenticateAdmin(
     .eq("id", data.user.id)
     .maybeSingle();
 
-  if (!me || !me.is_active || me.role !== "admin") {
+  if (!me || !me.is_active) {
     return {
-      error: "Accès refusé : le connecteur Celya CRM est réservé à l'administrateur.",
+      error:
+        "Accès refusé : ce compte n'est pas un membre actif du CRM. Contactez l'administrateur.",
     };
   }
-  return { userId: data.user.id };
+  return { userId: data.user.id, role: me.role as string };
 }

@@ -1,7 +1,7 @@
 import {
   getClient,
   createAuthCode,
-  authenticateAdmin,
+  authenticateMember,
   SCOPE,
 } from "@/lib/mcp/oauth";
 
@@ -78,7 +78,7 @@ function loginPage(params: AuthParams, error?: string): Response {
       <input id="password" name="password" type="password" autocomplete="current-password" required />
       <button type="submit">Autoriser l'accès</button>
     </form>
-    <p class="foot">Réservé au compte administrateur. Le connecteur n'accède qu'aux prospects, activités, relances et emails du CRM — jamais à la comptabilité, jamais au SQL libre.</p>
+    <p class="foot">Connectez-vous avec vos identifiants habituels du CRM. Le connecteur n'accède qu'à VOS prospects, activités, relances et emails — jamais au fichier d'un collègue, jamais à la comptabilité, jamais au SQL libre.</p>
   `);
 }
 
@@ -159,7 +159,7 @@ export async function POST(req: Request) {
   const password = get("password") ?? "";
   if (!email || !password) return loginPage(params, "Email et mot de passe requis.");
 
-  const auth = await authenticateAdmin(email, password);
+  const auth = await authenticateMember(email, password);
   if ("error" in auth) return loginPage(params, auth.error);
 
   const code = await createAuthCode({

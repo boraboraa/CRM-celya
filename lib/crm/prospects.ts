@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeStatus } from "@/lib/constants";
 import { findDuplicates, normalizeBelgianPhone, type DuplicateHit } from "./dedup";
+import type { Viewer } from "./access";
 
 export type NewProspectInput = {
   company_name?: string | null;
@@ -61,7 +62,14 @@ export async function createProspectCore(
   supabase: SupabaseClient,
   userId: string,
   input: NewProspectInput,
-  opts: { checkDuplicates?: boolean; normalizePhone?: boolean; force?: boolean } = {}
+  opts: {
+    checkDuplicates?: boolean;
+    normalizePhone?: boolean;
+    force?: boolean;
+    /** Renseigné par le connecteur MCP seul : il agit en service_role, donc
+     *  la dédup doit être bornée à son portefeuille à la main. Voir access.ts. */
+    scope?: Viewer | null;
+  } = {}
 ): Promise<CreateProspectResult> {
   const rawPhone = trimOrNull(input.phone);
   const phone = opts.normalizePhone ? normalizeBelgianPhone(rawPhone) : rawPhone;
@@ -69,11 +77,11 @@ export async function createProspectCore(
   const email = trimOrNull(input.email)?.toLowerCase() ?? null;
 
   if (opts.checkDuplicates && !opts.force) {
-    const duplicates = await findDuplicates(supabase, {
-      company_name: company,
-      phone,
-      email,
-    });
+    const duplicates = await findDuplicates(
+      supabase,
+      { company_name: company, phone, email },
+      opts.scope
+    );
     if (duplicates.length > 0) return { duplicates };
   }
 

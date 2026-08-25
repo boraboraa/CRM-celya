@@ -1,7 +1,11 @@
 // Celya CRM — boîte Zoho dans les deux sens.
-// - save_account : enregistre le compte (mot de passe d'application → Vault)
-// - send         : envoi SMTP depuis la boîte de Bora + journalisation,
-//                  accroché au fil de discussion du prospect (RFC 5322)
+// - save_account : enregistre SA boîte (mot de passe d'application → Vault).
+//                  Ouvert à tout membre actif depuis le 25 août : chacun
+//                  connecte la sienne, Bora ne manipule le mot de passe de
+//                  personne. Hôtes déduits du domaine (voir zohoHosts).
+// - send         : envoi SMTP depuis la boîte DE L'APPELANT + journalisation,
+//                  accroché au fil de discussion du prospect (RFC 5322).
+//                  Jamais depuis la boîte d'un autre — voir pickAccount.
 // - sync         : relève IMAP (pg_cron toutes les 5 min, ou bouton admin)
 // - probe        : diagnostic en lecture seule de la boîte
 //
@@ -204,8 +208,34 @@ Deno.serve(async (req: Request) => {
   try {
     switch (action) {
       // ---------------------------------------------------------------
+      // Chacun connecte SA boîte. Réserver ce geste à l'admin obligeait Bora à
+      // manipuler le mot de passe d'application d'un collègue — précisément ce
+      // qu'on veut éviter. Un membre actif suffit ; c'est le `user_id` ÉCRIT
+      // qui tient la cloison, et il vaut `callerId` sauf demande explicite
+      // d'un admin agissant pour autrui.
       case "save_account": {
-        if (callerRole !== "admin") return json({ error: "Réservé aux administrateurs" }, 403);
+        if (!callerId) return json({ error: "Non authentifié" }, 401);
+
+        // Le seul cas où l'identité écrite peut différer de l'appelant — et il
+        // faut être admin pour l'obtenir. Jamais de user_id lu du payload pour
+        // un non-admin : ce serait offrir la boîte d'autrui en écriture.
+        const cible = String(payload.user_id ?? "").trim();
+        let targetUser = callerId;
+        if (cible && cible !== callerId) {
+          if (callerRole !== "admin") {
+            return json(
+              { error: "Vous ne pouvez enregistrer que votre propre boîte." },
+              403
+            );
+          }
+          const { data: t } = await admin
+            .from("crm_users")
+            .select("id, is_active")
+            .eq("id", cible)
+            .maybeSingle();
+          if (!t?.is_active) return json({ error: "Utilisateur inconnu ou inactif" }, 400);
+          targetUser = t.id;
+        }
 
         const email = String(payload.email_address ?? "").trim().toLowerCase();
         const password = String(payload.app_password ?? "");
@@ -218,12 +248,29 @@ Deno.serve(async (req: Request) => {
           return json({ error: "Mot de passe d'application requis" }, 400);
         }
 
-        const smtpHost = `smtppro.zoho.${dc}`;
-        const imapHost = `imappro.zoho.${dc}`;
+        // `email_address` est UNIQUE : sans ce garde-fou, enregistrer l'adresse
+        // déjà connectée par quelqu'un d'autre RÉÉCRIRAIT son user_id et lui
+        // volerait sa boîte — avec, au passage, l'envoi sous son nom.
+        const { data: existant } = await admin
+          .from("email_accounts")
+          .select("id, user_id")
+          .eq("email_address", email)
+          .maybeSingle();
+        if (existant && existant.user_id !== targetUser) {
+          return json(
+            {
+              error:
+                "Cette adresse est déjà connectée par un autre utilisateur du CRM.",
+            },
+            409
+          );
+        }
+
+        const { smtpHost, imapHost, style } = zohoHosts(email, dc, payload.hosts);
 
         // Test de connexion IMAP immédiat : les erreurs Zoho sont opaques,
         // autant les attraper à l'enregistrement (mauvais centre de données,
-        // IMAP non activé, mot de passe erroné).
+        // mauvais jeu d'hôtes, IMAP non activé, mot de passe erroné).
         let testError: string | null = null;
         try {
           const probe = new ImapFlow({
@@ -249,7 +296,7 @@ Deno.serve(async (req: Request) => {
 
         const { error: upErr } = await admin.from("email_accounts").upsert(
           {
-            user_id: callerId,
+            user_id: targetUser,
             email_address: email,
             smtp_host: smtpHost,
             imap_host: imapHost,
@@ -260,7 +307,17 @@ Deno.serve(async (req: Request) => {
         );
         if (upErr) return json({ error: upErr.message }, 400);
 
-        return json({ ok: true, tested: testError === null, test_error: testError });
+        return json({
+          ok: true,
+          tested: testError === null,
+          test_error: testError,
+          // Ce que l'appelant doit pouvoir relire : le mot de passe, lui, ne
+          // ressort jamais et n'est jamais journalisé.
+          hosts: style,
+          smtp_host: smtpHost,
+          imap_host: imapHost,
+          imap_hint: testError ? imapHint(testError) : null,
+        });
       }
 
       // ---------------------------------------------------------------
@@ -274,6 +331,15 @@ Deno.serve(async (req: Request) => {
         // Il AUTHENTIFIE l'appelant, il ne l'autorise à rien de plus : le rôle
         // est relu dans crm_users, et le contrôle d'accès au prospect (juste
         // en dessous) reste identique.
+        //
+        // `payload.user_id` n'est JAMAIS lu pour un appelant porteur d'un JWT :
+        // la branche est gardée par `if (!callerId)`, donc un utilisateur
+        // connecté agit sous SON identité et ne peut pas s'en déclarer une
+        // autre. Elle n'est atteignable qu'avec le secret du Vault, que seul
+        // le `service_role` peut lire (RPC mail_get_secret) — c'est-à-dire le
+        // serveur MCP, qui y met le sujet de son jeton OAuth signé et rien
+        // d'autre. Un client qui fabriquerait `user_id` sans le secret tombe
+        // sur le 401 juste en dessous.
         if (!callerId) {
           const internalSecret = req.headers.get("x-internal-secret");
           const expected = internalSecret ? await getInternalSecret(admin) : null;
@@ -318,9 +384,19 @@ Deno.serve(async (req: Request) => {
           return json({ error: "Prospect non accessible" }, 403);
         }
 
+        // Pas de boîte à soi, pas d'envoi. Surtout pas depuis celle d'un
+        // autre : voir le commentaire de pickAccount.
         const account = await pickAccount(admin, callerId);
         if (!account) {
-          return json({ error: "Aucune boîte email configurée (voir Mon compte)" }, 400);
+          return json(
+            {
+              error:
+                "Vous n'avez pas encore connecté votre boîte email — Mon compte → Boîte email. " +
+                "Un envoi depuis la boîte d'un collègue n'est pas possible : les réponses " +
+                "lui reviendraient et le message partirait à son nom.",
+            },
+            400
+          );
         }
         const password = await getPassword(admin, account);
         if (!password) return json({ error: "Identifiants de la boîte introuvables" }, 500);
@@ -528,13 +604,90 @@ Deno.serve(async (req: Request) => {
 // Helpers
 // ===========================================================================
 
+/**
+ * La boîte de l'appelant — la SIENNE, ou rien.
+ *
+ * Cette fonction se terminait par `?? list[0]` : faute de boîte configurée,
+ * l'appelant envoyait depuis celle de quelqu'un d'autre. Tant que Bora était
+ * seul, le repli ne se voyait pas ; à deux, il signe les mails d'un commercial
+ * du nom de Bora, fait revenir les réponses dans la mauvaise boîte, et engage
+ * la réputation d'expéditeur de Bora sur une prospection qui n'est pas la
+ * sienne. Une usurpation d'identité, involontaire mais réelle.
+ *
+ * Sans boîte, `send` échoue avec un message qui dit quoi faire — c'est la
+ * seule issue acceptable.
+ */
 async function pickAccount(admin: SupabaseClient, userId: string): Promise<Account | null> {
   const { data } = await admin
     .from("email_accounts")
     .select("id, user_id, email_address, smtp_host, imap_host, credentials_secret_id, sync_cursor")
-    .order("created_at", { ascending: true });
-  const list = (data ?? []) as Account[];
-  return list.find((a) => a.user_id === userId) ?? list[0] ?? null;
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return (data as Account | null) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Zoho : deux familles de comptes, deux jeux d'hôtes
+//
+//   domaine personnalisé (@celya.be)  → imappro / smtppro
+//   compte personnel (@zohomail.eu…)  → imap    / smtp
+//
+// Se tromper de jeu donne une erreur d'authentification opaque, indiscernable
+// d'un mauvais mot de passe. Le domaine de l'adresse suffit à trancher : une
+// adresse en `zoho.*` ou `zohomail.*` est un compte personnel, tout le reste
+// est un domaine propre. `hosts` permet de forcer à la main les cas tordus.
+// ---------------------------------------------------------------------------
+
+type HostStyle = "perso" | "pro";
+
+function zohoHosts(
+  email: string,
+  dc: string,
+  forced: unknown
+): { smtpHost: string; imapHost: string; style: HostStyle } {
+  const domain = email.split("@")[1] ?? "";
+  const deduced: HostStyle = /^zoho(mail)?\./i.test(domain) ? "perso" : "pro";
+  const style: HostStyle =
+    forced === "perso" || forced === "pro" ? forced : deduced;
+  const p = style === "pro" ? "pro" : "";
+  return {
+    smtpHost: `smtp${p}.zoho.${dc}`,
+    imapHost: `imap${p}.zoho.${dc}`,
+    style,
+  };
+}
+
+/**
+ * Traduire l'erreur Zoho, qui ne veut rien dire pour qui la lit.
+ *
+ * Zoho n'ouvre plus l'accès IMAP sur le plan gratuit aux nouveaux inscrits :
+ * un compte personnel gratuit échouera donc au test, et le message brut
+ * ("Invalid credentials" / "AUTHENTICATE failed") laisse croire à une faute de
+ * frappe dans le mot de passe. Ce n'en est pas une — c'est le plan.
+ */
+function imapHint(raw: string): string {
+  const m = raw.toLowerCase();
+  if (m.includes("auth") || m.includes("credential") || m.includes("login")) {
+    return (
+      "Zoho a refusé la connexion. Trois causes, dans l'ordre de fréquence : " +
+      "(1) IMAP n'est pas activé — Paramètres → Comptes mail → IMAP ; sur un compte " +
+      "personnel gratuit, Zoho ne le propose plus, un plan payant (Mail Lite, ~1 €/mois) " +
+      "est requis. (2) Ce n'est pas un mot de passe d'application — il en faut un, " +
+      "généré dans Mon compte → Sécurité → Mots de passe d'application (2FA activée), " +
+      "jamais le mot de passe de connexion. (3) Mauvais centre de données : .eu ou .com, " +
+      "il se lit dans l'URL de votre boîte."
+    );
+  }
+  if (m.includes("timeout") || m.includes("econn") || m.includes("dns") || m.includes("getaddr")) {
+    return (
+      "Serveur Zoho injoignable. Vérifiez le centre de données (.eu / .com) et le type " +
+      "de compte : une adresse sur votre propre domaine utilise imappro.zoho.*, " +
+      "un compte Zoho personnel utilise imap.zoho.*."
+    );
+  }
+  return "Vérifiez le centre de données (.eu / .com), l'activation d'IMAP et le mot de passe d'application.";
 }
 
 async function getPassword(admin: SupabaseClient, account: Account): Promise<string | null> {

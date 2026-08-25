@@ -10,6 +10,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { scopeProspects, canSeeProspect, type Viewer } from "./access";
 
 /**
  * Normalise un numéro au format belge « +32 … ». Déterministe :
@@ -104,15 +105,24 @@ export type DuplicateHit = {
 /**
  * Détection de doublon avant création : téléphone, email et nom de société
  * normalisés, comparés aux prospects existants. On prévient, on ne bloque pas.
+ *
+ * `scope` n'est renseigné que par le connecteur MCP, qui agit en service_role
+ * (RLS contournée) : sans lui, l'avertissement de doublon renvoyé à un
+ * commercial nommerait les sociétés de Bora — une fuite par le canal le plus
+ * discret qui soit. Depuis l'interface, le client Supabase de l'utilisateur
+ * applique déjà `can_see_prospect`, et `scope` reste absent.
  */
 export async function findDuplicates(
   supabase: SupabaseClient,
-  fields: { company_name: string | null; phone: string | null; email: string | null }
+  fields: { company_name: string | null; phone: string | null; email: string | null },
+  scope?: Viewer | null
 ): Promise<DuplicateHit[]> {
-  const { data } = await supabase
+  let q = supabase
     .from("prospects")
-    .select("id, company_name, phone, email, status")
+    .select("id, company_name, phone, email, status, owner_id")
     .limit(2000);
+  if (scope) q = scopeProspects(q, scope);
+  const { data } = await q;
 
   const rows = data ?? [];
   const hits: DuplicateHit[] = [];
@@ -121,6 +131,11 @@ export async function findDuplicates(
   const targetName = companyKey(fields.company_name);
 
   for (const r of rows) {
+    // Dernier verrou : même si le filtre de requête n'avait pas mordu, une
+    // fiche qui ne regarde pas l'appelant ne franchit pas cette porte.
+    if (scope && !canSeeProspect(scope, (r.owner_id as string | null) ?? null)) {
+      continue;
+    }
     const reasons: string[] = [];
     if (targetPhone && phoneKey(r.phone) === targetPhone) reasons.push("même téléphone");
     if (targetEmail && r.email?.toLowerCase() === targetEmail) reasons.push("même email");

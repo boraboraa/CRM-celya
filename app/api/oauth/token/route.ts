@@ -103,7 +103,10 @@ export async function POST(req: Request) {
         access_token,
         token_type: "Bearer",
         expires_in: ACCESS_TTL,
-        refresh_token, // conservé (pas de rotation — service mono-utilisateur)
+        // Conservé, pas de rotation. Le compte est de toute façon relu dans
+        // crm_users à chaque appel d'outil : un membre désactivé est coupé
+        // immédiatement, sans attendre l'expiration de son jeton.
+        refresh_token,
         scope,
       },
       { headers: { ...CORS, "Cache-Control": "no-store" } }

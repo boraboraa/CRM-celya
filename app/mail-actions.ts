@@ -38,6 +38,11 @@ type MailResponse = {
   error?: string;
   tested?: boolean;
   test_error?: string | null;
+  /** Explication lisible d'un échec IMAP — voir imapHint dans crm-mail. */
+  imap_hint?: string | null;
+  smtp_host?: string;
+  imap_host?: string;
+  hosts?: "perso" | "pro";
   message_id?: string;
   accounts?: number;
   imported?: number;
@@ -72,9 +77,15 @@ async function callMail(payload: Record<string, unknown>): Promise<MailResponse>
 }
 
 // ---------------------------------------------------------------------------
-// C1 — Configuration du compte (admin)
+// C1 — Configuration de SA boîte (tout membre actif)
 // ---------------------------------------------------------------------------
 
+/**
+ * Chacun connecte sa propre boîte. Aucun `user_id` n'est transmis : l'edge
+ * function écrit celui du porteur du JWT. Le mot de passe d'application
+ * traverse cette action pour aller droit au Vault — il n'est ni stocké côté
+ * Next, ni journalisé, ni relu.
+ */
 export async function saveEmailAccountAction(
   _prev: ActionState,
   fd: FormData
@@ -82,6 +93,10 @@ export async function saveEmailAccountAction(
   const email = String(fd.get("email_address") ?? "").trim();
   const password = String(fd.get("app_password") ?? "");
   const datacenter = fd.get("datacenter") === "eu" ? "eu" : "com";
+  // « auto » (défaut) déduit le jeu d'hôtes du domaine ; les deux autres
+  // valeurs le forcent, pour le cas tordu que la déduction raterait.
+  const hostsRaw = String(fd.get("hosts") ?? "auto");
+  const hosts = hostsRaw === "perso" || hostsRaw === "pro" ? hostsRaw : undefined;
 
   if (!email || !password) {
     return { error: "Adresse et mot de passe d'application requis." };
@@ -92,15 +107,23 @@ export async function saveEmailAccountAction(
     email_address: email,
     app_password: password,
     datacenter,
+    ...(hosts ? { hosts } : {}),
   });
   if (res.error) return { error: res.error };
 
   revalidatePath("/reglages-email");
+  revalidatePath("/compte");
   if (res.tested) {
-    return { success: "Compte enregistré — connexion IMAP vérifiée." };
+    return {
+      success: `Boîte enregistrée — connexion IMAP vérifiée (${res.imap_host}).`,
+    };
   }
+  // L'erreur Zoho brute est incompréhensible : l'edge function renvoie une
+  // explication utilisable, on la préfère au message d'origine.
   return {
-    error: `Compte enregistré, mais la connexion IMAP a échoué : ${res.test_error ?? "erreur inconnue"}. Vérifiez le centre de données (.eu / .com), que IMAP est activé dans Zoho Mail, et le mot de passe d'application.`,
+    error:
+      `Boîte enregistrée, mais la connexion IMAP a échoué. ` +
+      `${res.imap_hint ?? ""} (Réponse de Zoho : ${res.test_error ?? "erreur inconnue"}.)`,
   };
 }
 

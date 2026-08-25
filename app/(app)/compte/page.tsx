@@ -22,25 +22,28 @@ export default async function AccountPage() {
         <ProfileForm fullName={me.full_name ?? ""} phone={me.phone ?? ""} />
         <PasswordForm mustChange={me.must_change_password} />
 
-        {me.role === "admin" && (
-          <section className="card p-6">
-            <h2 className="mb-1 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Boîte email
-            </h2>
-            <p className="mb-4 text-xs leading-relaxed text-slate-500">
-              Connexion de la boîte Zoho (envoi et relève des réponses) et
-              rattachement des messages orphelins.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/reglages-email" className="btn-ghost">
-                Réglages de la boîte
-              </Link>
-              <Link href="/emails" className="btn-ghost">
-                Emails non rattachés
-              </Link>
-            </div>
-          </section>
-        )}
+        {/* Chacun connecte SA boîte : c'est de là que partent ses relances et
+            que reviennent ses réponses. Réservé à l'admin, il aurait fallu
+            qu'il manipule le mot de passe d'application de ses commerciaux. */}
+        <section className="card p-6">
+          <h2 className="mb-1 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Ma boîte email
+          </h2>
+          <p className="mb-4 text-xs leading-relaxed text-slate-500">
+            Connectez votre boîte Zoho pour envoyer vos relances depuis votre
+            propre adresse et voir les réponses revenir dans le CRM. Vos
+            messages restent les vôtres&nbsp;: un collègue ne voit ni votre
+            boîte, ni vos échanges.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/reglages-email" className="btn-ghost">
+              Réglages de la boîte
+            </Link>
+            <Link href="/emails" className="btn-ghost">
+              Emails non rattachés
+            </Link>
+          </div>
+        </section>
       </div>
     </>
   );

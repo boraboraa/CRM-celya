@@ -669,7 +669,29 @@ function zohoHosts(
  */
 function imapHint(raw: string): string {
   const m = raw.toLowerCase();
-  if (m.includes("auth") || m.includes("credential") || m.includes("login")) {
+
+  // Le réseau d'abord : c'est le diagnostic le plus spécifique, et il ne doit
+  // pas être avalé par le filet « authentification » ci-dessous.
+  if (m.includes("timeout") || m.includes("econn") || m.includes("dns") || m.includes("getaddr")) {
+    return (
+      "Serveur Zoho injoignable. Vérifiez le centre de données (.eu / .com) et le type " +
+      "de compte : une adresse sur votre propre domaine utilise imappro.zoho.*, " +
+      "un compte Zoho personnel utilise imap.zoho.*."
+    );
+  }
+
+  // « Command failed » est ce qu'imapflow remonte quand Zoho refuse
+  // l'AUTHENTICATE — mesuré le 25 août contre un vrai compte. C'est LE cas
+  // fréquent, et il tombait dans le message générique : le commercial lisait
+  // « vérifiez le centre de données » alors que son plan Zoho est en cause.
+  if (
+    m.includes("auth") ||
+    m.includes("credential") ||
+    m.includes("login") ||
+    m.includes("command failed") ||
+    m.includes("535") ||
+    m.includes("no permission")
+  ) {
     return (
       "Zoho a refusé la connexion. Trois causes, dans l'ordre de fréquence : " +
       "(1) IMAP n'est pas activé — Paramètres → Comptes mail → IMAP ; sur un compte " +
@@ -680,13 +702,7 @@ function imapHint(raw: string): string {
       "il se lit dans l'URL de votre boîte."
     );
   }
-  if (m.includes("timeout") || m.includes("econn") || m.includes("dns") || m.includes("getaddr")) {
-    return (
-      "Serveur Zoho injoignable. Vérifiez le centre de données (.eu / .com) et le type " +
-      "de compte : une adresse sur votre propre domaine utilise imappro.zoho.*, " +
-      "un compte Zoho personnel utilise imap.zoho.*."
-    );
-  }
+
   return "Vérifiez le centre de données (.eu / .com), l'activation d'IMAP et le mot de passe d'application.";
 }
 

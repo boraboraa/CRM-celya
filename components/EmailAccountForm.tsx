@@ -58,6 +58,29 @@ export function EmailAccountForm() {
         </select>
       </div>
 
+      {/* Zoho a deux jeux de serveurs, et se tromper donne une erreur
+          d'authentification indiscernable d'un mauvais mot de passe. Le
+          domaine de l'adresse suffit à trancher dans l'immense majorité des
+          cas — mais pas tous, d'où le forçage manuel. */}
+      <div>
+        <label className="label" htmlFor="hosts">
+          Type de compte
+        </label>
+        <select id="hosts" name="hosts" defaultValue="auto" className="input">
+          <option value="auto">Détection automatique (recommandé)</option>
+          <option value="pro">
+            Adresse sur mon domaine (@celya.be) — imappro / smtppro
+          </option>
+          <option value="perso">
+            Compte Zoho personnel (@zohomail.eu) — imap / smtp
+          </option>
+        </select>
+        <p className="mt-1 text-[11px] text-slate-500">
+          Déduit du domaine de l&apos;adresse. Ne le forcez que si la détection
+          se trompe.
+        </p>
+      </div>
+
       <FormError message={state.error} />
       {state.success && (
         <p className="rounded-xl bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-300 ring-1 ring-emerald-400/20">

@@ -198,13 +198,17 @@ export function ProspectForm({
           <label className="label" htmlFor="owner_id">
             Responsable
           </label>
+          {/* Plus d'option « Non assigné » : le vivier est fermé (migration
+              016). Une fiche appartient toujours à quelqu'un — sans quoi elle
+              était publiée à toute l'équipe, et le formulaire ne le disait
+              pas. Assigner à un collègue reste possible, c'est explicite. */}
           <select
             id="owner_id"
             name="owner_id"
-            defaultValue={prospect?.owner_id ?? currentUserId ?? "none"}
+            required
+            defaultValue={prospect?.owner_id ?? currentUserId ?? ""}
             className="input"
           >
-            <option value="none">Non assigné (visible par tous)</option>
             {members.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.full_name ?? m.email}

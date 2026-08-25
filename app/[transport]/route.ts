@@ -11,8 +11,15 @@
  * même normalisation « +32 », même cadence de relance).
  *
  * Le serveur agit en service_role (RLS contournée) : c'est donc lui qui impose
- * que tout est rattaché à Bora — author_id / created_by renseignés depuis le
- * sujet du jeton OAuth, délivré au seul compte administrateur.
+ * la cloison, et non Postgres. Depuis l'arrivée du premier commercial
+ * (25 août), le jeton n'est plus réservé à l'admin — chaque membre actif a le
+ * sien. Deux conséquences, tenues par `lib/crm/access.ts` :
+ *
+ *   · tout outil qui LIT passe par `scopeProspects` / `canSeeProspect` : un
+ *     `lister_prospects` lancé par un commercial ne renvoie que ses fiches ;
+ *   · tout outil qui ÉCRIT rattache au porteur du jeton (author_id /
+ *     created_by / owner_id = sujet du jeton), jamais à une identité fournie
+ *     par le client — aucun outil n'expose de paramètre « utilisateur ».
  */
 
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
@@ -20,6 +27,13 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  loadViewer,
+  canSeeProspect,
+  scopeProspects,
+  scopeJoinedProspects,
+  type Viewer,
+} from "@/lib/crm/access";
 import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { SUPABASE_URL } from "@/lib/env";
@@ -60,10 +74,28 @@ const fail = (t: string): ToolResult => ({ content: [{ type: "text", text: t }],
 const json = (label: string, data: unknown): ToolResult =>
   text(`${label}\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
 
-/** L'identifiant de Bora, extrait du jeton OAuth (sujet). */
-function userIdFrom(extra: { authInfo?: AuthInfo }): string | null {
+/**
+ * Le contexte d'un appel : le client service_role, et QUI agit.
+ *
+ * Le serveur agit en service_role, donc la RLS ne le protège de rien : c'est
+ * `viewer` qui porte la cloison, et chaque outil doit s'y référer. Le compte
+ * est relu dans `crm_users` à chaque appel — désactiver un commercial dans
+ * /equipe le coupe immédiatement, sans attendre l'expiration de son jeton.
+ */
+async function context(extra: {
+  authInfo?: AuthInfo;
+}): Promise<{ admin: SupabaseClient; viewer: Viewer } | { error: string }> {
   const id = extra.authInfo?.extra?.userId;
-  return typeof id === "string" ? id : null;
+  if (typeof id !== "string" || !id) return { error: "Non authentifié." };
+  const admin = createAdminClient();
+  const viewer = await loadViewer(admin, id);
+  if (!viewer) {
+    return {
+      error:
+        "Compte inconnu ou désactivé — ce connecteur n'a plus accès au CRM. Contactez l'administrateur.",
+    };
+  }
+  return { admin, viewer };
 }
 
 const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
@@ -71,35 +103,56 @@ const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
 /** Nettoie une recherche texte avant de la passer à un filtre PostgREST or(). */
 const safeSearch = (s: string) => s.replace(/[%,()*\\]/g, " ").trim().slice(0, 80);
 
+type ResolvedProspect = {
+  id: string;
+  company_name: string;
+  status: string;
+  owner_id: string | null;
+};
+
 /**
- * Résout un prospect par identifiant OU par nom. Renvoie une erreur lisible si
- * rien ne correspond, et la liste des candidats si le nom est ambigu.
+ * Résout un prospect par identifiant OU par nom, DANS LE PORTEFEUILLE DE
+ * L'APPELANT. Renvoie une erreur lisible si rien ne correspond, et la liste
+ * des candidats si le nom est ambigu.
+ *
+ * Une fiche hors portefeuille se comporte comme une fiche inexistante : c'est
+ * `resolveProspect` qui tient la cloison pour les huit outils qui ciblent un
+ * prospect, et la recherche par nom est bornée en base (`scopeProspects`) et
+ * non après coup — sans quoi le `limit(10)` pourrait renvoyer dix fiches de
+ * Bora et faire croire à une ambiguïté, en nommant ses sociétés au passage.
  */
 async function resolveProspect(
   admin: SupabaseClient,
+  viewer: Viewer,
   args: { id?: string; nom?: string }
-): Promise<
-  | { id: string; company_name: string; status: string }
-  | { error: string }
-> {
+): Promise<ResolvedProspect | { error: string }> {
+  const COLS = "id, company_name, status, owner_id";
+
   if (args.id) {
     const { data } = await admin
       .from("prospects")
-      .select("id, company_name, status")
+      .select(COLS)
       .eq("id", args.id)
       .maybeSingle();
-    if (!data) return { error: `Aucun prospect avec l'identifiant ${args.id}.` };
-    return data as { id: string; company_name: string; status: string };
+    // Introuvable et non visible donnent le même message : ne pas révéler
+    // l'existence d'une fiche qu'on n'a pas le droit de voir.
+    if (!data || !canSeeProspect(viewer, (data.owner_id as string | null) ?? null)) {
+      return { error: `Aucun prospect avec l'identifiant ${args.id}.` };
+    }
+    return data as ResolvedProspect;
   }
+
   const nom = args.nom?.trim();
   if (!nom) return { error: "Fournissez « id » ou « nom »." };
 
-  const { data } = await admin
-    .from("prospects")
-    .select("id, company_name, status")
-    .ilike("company_name", `%${safeSearch(nom)}%`)
-    .limit(10);
-  const rows = (data ?? []) as { id: string; company_name: string; status: string }[];
+  const { data } = await scopeProspects(
+    admin.from("prospects").select(COLS).ilike("company_name", `%${safeSearch(nom)}%`),
+    viewer
+  ).limit(10);
+
+  const rows = ((data ?? []) as ResolvedProspect[]).filter((r) =>
+    canSeeProspect(viewer, r.owner_id)
+  );
   if (rows.length === 0) return { error: `Aucun prospect au nom « ${nom} ».` };
   if (rows.length > 1) {
     const liste = rows.map((r) => `- ${r.company_name} (id ${r.id})`).join("\n");
@@ -193,12 +246,19 @@ function register(server: McpServer) {
       limite: z.number().int().min(1).max(200).optional().describe("Nombre maximum de fiches (défaut 50)."),
     },
     async (args, extra) => {
-      if (!userIdFrom(extra)) return fail("Non authentifié.");
-      const admin = createAdminClient();
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
 
-      let q = admin
-        .from("prospects")
-        .select("id, company_name, contact_name, phone, email, status, next_action_at")
+      // Le filtre de portefeuille est posé AVANT le limit : sinon les 50
+      // premières lignes pourraient être celles d'un autre, et la liste
+      // reviendrait vide alors que l'appelant a des fiches.
+      let q = scopeProspects(
+        admin
+          .from("prospects")
+          .select("id, company_name, contact_name, phone, email, status, next_action_at, owner_id"),
+        viewer
+      )
         .order("next_action_at", { ascending: true, nullsFirst: false })
         .limit(args.limite ?? 50);
 
@@ -217,14 +277,18 @@ function register(server: McpServer) {
 
       const { data, error } = await q;
       if (error) return fail(`Erreur : ${error.message}`);
-      const rows = (data ?? []).map((r) => ({
-        id: r.id,
-        societe: r.company_name,
-        contact: r.contact_name,
-        telephone: r.phone,
-        etape: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] ?? r.status,
-        prochaine_action: r.next_action_at,
-      }));
+      const rows = (data ?? [])
+        // Dernier verrou, après le filtre de requête : une fiche hors
+        // portefeuille ne sort pas d'ici, quoi qu'il arrive en amont.
+        .filter((r) => canSeeProspect(viewer, (r.owner_id as string | null) ?? null))
+        .map((r) => ({
+          id: r.id,
+          societe: r.company_name,
+          contact: r.contact_name,
+          telephone: r.phone,
+          etape: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] ?? r.status,
+          prochaine_action: r.next_action_at,
+        }));
       return json(`${rows.length} prospect(s).`, rows);
     }
   );
@@ -238,9 +302,10 @@ function register(server: McpServer) {
       nom: z.string().optional().describe("Nom de société (utilisé si l'identifiant n'est pas fourni)."),
     },
     async (args, extra) => {
-      if (!userIdFrom(extra)) return fail("Non authentifié.");
-      const admin = createAdminClient();
-      const resolved = await resolveProspect(admin, args);
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const resolved = await resolveProspect(admin, viewer, args);
       if ("error" in resolved) return fail(resolved.error);
 
       const [fiche, activites, taches] = await Promise.all([
@@ -299,34 +364,46 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour, tous prospects confondus. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour, sur vos prospects. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
     {},
     async (_args, extra) => {
-      if (!userIdFrom(extra)) return fail("Non authentifié.");
-      const admin = createAdminClient();
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
       const { start, end } = todayBounds();
-      const SELECT = "id, title, due_at, priority, prospect_id, prospects(company_name, phone)";
+      // `!inner` : la jointure devient filtrante, et `owner_id` remonte pour
+      // la vérification en mémoire ci-dessous.
+      const SELECT =
+        "id, title, due_at, priority, prospect_id, prospects!inner(company_name, phone, owner_id)";
 
       const [overdue, today] = await Promise.all([
-        admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start).order("due_at", { ascending: true }).limit(100),
-        admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end).order("due_at", { ascending: true }).limit(100),
+        scopeJoinedProspects(
+          admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start),
+          viewer
+        ).order("due_at", { ascending: true }).limit(100),
+        scopeJoinedProspects(
+          admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end),
+          viewer
+        ).order("due_at", { ascending: true }).limit(100),
       ]);
 
-      const shape = (t: Record<string, unknown>) => {
-        const pros = t.prospects as { company_name?: string; phone?: string } | null;
-        return {
-          id: t.id,
-          titre: t.title,
-          echeance: t.due_at,
-          societe: pros?.company_name ?? null,
-          telephone: pros?.phone ?? null,
-          prospect_id: t.prospect_id,
-        };
+      type Row = Record<string, unknown> & {
+        prospects?: { company_name?: string; phone?: string; owner_id?: string | null } | null;
       };
+      const visible = (t: Row) =>
+        canSeeProspect(viewer, t.prospects?.owner_id ?? null);
+      const shape = (t: Row) => ({
+        id: t.id,
+        titre: t.title,
+        echeance: t.due_at,
+        societe: t.prospects?.company_name ?? null,
+        telephone: t.prospects?.phone ?? null,
+        prospect_id: t.prospect_id,
+      });
 
       return json("À faire — relances en retard puis du jour.", {
-        en_retard: (overdue.data ?? []).map(shape),
-        aujourd_hui: (today.data ?? []).map(shape),
+        en_retard: ((overdue.data ?? []) as Row[]).filter(visible).map(shape),
+        aujourd_hui: ((today.data ?? []) as Row[]).filter(visible).map(shape),
       });
     }
   );
@@ -357,13 +434,13 @@ function register(server: McpServer) {
       forcer: z.boolean().optional().describe("Créer même si un doublon est détecté."),
     },
     async (args, extra) => {
-      const userId = userIdFrom(extra);
-      if (!userId) return fail("Non authentifié.");
-      const admin = createAdminClient();
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
 
       const result = await createProspectCore(
         admin,
-        userId,
+        viewer.userId,
         {
           company_name: args.societe,
           contact_name: args.contact,
@@ -377,8 +454,19 @@ function register(server: McpServer) {
           value_estimate: args.valeur_estimee,
           probability: args.probabilite,
           notes: args.notes,
+          // La fiche appartient au porteur du jeton. Le trigger en base la
+          // rattraperait de toute façon, mais mieux vaut que le propriétaire
+          // soit posé par l'appelant que par un filet de sécurité.
+          owner_id: viewer.userId,
         },
-        { checkDuplicates: true, normalizePhone: true, force: args.forcer }
+        {
+          checkDuplicates: true,
+          normalizePhone: true,
+          force: args.forcer,
+          // Sans ce scope, l'avertissement de doublon nommerait les sociétés
+          // des autres — le service_role voit tout.
+          scope: viewer,
+        }
       );
 
       if (result.error) return fail(`Erreur : ${result.error}`);
@@ -419,9 +507,10 @@ function register(server: McpServer) {
       statut: z.enum(STATUS_ENUM).describe("Nouvelle étape."),
     },
     async (args, extra) => {
-      if (!userIdFrom(extra)) return fail("Non authentifié.");
-      const admin = createAdminClient();
-      const resolved = await resolveProspect(admin, { id: args.id, nom: args.nom });
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
 
       const { error } = await admin
@@ -474,13 +563,13 @@ function register(server: McpServer) {
       motif: z.string().optional().describe("Raison de la perte (si statut = perdu)."),
     },
     async (args, extra) => {
-      const userId = userIdFrom(extra);
-      if (!userId) return fail("Non authentifié.");
-      const admin = createAdminClient();
-      const resolved = await resolveProspect(admin, { id: args.id, nom: args.nom });
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
 
-      const r = await saveExchangeCore(admin, userId, {
+      const r = await saveExchangeCore(admin, viewer.userId, {
         prospectId: resolved.id,
         type: args.type,
         note: args.note,
@@ -547,11 +636,12 @@ function register(server: McpServer) {
         .describe("false/absent → simulation ; true → envoi réel, irréversible."),
     },
     async (args, extra) => {
-      const userId = userIdFrom(extra);
-      if (!userId) return fail("Non authentifié.");
-      const admin = createAdminClient();
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const userId = viewer.userId;
 
-      const resolved = await resolveProspect(admin, { id: args.id, nom: args.nom });
+      const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
 
       const { data: fiche } = await admin
@@ -690,13 +780,13 @@ function register(server: McpServer) {
       note: z.string().optional().describe("Note facultative versée au journal en même temps."),
     },
     async (args, extra) => {
-      const userId = userIdFrom(extra);
-      if (!userId) return fail("Non authentifié.");
-      const admin = createAdminClient();
-      const resolved = await resolveProspect(admin, { id: args.id, nom: args.nom });
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
 
-      const r = await saveExchangeCore(admin, userId, {
+      const r = await saveExchangeCore(admin, viewer.userId, {
         prospectId: resolved.id,
         type: args.type ?? "note",
         note: args.note ?? null,
@@ -738,17 +828,26 @@ function register(server: McpServer) {
       confirmer: z.boolean().optional().describe("false/absent → simulation ; true → suppression réelle."),
     },
     async (args, extra) => {
-      if (!userIdFrom(extra)) return fail("Non authentifié.");
-      const admin = createAdminClient();
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
 
       // --- Cas 1 : une entrée précise.
       if (args.id && !args.brouillons) {
         const { data } = await admin
           .from("activities")
-          .select("id, prospect_id, type, subject, body, occurred_at, is_draft")
+          .select("id, prospect_id, type, subject, body, occurred_at, is_draft, prospects(owner_id)")
           .eq("id", args.id)
           .maybeSingle();
         if (!data) return fail(`Aucune activité avec l'identifiant ${args.id}.`);
+        // Une entrée du journal appartient à son prospect : elle n'est
+        // supprimable que par qui peut voir la fiche. Même message que
+        // « introuvable » — ne pas révéler l'existence de l'entrée.
+        const proprio =
+          (data.prospects as { owner_id?: string | null } | null)?.owner_id ?? null;
+        if (!canSeeProspect(viewer, proprio)) {
+          return fail(`Aucune activité avec l'identifiant ${args.id}.`);
+        }
 
         const apercu = {
           id: data.id,
@@ -777,7 +876,10 @@ function register(server: McpServer) {
         );
       }
 
-      const resolved = await resolveProspect(admin, { id: args.prospect_id, nom: args.nom });
+      const resolved = await resolveProspect(admin, viewer, {
+        id: args.prospect_id,
+        nom: args.nom,
+      });
       if ("error" in resolved) return fail(resolved.error);
 
       const { data: rows } = await admin
@@ -840,13 +942,20 @@ function register(server: McpServer) {
       confirmer: z.boolean().optional().describe("false/absent → simulation ; true → écriture réelle."),
     },
     async (args, extra) => {
-      const userId = userIdFrom(extra);
-      if (!userId) return fail("Non authentifié.");
-      const admin = createAdminClient();
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
 
-      const result = await importProspectsCore(admin, userId, args.prospects, null, {
-        dryRun: !args.confirmer,
-      });
+      // `null` en propriétaire versait TOUT l'import dans le vivier — donc
+      // visible par tous les commerciaux. Les fiches importées appartiennent
+      // à qui les importe, comme celles créées une par une.
+      const result = await importProspectsCore(
+        admin,
+        viewer.userId,
+        args.prospects,
+        viewer.userId,
+        { dryRun: !args.confirmer }
+      );
       if (result.error) return fail(`Erreur : ${result.error}`);
 
       if (!args.confirmer) {

@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeStatus } from "@/lib/constants";
 import { findDuplicates, normalizeBelgianPhone, type DuplicateHit } from "./dedup";
+import type { Viewer } from "./access";
 
 export type NewProspectInput = {
   company_name?: string | null;
@@ -61,7 +62,14 @@ export async function createProspectCore(
   supabase: SupabaseClient,
   userId: string,
   input: NewProspectInput,
-  opts: { checkDuplicates?: boolean; normalizePhone?: boolean; force?: boolean } = {}
+  opts: {
+    checkDuplicates?: boolean;
+    normalizePhone?: boolean;
+    force?: boolean;
+    /** Renseigné par le connecteur MCP seul : il agit en service_role, donc
+     *  la dédup doit être bornée à son portefeuille à la main. Voir access.ts. */
+    scope?: Viewer | null;
+  } = {}
 ): Promise<CreateProspectResult> {
   const rawPhone = trimOrNull(input.phone);
   const phone = opts.normalizePhone ? normalizeBelgianPhone(rawPhone) : rawPhone;
@@ -69,11 +77,11 @@ export async function createProspectCore(
   const email = trimOrNull(input.email)?.toLowerCase() ?? null;
 
   if (opts.checkDuplicates && !opts.force) {
-    const duplicates = await findDuplicates(supabase, {
-      company_name: company,
-      phone,
-      email,
-    });
+    const duplicates = await findDuplicates(
+      supabase,
+      { company_name: company, phone, email },
+      opts.scope
+    );
     if (duplicates.length > 0) return { duplicates };
   }
 
@@ -95,7 +103,10 @@ export async function createProspectCore(
           ? input.value_estimate
           : null,
       probability: cleanProbability(input.probability),
-      owner_id: owner === "none" ? null : (trimOrNull(owner) ?? userId),
+      // Vivier fermé : « none » ne vaut plus « personne » mais « moi ». Le
+      // trigger en base rattraperait un null de toute façon (migration 015),
+      // mais mieux vaut que le propriétaire soit posé ici, sciemment.
+      owner_id: owner === "none" ? userId : (trimOrNull(owner) ?? userId),
       notes: trimOrNull(input.notes, 4000),
       created_by: userId,
     })
@@ -274,7 +285,9 @@ export async function importProspectsCore(
       source: clean(row.source) ?? "Import CSV",
       value_estimate: toNumber(row.value_estimate),
       notes: clean(row.notes),
-      owner_id: ownerId === "none" || ownerId === null ? null : ownerId,
+      // Idem : un import appartient à quelqu'un. « none »/null retombent sur
+      // l'auteur de l'import plutôt que dans un vivier qui n'existe plus.
+      owner_id: ownerId === "none" || ownerId === null ? userId : ownerId,
       created_by: userId,
     });
   });

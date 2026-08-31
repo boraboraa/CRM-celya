@@ -7,12 +7,21 @@ import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
 import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
+import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { fmtDate, relative } from "@/lib/constants";
 import {
   LAST_ACTION_SELECT,
   mapLastActions,
   type LastActionRow,
 } from "@/lib/crm/lastAction";
+import {
+  lirePerimetre,
+  filtrerTaches,
+  filtrerProspects,
+  filtrerJointProspects,
+  restreindreAuxProspects,
+  type PerimetreViewer,
+} from "@/lib/crm/perimetre";
 
 
 /** Une fiche en attente de réponse — la zone CALME du tableau. */
@@ -36,49 +45,80 @@ type WaitingProspect = {
  *      Zone CALME : jamais « en retard ». La fiche ne remonte en zone 1 qu'à
  *      l'échéance de sa relance « si pas de réponse » (+5 jours à l'envoi).
  *   3. « Réponses reçues » — le prospect a répondu : agir maintenant.
+ *
+ * Le tout dans le PÉRIMÈTRE choisi (lib/crm/perimetre.ts) : « moi » par
+ * défaut, pour tout le monde — l'admin peut élargir à un membre ou à toute
+ * l'équipe. C'est un filtre de confort ; la cloison de sécurité reste la RLS.
  */
-export default async function TodoPage() {
+export default async function TodoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ perimetre?: string }>;
+}) {
   const supabase = await createClient();
-  const session = await getSession();
+  const [session, params] = await Promise.all([getSession(), searchParams]);
   const { start, end } = todayBounds();
+
+  const viewer: PerimetreViewer = {
+    userId: session?.userId ?? "",
+    isAdmin: session?.me?.role === "admin",
+  };
+  const perimetre = lirePerimetre(params, viewer);
 
   const TASK_SELECT =
     "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name, phone, email)";
 
-  // Les cinq requêtes partent ENSEMBLE. La liste des fiches en attente était
+  // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un
   // aller-retour de plus, en série, sur l'écran le plus consulté. On charge
   // maintenant les fiches ouvertes en parallèle et on croise en mémoire.
-  const [overdueRes, todayRes, repliesRes, waitingRes, openProspectsRes] =
+  //
+  // Le périmètre s'applique aux CINQ : en oublier une remettrait du bruit
+  // dans sa zone. La vue prospect_action_state, qui ne porte pas owner_id,
+  // est restreinte en mémoire juste en dessous.
+  const [overdueRes, todayRes, repliesRes, waitingRes, openProspectsRes, membresRes] =
     await Promise.all([
     // En retard — les plus anciennes d'abord.
-    supabase
-      .from("tasks")
-      .select(TASK_SELECT)
-      .eq("status", "a_faire")
-      .lt("due_at", start)
+    filtrerTaches(
+      supabase
+        .from("tasks")
+        .select(TASK_SELECT)
+        .eq("status", "a_faire")
+        .lt("due_at", start),
+      perimetre,
+      viewer
+    )
       .order("due_at", { ascending: true })
       .limit(100),
 
     // Aujourd'hui.
-    supabase
-      .from("tasks")
-      .select(TASK_SELECT)
-      .eq("status", "a_faire")
-      .gte("due_at", start)
-      .lte("due_at", end)
+    filtrerTaches(
+      supabase
+        .from("tasks")
+        .select(TASK_SELECT)
+        .eq("status", "a_faire")
+        .gte("due_at", start)
+        .lte("due_at", end),
+      perimetre,
+      viewer
+    )
       .order("due_at", { ascending: true })
       .limit(100),
 
     // Réponses reçues — emails entrants rattachés, en attente de tri.
-    supabase
-      .from("emails")
-      .select(
-        "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects(id, company_name)"
-      )
-      .eq("direction", "entrant")
-      .eq("triage", "a_traiter")
-      .not("prospect_id", "is", null)
+    // L'embed est !inner pour que le filtre de périmètre soit filtrant.
+    filtrerJointProspects(
+      supabase
+        .from("emails")
+        .select(
+          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name)"
+        )
+        .eq("direction", "entrant")
+        .eq("triage", "a_traiter")
+        .not("prospect_id", "is", null),
+      perimetre,
+      viewer
+    )
       .order("received_at", { ascending: false })
       .limit(20),
 
@@ -92,17 +132,44 @@ export default async function TodoPage() {
       .limit(200),
 
     // Les fiches encore ouvertes — celles qui peuvent peupler la zone calme.
-    supabase
-      .from("prospects")
-      .select("id, company_name, contact_name, next_action_at")
-      .not("status", "in", "(gagne,perdu)")
-      .limit(500),
+    filtrerProspects(
+      supabase
+        .from("prospects")
+        .select("id, company_name, contact_name, next_action_at")
+        .not("status", "in", "(gagne,perdu)"),
+      perimetre,
+      viewer
+    ).limit(500),
+
+    // Les membres actifs — pour le sélecteur de périmètre (admin seulement).
+    viewer.isAdmin
+      ? supabase
+          .from("crm_users")
+          .select("id, full_name, email")
+          .eq("is_active", true)
+          .order("full_name")
+      : Promise.resolve({ data: [] }),
   ]);
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
   const todayAll = (todayRes.data ?? []) as unknown as TaskWithProspect[];
   const replies = (repliesRes.data ?? []) as unknown as ReplyCardEmail[];
-  const waitingRows = (waitingRes.data ?? []) as unknown as LastActionRow[];
+  const membres = (membresRes.data ?? []) as {
+    id: string;
+    full_name: string | null;
+    email: string;
+  }[];
+  const openProspectRows = (openProspectsRes.data ?? []) as unknown as Omit<
+    WaitingProspect,
+    "sent_at"
+  >[];
+  // La vue ne sait pas porter le filtre de périmètre (pas d'owner_id, pas de
+  // jointure PostgREST possible) : on la restreint aux fiches du périmètre.
+  const waitingRows = restreindreAuxProspects(
+    (waitingRes.data ?? []) as unknown as LastActionRow[],
+    new Set(openProspectRows.map((p) => p.id)),
+    perimetre
+  );
   const waitingMap = mapLastActions(waitingRows);
 
   // Une fiche qui a répondu vit en zone 3 — ses relances n'encombrent pas la
@@ -129,9 +196,7 @@ export default async function TodoPage() {
       .filter((id) => !dueIds.has(id) && !replyIds.has(id))
   );
 
-  const waiting: WaitingProspect[] = (
-    (openProspectsRes.data ?? []) as unknown as Omit<WaitingProspect, "sent_at">[]
-  )
+  const waiting: WaitingProspect[] = openProspectRows
     .filter((p) => calmIds.has(p.id))
     .map((p) => ({
       ...p,
@@ -165,6 +230,20 @@ export default async function TodoPage() {
           </Link>
         }
       />
+
+      {/* Le périmètre — admin seulement (le composant ne rend rien sinon). */}
+      {viewer.isAdmin && (
+        <div className="mb-5">
+          <PerimetreSwitcher
+            role={session?.me?.role ?? "commercial"}
+            viewerId={viewer.userId}
+            perimetre={perimetre}
+            membres={membres}
+            basePath="/dashboard"
+            searchParams={params}
+          />
+        </div>
+      )}
 
       {nothingAtAll ? (
         <EmptyState

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/auth";
 import {
   PageHeader,
   StatusChip,
@@ -8,6 +9,7 @@ import {
   ConfidenceBadge,
   LastActionLine,
 } from "@/components/ui";
+import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import {
   STATUS_ORDER,
@@ -22,6 +24,12 @@ import {
   type LastActionRow,
 } from "@/lib/crm/lastAction";
 import { composerHref } from "@/lib/crm/composer";
+import {
+  lirePerimetre,
+  filtrerProspects,
+  restreindreAuxProspects,
+  type PerimetreViewer,
+} from "@/lib/crm/perimetre";
 import type { ConfidenceLevel } from "@/lib/types";
 
 
@@ -31,30 +39,47 @@ type Search = {
   tri?: string;
   vue?: string;
   filtre?: string;
+  perimetre?: string;
 };
 
 /**
  * Une seule liste de prospects, deux affichages : liste (tableau filtrable)
  * ou colonnes par étape (glisser-déposer). Même jeu de données, mêmes
  * filtres — la vue en colonnes n'est qu'un mode d'affichage.
+ *
+ * Le tout dans le PÉRIMÈTRE choisi : « moi » par défaut, y compris pour
+ * l'admin — le sélecteur lui permet d'élargir. La colonne « Responsable »
+ * rend le mode équipe lisible.
  */
 export default async function ProspectsPage({
   searchParams,
 }: {
   searchParams: Promise<Search>;
 }) {
-  const { q, statut, tri, vue, filtre } = await searchParams;
+  const params = await searchParams;
+  const { q, statut, tri, vue, filtre } = params;
   const supabase = await createClient();
+  const session = await getSession();
   const view = vue === "colonnes" ? "colonnes" : "liste";
   // « Emails envoyés » : ne garder que les fiches à qui un mail est parti,
   // triées par date du dernier envoi — pour les retrouver d'un coup.
   const filtreEmails = filtre === "emails";
 
-  let query = supabase
-    .from("prospects")
-    .select(
-      "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
-    );
+  const viewer: PerimetreViewer = {
+    userId: session?.userId ?? "",
+    isAdmin: session?.me?.role === "admin",
+  };
+  const perimetre = lirePerimetre(params, viewer);
+
+  let query = filtrerProspects(
+    supabase
+      .from("prospects")
+      .select(
+        "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
+      ),
+    perimetre,
+    viewer
+  );
 
   if (q) {
     const like = `%${q}%`;
@@ -82,16 +107,33 @@ export default async function ProspectsPage({
   }
 
   // La « dernière action » de chaque fiche (canal + date) vient de la vue
-  // prospect_action_state — la RLS s'y applique comme partout.
-  const [{ data, error }, actionsRes] = await Promise.all([
+  // prospect_action_state — la RLS s'y applique comme partout. Le périmètre,
+  // lui, est restreint en mémoire (la vue ne porte pas owner_id).
+  const [{ data, error }, actionsRes, membresRes] = await Promise.all([
     query.limit(500),
     supabase
       .from("prospect_action_state")
       .select(LAST_ACTION_SELECT)
       .limit(2000),
+    viewer.isAdmin
+      ? supabase
+          .from("crm_users")
+          .select("id, full_name, email")
+          .eq("is_active", true)
+          .order("full_name")
+      : Promise.resolve({ data: [] }),
   ]);
+  const membres = (membresRes.data ?? []) as {
+    id: string;
+    full_name: string | null;
+    email: string;
+  }[];
   const lastActions = mapLastActions(
-    (actionsRes.data ?? []) as unknown as LastActionRow[]
+    restreindreAuxProspects(
+      (actionsRes.data ?? []) as unknown as LastActionRow[],
+      new Set(((data ?? []) as { id: string }[]).map((p) => p.id)),
+      perimetre
+    )
   );
   let prospects = ((data ?? []) as unknown as {
     id: string;
@@ -139,18 +181,22 @@ export default async function ProspectsPage({
     last_at: lastActions.get(p.id)?.last_at ?? null,
   }));
 
-  /** URL de la page en conservant recherche, étape, tri, vue et filtre. */
+  /** URL de la page en conservant recherche, étape, tri, vue, filtre — et
+   *  périmètre. */
   const makeHref = (over: {
     vue?: "liste" | "colonnes";
     filtreEmails?: boolean;
   }) => {
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (statut && statut !== "tous") params.set("statut", statut);
-    if (tri) params.set("tri", tri);
-    if ((over.vue ?? view) === "colonnes") params.set("vue", "colonnes");
-    if (over.filtreEmails ?? filtreEmails) params.set("filtre", "emails");
-    const qs = params.toString();
+    const sp = new URLSearchParams();
+    if (q) sp.set("q", q);
+    if (statut && statut !== "tous") sp.set("statut", statut);
+    if (tri) sp.set("tri", tri);
+    if ((over.vue ?? view) === "colonnes") sp.set("vue", "colonnes");
+    if (over.filtreEmails ?? filtreEmails) sp.set("filtre", "emails");
+    if (params.perimetre && params.perimetre !== "moi") {
+      sp.set("perimetre", params.perimetre);
+    }
+    const qs = sp.toString();
     return `/prospects${qs ? `?${qs}` : ""}`;
   };
   const viewHref = (v: "liste" | "colonnes") => makeHref({ vue: v });
@@ -173,6 +219,16 @@ export default async function ProspectsPage({
       />
 
       <div className="mb-5 flex flex-wrap items-end gap-3">
+        {/* Le périmètre — admin seulement (le composant ne rend rien sinon). */}
+        <PerimetreSwitcher
+          role={session?.me?.role ?? "commercial"}
+          viewerId={viewer.userId}
+          perimetre={perimetre}
+          membres={membres}
+          basePath="/prospects"
+          searchParams={params}
+        />
+
         {/* Bascule liste ↔ colonnes — même jeu de données. */}
         <div className="flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
           {(
@@ -213,6 +269,9 @@ export default async function ProspectsPage({
         <form className="flex flex-1 flex-wrap items-end gap-3">
           {view === "colonnes" && <input type="hidden" name="vue" value="colonnes" />}
           {filtreEmails && <input type="hidden" name="filtre" value="emails" />}
+          {params.perimetre && params.perimetre !== "moi" && (
+            <input type="hidden" name="perimetre" value={params.perimetre} />
+          )}
           <div className="min-w-[200px] flex-1">
             <label className="label" htmlFor="q">
               Rechercher

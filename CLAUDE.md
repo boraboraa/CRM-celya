@@ -175,6 +175,21 @@ Vérifié empiriquement le 2 août : un compte commercial ne voit pas les fiches
 d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 `crm-admin` (403), et la clé publique seule renvoie `42501`.
 
+### Le périmètre d'affichage — du confort, PAS de la sécurité (31 août)
+
+La RLS cloisonnait, mais les écrans requêtaient `tasks` et `prospects` sans
+filtre : en admin, Bora recevait l'union des portefeuilles. D'où
+`lib/crm/perimetre.ts` — `lirePerimetre` (`?perimetre=moi | equipe | <uuid>`),
+`filtrerTaches` (`assignee_id`), `filtrerProspects` (`owner_id`),
+`filtrerJointProspects`, `restreindreAuxProspects` (les vues sans `owner_id`).
+**Défaut « moi » pour tout le monde, admin compris** ; un non-admin est forcé à
+« moi » quoi qu'il y ait dans l'URL. Le sélecteur (`PerimetreSwitcher`, admin
+seulement) vit sur `/dashboard` et `/prospects` ; les outils MCP
+`lister_prospects` / `a_faire` acceptent `perimetre: "moi" | "equipe"` (défaut
+« moi », appliqué APRÈS `scopeProspects`). **Ne jamais fusionner ce module avec
+`access.ts`** : le périmètre se DÉSACTIVE (mode équipe), la cloison jamais —
+les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort.
+
 ---
 
 ## Base de données
@@ -1231,6 +1246,13 @@ sélecteur du vrai contenu).
 **Trier sur une valeur calculée.** PostgREST ne sait pas trier sur une
 expression : `weighted_value` est une **colonne générée**, pas un calcul
 applicatif. Même réflexe pour tout futur indicateur dérivé qu'on voudra trier.
+
+**Une vue ne se joint pas en PostgREST.** `prospect_action_state` n'a pas de
+clé étrangère : `select=...,prospects!inner(...)` depuis la vue renvoie
+`PGRST200` (« no relationship found »), vérifié le 31 août. Un filtre par
+propriétaire sur une vue passe donc soit par une colonne exposée par la vue
+elle-même, soit par une restriction en mémoire sur des identifiants déjà
+bornés (`restreindreAuxProspects`).
 
 **Chronologie et faits : filtrer les brouillons partout.** `is_draft` doit être
 exclu à trois endroits — la chronologie, la lecture des faits

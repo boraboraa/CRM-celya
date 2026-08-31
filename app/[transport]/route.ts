@@ -34,6 +34,11 @@ import {
   scopeJoinedProspects,
   type Viewer,
 } from "@/lib/crm/access";
+import {
+  filtrerProspects,
+  filtrerTaches,
+  type Perimetre,
+} from "@/lib/crm/perimetre";
 import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { SUPABASE_URL } from "@/lib/env";
@@ -99,6 +104,21 @@ async function context(extra: {
 }
 
 const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
+
+/**
+ * Le périmètre d'affichage (lib/crm/perimetre.ts), version connecteur : « moi »
+ * par défaut, « equipe » réservé à l'admin — un non-admin est FORCÉ à « moi »,
+ * quoi que demande le client. C'est du confort par-dessus la sécurité :
+ * `scopeProspects` (la cloison) s'applique toujours AVANT.
+ */
+function perimetreDe(
+  viewer: Viewer,
+  demande: "moi" | "equipe" | undefined
+): Perimetre {
+  return viewer.isAdmin && demande === "equipe"
+    ? { mode: "equipe" }
+    : { mode: "moi" };
+}
 
 /** Nettoie une recherche texte avant de la passer à un filtre PostgREST or(). */
 const safeSearch = (s: string) => s.replace(/[%,()*\\]/g, " ").trim().slice(0, 80);
@@ -235,7 +255,7 @@ function register(server: McpServer) {
   // --- lister_prospects -----------------------------------------------------
   server.tool(
     "lister_prospects",
-    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
+    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe » pour voir toute l'équipe. Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
     {
       statut: z.enum(STATUS_ENUM).optional().describe("Filtrer sur une étape précise."),
       a_relancer: z
@@ -244,6 +264,12 @@ function register(server: McpServer) {
         .describe("Ne garder que les prospects dont la prochaine action échoit aujourd'hui ou est en retard."),
       recherche: z.string().optional().describe("Texte recherché dans société, contact, email ou téléphone."),
       limite: z.number().int().min(1).max(200).optional().describe("Nombre maximum de fiches (défaut 50)."),
+      perimetre: z
+        .enum(["moi", "equipe"])
+        .optional()
+        .describe(
+          "Défaut « moi » : uniquement les fiches de l'appelant. « equipe » (admin uniquement) élargit à toute l'équipe ; sans effet pour un commercial."
+        ),
     },
     async (args, extra) => {
       const ctx = await context(extra);
@@ -252,11 +278,16 @@ function register(server: McpServer) {
 
       // Le filtre de portefeuille est posé AVANT le limit : sinon les 50
       // premières lignes pourraient être celles d'un autre, et la liste
-      // reviendrait vide alors que l'appelant a des fiches.
-      let q = scopeProspects(
-        admin
-          .from("prospects")
-          .select("id, company_name, contact_name, phone, email, status, next_action_at, owner_id"),
+      // reviendrait vide alors que l'appelant a des fiches. Le périmètre
+      // (confort) se pose APRÈS la cloison (sécurité), jamais à sa place.
+      let q = filtrerProspects(
+        scopeProspects(
+          admin
+            .from("prospects")
+            .select("id, company_name, contact_name, phone, email, status, next_action_at, owner_id"),
+          viewer
+        ),
+        perimetreDe(viewer, args.perimetre),
         viewer
       )
         .order("next_action_at", { ascending: true, nullsFirst: false })
@@ -364,25 +395,42 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour, sur vos prospects. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
-    {},
-    async (_args, extra) => {
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe » pour toute l'équipe. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
+    {
+      perimetre: z
+        .enum(["moi", "equipe"])
+        .optional()
+        .describe(
+          "Défaut « moi » : uniquement les relances de l'appelant. « equipe » (admin uniquement) élargit à toute l'équipe ; sans effet pour un commercial."
+        ),
+    },
+    async (args, extra) => {
       const ctx = await context(extra);
       if ("error" in ctx) return fail(ctx.error);
       const { admin, viewer } = ctx;
       const { start, end } = todayBounds();
+      const per = perimetreDe(viewer, args.perimetre);
       // `!inner` : la jointure devient filtrante, et `owner_id` remonte pour
-      // la vérification en mémoire ci-dessous.
+      // la vérification en mémoire ci-dessous. La cloison (scopeJoinedProspects)
+      // d'abord, le périmètre (assignee_id, comme l'écran « À faire ») ensuite.
       const SELECT =
         "id, title, due_at, priority, prospect_id, prospects!inner(company_name, phone, owner_id)";
 
       const [overdue, today] = await Promise.all([
-        scopeJoinedProspects(
-          admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start),
+        filtrerTaches(
+          scopeJoinedProspects(
+            admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start),
+            viewer
+          ),
+          per,
           viewer
         ).order("due_at", { ascending: true }).limit(100),
-        scopeJoinedProspects(
-          admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end),
+        filtrerTaches(
+          scopeJoinedProspects(
+            admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end),
+            viewer
+          ),
+          per,
           viewer
         ).order("due_at", { ascending: true }).limit(100),
       ]);

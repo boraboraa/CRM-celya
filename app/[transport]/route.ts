@@ -2,9 +2,9 @@
  * Serveur MCP « Celya CRM » — connecteur personnalisé de Claude.
  *
  * Périmètre STRICTEMENT limité au CRM : ces outils ne touchent QUE les tables
- * prospects, activities, tasks, emails. Aucune exécution SQL libre, aucun accès
- * aux tables comptables du même projet Supabase. C'est la raison d'être de ce
- * connecteur face au connecteur Supabase brut.
+ * prospects, activities, tasks, emails et meetings (l'agenda). Aucune exécution
+ * SQL libre, aucun accès aux tables comptables du même projet Supabase. C'est
+ * la raison d'être de ce connecteur face au connecteur Supabase brut.
  *
  * Chaque outil est une enveloppe fine au-dessus du cœur partagé (lib/crm) : un
  * prospect créé ici est indiscernable d'un prospect créé à la main (même dédup,
@@ -34,12 +34,28 @@ import {
   scopeJoinedProspects,
   type Viewer,
 } from "@/lib/crm/access";
+import {
+  filtrerProspects,
+  filtrerTaches,
+  type Perimetre,
+} from "@/lib/crm/perimetre";
 import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { SUPABASE_URL } from "@/lib/env";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { saveExchangeCore } from "@/lib/crm/exchange";
-import { manualStatusPatch, applyAutoStatus } from "@/lib/crm/status";
+import {
+  poserRendezVous,
+  deplacerRendezVous,
+  cloturerRendezVous,
+  MEETING_STATUS_LABEL,
+  type MeetingStatus,
+} from "@/lib/crm/agenda";
+import {
+  manualStatusPatch,
+  applyAutoStatus,
+  readProspectFacts,
+} from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
 import {
@@ -56,7 +72,7 @@ import {
   fmtDate,
   fmtDateTime,
 } from "@/lib/constants";
-import { todayBounds } from "@/lib/time";
+import { todayBounds, localInputToISO, isoToLocalInput } from "@/lib/time";
 import type { ProspectStatus } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -100,8 +116,49 @@ async function context(extra: {
 
 const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
 
+/**
+ * Le périmètre d'affichage (lib/crm/perimetre.ts), version connecteur : « moi »
+ * par défaut, « equipe » réservé à l'admin — un non-admin est FORCÉ à « moi »,
+ * quoi que demande le client. C'est du confort par-dessus la sécurité :
+ * `scopeProspects` (la cloison) s'applique toujours AVANT.
+ */
+function perimetreDe(
+  viewer: Viewer,
+  demande: "moi" | "equipe" | undefined
+): Perimetre {
+  return viewer.isAdmin && demande === "equipe"
+    ? { mode: "equipe" }
+    : { mode: "moi" };
+}
+
 /** Nettoie une recherche texte avant de la passer à un filtre PostgREST or(). */
 const safeSearch = (s: string) => s.replace(/[%,()*\\]/g, " ").trim().slice(0, 80);
+
+/**
+ * Diagnostique un début de rendez-vous fourni par le modèle. La règle du
+ * 31/08 : si le JOUR ou l'HEURE manque, on REFUSE en le disant — on ne
+ * complète JAMAIS en silence, et on ne pose JAMAIS une relance générique à
+ * la place (c'est ainsi qu'un rendez-vous a été perdu).
+ */
+function litDateRendezVous(brut: string): { ok?: string; error?: string } {
+  const v = (brut ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return { ok: v };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    return {
+      error:
+        "Il manque l'heure. Un rendez-vous n'est jamais « toute la journée » — demandez l'heure à l'utilisateur, puis repassez « YYYY-MM-DDTHH:mm ».",
+    };
+  }
+  if (/^\d{1,2}\s*[:hH]\s*\d{0,2}$/.test(v)) {
+    return {
+      error:
+        "Il manque le jour. Demandez le jour à l'utilisateur, puis repassez « YYYY-MM-DDTHH:mm ». Ne posez pas de relance à la place.",
+    };
+  }
+  return {
+    error: "Date invalide — attendu « YYYY-MM-DDTHH:mm » (heure de Bruxelles).",
+  };
+}
 
 type ResolvedProspect = {
   id: string;
@@ -235,7 +292,7 @@ function register(server: McpServer) {
   // --- lister_prospects -----------------------------------------------------
   server.tool(
     "lister_prospects",
-    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
+    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe » pour voir toute l'équipe. Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
     {
       statut: z.enum(STATUS_ENUM).optional().describe("Filtrer sur une étape précise."),
       a_relancer: z
@@ -244,6 +301,12 @@ function register(server: McpServer) {
         .describe("Ne garder que les prospects dont la prochaine action échoit aujourd'hui ou est en retard."),
       recherche: z.string().optional().describe("Texte recherché dans société, contact, email ou téléphone."),
       limite: z.number().int().min(1).max(200).optional().describe("Nombre maximum de fiches (défaut 50)."),
+      perimetre: z
+        .enum(["moi", "equipe"])
+        .optional()
+        .describe(
+          "Défaut « moi » : uniquement les fiches de l'appelant. « equipe » (admin uniquement) élargit à toute l'équipe ; sans effet pour un commercial."
+        ),
     },
     async (args, extra) => {
       const ctx = await context(extra);
@@ -252,11 +315,16 @@ function register(server: McpServer) {
 
       // Le filtre de portefeuille est posé AVANT le limit : sinon les 50
       // premières lignes pourraient être celles d'un autre, et la liste
-      // reviendrait vide alors que l'appelant a des fiches.
-      let q = scopeProspects(
-        admin
-          .from("prospects")
-          .select("id, company_name, contact_name, phone, email, status, next_action_at, owner_id"),
+      // reviendrait vide alors que l'appelant a des fiches. Le périmètre
+      // (confort) se pose APRÈS la cloison (sécurité), jamais à sa place.
+      let q = filtrerProspects(
+        scopeProspects(
+          admin
+            .from("prospects")
+            .select("id, company_name, contact_name, phone, email, status, next_action_at, owner_id"),
+          viewer
+        ),
+        perimetreDe(viewer, args.perimetre),
         viewer
       )
         .order("next_action_at", { ascending: true, nullsFirst: false })
@@ -308,7 +376,7 @@ function register(server: McpServer) {
       const resolved = await resolveProspect(admin, viewer, args);
       if ("error" in resolved) return fail(resolved.error);
 
-      const [fiche, activites, taches] = await Promise.all([
+      const [fiche, activites, taches, rdvs] = await Promise.all([
         admin.from("prospects").select("*").eq("id", resolved.id).single(),
         admin
           .from("activities")
@@ -322,6 +390,12 @@ function register(server: McpServer) {
           .eq("prospect_id", resolved.id)
           .eq("status", "a_faire")
           .order("due_at", { ascending: true }),
+        admin
+          .from("meetings_visibles")
+          .select("id, title, starts_at, ends_at, location, status")
+          .eq("prospect_id", resolved.id)
+          .order("starts_at", { ascending: false })
+          .limit(5),
       ]);
 
       if (fiche.error) return fail(`Erreur : ${fiche.error.message}`);
@@ -357,6 +431,15 @@ function register(server: McpServer) {
           echeance: t.due_at,
           priorite: t.priority,
         })),
+        rendez_vous: (rdvs.data ?? []).map((m) => ({
+          id: m.id,
+          titre: m.title,
+          debut: m.starts_at,
+          fin: m.ends_at,
+          lieu: m.location,
+          statut:
+            MEETING_STATUS_LABEL[m.status as MeetingStatus] ?? m.status,
+        })),
       });
     }
   );
@@ -364,25 +447,42 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour, sur vos prospects. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
-    {},
-    async (_args, extra) => {
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe » pour toute l'équipe. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
+    {
+      perimetre: z
+        .enum(["moi", "equipe"])
+        .optional()
+        .describe(
+          "Défaut « moi » : uniquement les relances de l'appelant. « equipe » (admin uniquement) élargit à toute l'équipe ; sans effet pour un commercial."
+        ),
+    },
+    async (args, extra) => {
       const ctx = await context(extra);
       if ("error" in ctx) return fail(ctx.error);
       const { admin, viewer } = ctx;
       const { start, end } = todayBounds();
+      const per = perimetreDe(viewer, args.perimetre);
       // `!inner` : la jointure devient filtrante, et `owner_id` remonte pour
-      // la vérification en mémoire ci-dessous.
+      // la vérification en mémoire ci-dessous. La cloison (scopeJoinedProspects)
+      // d'abord, le périmètre (assignee_id, comme l'écran « À faire ») ensuite.
       const SELECT =
         "id, title, due_at, priority, prospect_id, prospects!inner(company_name, phone, owner_id)";
 
       const [overdue, today] = await Promise.all([
-        scopeJoinedProspects(
-          admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start),
+        filtrerTaches(
+          scopeJoinedProspects(
+            admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start),
+            viewer
+          ),
+          per,
           viewer
         ).order("due_at", { ascending: true }).limit(100),
-        scopeJoinedProspects(
-          admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end),
+        filtrerTaches(
+          scopeJoinedProspects(
+            admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end),
+            viewer
+          ),
+          per,
           viewer
         ).order("due_at", { ascending: true }).limit(100),
       ]);
@@ -500,7 +600,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ».",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -512,6 +612,19 @@ function register(server: McpServer) {
       const { admin, viewer } = ctx;
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
+
+      // « Rendez-vous » n'est pas une intention, c'est un FAIT : sans
+      // rendez-vous enregistré (activité datée ou rendez-vous à venir),
+      // l'étape ne se force pas — c'est ainsi qu'un RDV sans date a déjà
+      // été perdu. On pose le rendez-vous, l'étape suit toute seule.
+      if (args.statut === "rendez_vous") {
+        const facts = await readProspectFacts(admin, resolved.id);
+        if (!facts.meeting) {
+          return fail(
+            "Aucun rendez-vous enregistré sur cette fiche. Posez d'abord le rendez-vous, l'étape suivra toute seule."
+          );
+        }
+      }
 
       const { error } = await admin
         .from("prospects")
@@ -532,7 +645,7 @@ function register(server: McpServer) {
   // --- ajouter_note ---------------------------------------------------------
   server.tool(
     "ajouter_note",
-    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. N'impose pas de date de relance — pour poser une relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
+    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. Si la note mentionne un rendez-vous daté, passez « rdv_le » (et « lieu ») : le rendez-vous est posé dans l'agenda en même temps. Si la note mentionne un rendez-vous dont le JOUR ou l'HEURE manque, POSEZ LA QUESTION à l'utilisateur. Ne posez jamais une relance générique à la place : le rendez-vous serait perdu. Pour une simple relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -540,6 +653,13 @@ function register(server: McpServer) {
       note: z.string().describe("Texte de l'échange."),
       resume: z.string().optional().describe("Résumé court (versé en sujet)."),
       contact: z.string().optional().describe("Nom du contact à mettre à jour sur la fiche."),
+      rdv_le: z
+        .string()
+        .optional()
+        .describe(
+          "Rendez-vous mentionné dans la note : « YYYY-MM-DDTHH:mm » (heure de Bruxelles), jour ET heure OBLIGATOIRES. Le rendez-vous est posé dans l'agenda et la note versée au journal."
+        ),
+      lieu: z.string().optional().describe("Lieu du rendez-vous (avec « rdv_le »)."),
       echange: z
         .boolean()
         .optional()
@@ -569,15 +689,26 @@ function register(server: McpServer) {
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
 
+      // Un rendez-vous mentionné dans la note : validé strictement (jour ET
+      // heure), puis délégué au cœur agenda via saveExchangeCore — la note
+      // devient une activité rendez_vous, le créneau part dans meetings.
+      let rdvLe: string | null = null;
+      if (args.rdv_le) {
+        const quand = litDateRendezVous(args.rdv_le);
+        if (quand.error) return fail(quand.error);
+        rdvLe = quand.ok!;
+      }
+
       const r = await saveExchangeCore(admin, viewer.userId, {
         prospectId: resolved.id,
-        type: args.type,
+        type: rdvLe ? "rendez_vous" : args.type,
         note: args.note,
         resume: args.resume,
         contactName: args.contact,
         statut: args.statut as ProspectStatus | undefined,
         motif: args.motif,
-        dateLocale: null,
+        dateLocale: rdvLe,
+        rdvLieu: rdvLe ? (args.lieu ?? null) : null,
         // Défaut prudent côté connecteur : sans déclaration explicite, une
         // note écrite par Claude n'atteste pas d'un échange (l'interface, elle,
         // coche la case par défaut — la saisie y est humaine).
@@ -590,8 +721,15 @@ function register(server: McpServer) {
       const bits = [
         args.brouillon
           ? `✅ Brouillon rangé sur ${resolved.company_name} (hors chronologie).`
-          : `✅ Note ajoutée sur ${resolved.company_name}.`,
+          : rdvLe
+            ? `✅ Note ajoutée sur ${resolved.company_name}, rendez-vous posé le ${fmtDateTime(r.scheduledAt)}${args.lieu ? ` — ${args.lieu}` : ""}.`
+            : `✅ Note ajoutée sur ${resolved.company_name}.`,
       ];
+      if (r.conflit) {
+        bits.push(
+          `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`
+        );
+      }
       if (r.statusChanged) {
         bits.push(
           `Étape → « ${STATUS_LABEL[r.newStatus as keyof typeof STATUS_LABEL]} » (fixée à la main, donc verrouillée).`
@@ -768,7 +906,7 @@ function register(server: McpServer) {
   // --- planifier_relance ----------------------------------------------------
   server.tool(
     "planifier_relance",
-    "Pose une relance datée sur un prospect (met à jour next_action_at et la tâche associée, sans jamais créer de doublon : la relance ouverte existante est re-datée). La date est « YYYY-MM-DD » (échéance à 09:00) ou « YYYY-MM-DDTHH:mm » (heure précise, heure de Bruxelles). Un type « rendez_vous » crée une tâche « RDV avec … » protégée.",
+    "Pose une relance datée sur un prospect (met à jour next_action_at et la tâche associée, sans jamais créer de doublon : la relance ouverte existante est re-datée). La date est « YYYY-MM-DD » (échéance à 09:00) ou « YYYY-MM-DDTHH:mm » (heure précise, heure de Bruxelles). Pour un RENDEZ-VOUS, utilisez « poser_rendez_vous » (agenda, jour ET heure obligatoires) — le type « rendez_vous » ici exige aussi une heure et crée le même rendez-vous d'agenda.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -776,7 +914,7 @@ function register(server: McpServer) {
         .string()
         .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/, "Format attendu : YYYY-MM-DD ou YYYY-MM-DDTHH:mm.")
         .describe("Date de relance (heure de Bruxelles)."),
-      type: z.enum(["note", "rendez_vous"]).optional().describe("« rendez_vous » pour un RDV daté (défaut « note » : simple relance)."),
+      type: z.enum(["note", "rendez_vous"]).optional().describe("« rendez_vous » pose un vrai rendez-vous d'AGENDA — jour ET heure alors obligatoires (préférez « poser_rendez_vous », plus complet). Défaut « note » : simple relance."),
       note: z.string().optional().describe("Note facultative versée au journal en même temps."),
     },
     async (args, extra) => {
@@ -793,17 +931,252 @@ function register(server: McpServer) {
         dateLocale: args.date,
         // Planifier n'est pas échanger : poser une relance ne fait pas passer
         // la fiche en « Contacté ». Un rendez-vous daté, lui, est un fait —
-        // il passe par la tâche « RDV avec … » que crée le cœur partagé.
+        // le cœur partagé le pose dans l'agenda (meetings).
         isExchange: false,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
       const bits = [
-        `✅ Relance posée sur ${resolved.company_name} : « ${r.taskTitle} » pour le ${fmtDateTime(r.scheduledAt)}.`,
+        args.type === "rendez_vous"
+          ? `✅ Rendez-vous posé sur ${resolved.company_name} : « ${r.taskTitle} » le ${fmtDateTime(r.scheduledAt)}.`
+          : `✅ Relance posée sur ${resolved.company_name} : « ${r.taskTitle} » pour le ${fmtDateTime(r.scheduledAt)}.`,
       ];
       if (r.autoStatus) {
         bits.push(
           `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
+        );
+      }
+      if (r.conflit) {
+        bits.push(
+          `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`
+        );
+      }
+      return text(bits.join(" "));
+    }
+  );
+
+  // --- agenda ---------------------------------------------------------------
+  server.tool(
+    "agenda",
+    "Liste les rendez-vous de l'agenda sur une période (défaut : les 7 prochains jours). Par DÉFAUT, uniquement les rendez-vous de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe ». Les rendez-vous PERSONNELS des autres membres n'exposent que leur créneau (« Occupé »), jamais leur intitulé.",
+    {
+      du: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Format attendu : YYYY-MM-DD.")
+        .optional()
+        .describe("Début de période (YYYY-MM-DD, heure de Bruxelles). Défaut : aujourd'hui."),
+      au: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Format attendu : YYYY-MM-DD.")
+        .optional()
+        .describe("Fin de période, incluse. Défaut : début + 7 jours."),
+      perimetre: z
+        .enum(["moi", "equipe"])
+        .optional()
+        .describe("Défaut « moi ». « equipe » (admin uniquement) superpose toute l'équipe."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const per = perimetreDe(viewer, args.perimetre);
+
+      const du = args.du ?? isoToLocalInput(new Date().toISOString()).slice(0, 10);
+      const auDefaut = new Date(`${du}T12:00:00Z`);
+      auDefaut.setUTCDate(auDefaut.getUTCDate() + 7);
+      const au = args.au ?? auDefaut.toISOString().slice(0, 10);
+      const debut = localInputToISO(`${du}T00:00`);
+      const fin = localInputToISO(`${au}T23:59`);
+      if (!debut || !fin) return fail("Période invalide.");
+
+      let q = admin
+        .from("meetings_visibles")
+        .select("id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status")
+        .gte("starts_at", debut)
+        .lte("starts_at", fin)
+        .order("starts_at", { ascending: true })
+        .limit(100);
+      if (per.mode === "moi") q = q.eq("owner_id", viewer.userId);
+
+      const { data, error } = await q;
+      if (error) return fail(`Erreur : ${error.message}`);
+
+      type Row = {
+        id: string;
+        owner_id: string;
+        prospect_id: string | null;
+        kind: string;
+        title: string;
+        starts_at: string;
+        ends_at: string;
+        location: string | null;
+        status: string;
+      };
+      const rows = (data ?? []) as Row[];
+
+      // Les noms de société, pour que Claude sache de qui on parle.
+      const prospectIds = [
+        ...new Set(rows.map((m) => m.prospect_id).filter(Boolean) as string[]),
+      ];
+      const societes = new Map<string, string>();
+      if (prospectIds.length > 0) {
+        const { data: fiches } = await admin
+          .from("prospects")
+          .select("id, company_name")
+          .in("id", prospectIds);
+        for (const f of (fiches ?? []) as { id: string; company_name: string }[]) {
+          societes.set(f.id, f.company_name);
+        }
+      }
+
+      // Le serveur agit en service_role : la vue ne masque RIEN ici
+      // (auth.uid() est nul). Le masquage des rendez-vous perso des autres
+      // est donc réappliqué en code — même règle que la vue.
+      const sortie = rows.map((m) => {
+        const persoAutrui = m.kind === "perso" && m.owner_id !== viewer.userId;
+        return {
+          id: m.id,
+          titre: persoAutrui ? "Occupé" : m.title,
+          debut: m.starts_at,
+          fin: m.ends_at,
+          statut: MEETING_STATUS_LABEL[m.status as MeetingStatus] ?? m.status,
+          lieu: persoAutrui ? null : m.location,
+          prospect_id: persoAutrui ? null : m.prospect_id,
+          societe:
+            !persoAutrui && m.prospect_id
+              ? (societes.get(m.prospect_id) ?? null)
+              : null,
+          a_moi: m.owner_id === viewer.userId,
+        };
+      });
+      return json(`${sortie.length} rendez-vous du ${du} au ${au}.`, sortie);
+    }
+  );
+
+  // --- poser_rendez_vous ----------------------------------------------------
+  server.tool(
+    "poser_rendez_vous",
+    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu.",
+    {
+      id: z.string().optional().describe("Identifiant du prospect."),
+      nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
+      personnel: z
+        .boolean()
+        .optional()
+        .describe("true : rendez-vous PERSONNEL, sans prospect (les autres ne verront que « Occupé »)."),
+      date: z
+        .string()
+        .describe("Début du rendez-vous : « YYYY-MM-DDTHH:mm » (heure de Bruxelles). Jour ET heure obligatoires."),
+      duree_min: z
+        .number()
+        .int()
+        .min(5)
+        .max(600)
+        .optional()
+        .describe("Durée en minutes (défaut 60)."),
+      lieu: z.string().optional().describe("Lieu du rendez-vous (adresse, visio…)."),
+      titre: z.string().optional().describe("Titre (défaut « RDV avec <société> »)."),
+      notes: z.string().optional(),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+
+      const quand = litDateRendezVous(args.date);
+      if (quand.error) return fail(quand.error);
+
+      let prospectId: string | null = null;
+      let societe: string | null = null;
+      if (!args.personnel) {
+        const resolved = await resolveProspect(admin, viewer, {
+          id: args.id,
+          nom: args.nom,
+        });
+        if ("error" in resolved) return fail(resolved.error);
+        prospectId = resolved.id;
+        societe = resolved.company_name;
+      }
+
+      const r = await poserRendezVous(admin, viewer.userId, {
+        prospectId,
+        kind: args.personnel ? "perso" : "prospect",
+        title: args.titre,
+        startsAt: quand.ok!,
+        dureeMin: args.duree_min,
+        location: args.lieu,
+        notes: args.notes,
+      });
+      if (r.error) return fail(r.error);
+
+      const bits = [
+        `✅ Rendez-vous posé : « ${r.title} » le ${fmtDateTime(r.startsAtISO)}${
+          args.lieu ? ` — ${args.lieu}` : ""
+        }${societe ? ` (fiche ${societe})` : ""}.`,
+      ];
+      if (r.autoStatus) {
+        bits.push(
+          `Étape → « ${STATUS_LABEL[r.autoStatus as keyof typeof STATUS_LABEL]} » : ${r.autoReason}.`
+        );
+      }
+      if (r.conflit) {
+        bits.push(
+          `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}) — signalez-le à l'utilisateur.`
+        );
+      }
+      return text(bits.join(" "));
+    }
+  );
+
+  // --- deplacer_rendez_vous -------------------------------------------------
+  server.tool(
+    "deplacer_rendez_vous",
+    "Déplace un rendez-vous de l'agenda (nouvelle date « YYYY-MM-DDTHH:mm », jour ET heure) ou l'annule (annuler: true). Le report passe le statut à « reporté » et verse l'ancienne et la nouvelle date au journal de la fiche ; l'annulation clôt le rendez-vous. L'identifiant vient de l'outil « agenda » ou d'« obtenir_prospect ».",
+    {
+      id: z.string().describe("Identifiant du rendez-vous."),
+      date: z
+        .string()
+        .optional()
+        .describe("Nouveau début « YYYY-MM-DDTHH:mm » (heure de Bruxelles). Requis sauf pour annuler."),
+      annuler: z.boolean().optional().describe("true : annule le rendez-vous au lieu de le déplacer."),
+      motif: z.string().optional().describe("Motif du report ou de l'annulation, versé au journal."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+
+      if (args.annuler) {
+        const r = await cloturerRendezVous(admin, viewer.userId, {
+          id: args.id,
+          resultat: "annule",
+          compteRendu: args.motif,
+          isAdmin: viewer.isAdmin,
+        });
+        if (r.error) return fail(r.error);
+        return text(`✅ Rendez-vous « ${r.title} » annulé.`);
+      }
+
+      if (!args.date) {
+        return fail("Fournissez « date » (YYYY-MM-DDTHH:mm) pour déplacer, ou « annuler: true ».");
+      }
+      const quand = litDateRendezVous(args.date);
+      if (quand.error) return fail(quand.error);
+
+      const r = await deplacerRendezVous(admin, viewer.userId, {
+        id: args.id,
+        startsAt: quand.ok!,
+        motif: args.motif,
+        isAdmin: viewer.isAdmin,
+      });
+      if (r.error) return fail(r.error);
+
+      const bits = [
+        `✅ Rendez-vous « ${r.title} » reporté au ${fmtDateTime(r.startsAtISO)}.`,
+      ];
+      if (r.conflit) {
+        bits.push(
+          `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`
         );
       }
       return text(bits.join(" "));

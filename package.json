@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:raccourcis": "node --experimental-strip-types lib/crm/raccourcis.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

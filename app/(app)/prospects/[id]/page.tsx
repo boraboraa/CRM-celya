@@ -54,7 +54,7 @@ export default async function ProspectDetailPage({
   // Les emails portent un corps HTML et un `raw` jsonb qui ne servent pas ici :
   // on ne demande que ce qui s'affiche. Les activités montent à 200 parce que
   // les faits d'étape se lisent sur la même moisson (voir plus bas).
-  const [prospectRes, membersRes, activitiesRes, emailsRes, tasksRes] =
+  const [prospectRes, membersRes, activitiesRes, emailsRes, tasksRes, meetingsRes] =
     await Promise.all([
       supabase.from("prospects").select("*").eq("id", id).maybeSingle(),
       supabase
@@ -82,6 +82,15 @@ export default async function ProspectDetailPage({
         .eq("prospect_id", id)
         .order("status")
         .order("due_at", { ascending: true }),
+      // Les rendez-vous de la fiche (agenda) — lus via meetings_visibles,
+      // comme toute lecture d'agenda. Ils portent le fait « rendez-vous »
+      // et la prochaine action.
+      supabase
+        .from("meetings_visibles")
+        .select("id, title, starts_at, ends_at, location, status")
+        .eq("prospect_id", id)
+        .order("starts_at", { ascending: true })
+        .limit(50),
     ]);
 
   const prospect = prospectRes.data as Prospect | null;
@@ -104,6 +113,14 @@ export default async function ProspectDetailPage({
   const allActivities = (activitiesRes.data ?? []) as unknown as ActivityRow[];
   const emails = (emailsRes.data ?? []) as Email[];
   const tasks = (tasksRes.data ?? []) as unknown as TaskWithProspect[];
+  const meetings = (meetingsRes.data ?? []) as unknown as {
+    id: string;
+    title: string;
+    starts_at: string;
+    ends_at: string;
+    location: string | null;
+    status: string;
+  }[];
   // Les tâches annulées ne sont pas affichées : TaskRow les rendrait comme
   // des relances actives en retard.
   const openTasks = tasks.filter((t) => t.status === "a_faire");
@@ -111,14 +128,14 @@ export default async function ProspectDetailPage({
 
   // L'étape confrontée aux faits — déduits des lignes DÉJÀ chargées ci-dessus.
   // C'est la même règle qu'avant (lib/crm/status.ts), simplement lue sans
-  // redemander activités, emails, relances et fiche à la base : quatre
+  // redemander activités, emails, rendez-vous et fiche à la base : quatre
   // allers-retours économisés à chaque ouverture de fiche.
   // Sur une fiche verrouillée, le verdict ne sert qu'à proposer, jamais à
   // écrire.
   const facts = factsFromRows({
     activities: allActivities,
     emails,
-    openTasks,
+    meetings,
     proposalSentAt: prospect.proposal_sent_at ?? null,
   });
   const verdict = evaluateStatus(status, Boolean(prospect.status_locked), facts);
@@ -168,14 +185,22 @@ export default async function ProspectDetailPage({
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
-  // « Prochaine action » — dérivée sans le moindre appel à un modèle.
+  // « Prochaine action » — dérivée sans le moindre appel à un modèle. Le
+  // prochain rendez-vous d'agenda (à venir, non annulé) passe devant la
+  // relance s'il arrive avant elle.
   const lastEvent: LastEvent = timeline[0]
     ? { kind: timeline[0].kind, at: timeline[0].at }
     : null;
+  const prochainRdv =
+    meetings.find(
+      (m) =>
+        m.status !== "annule" && new Date(m.starts_at).getTime() >= Date.now()
+    ) ?? null;
   const nextAction = deriveNextAction(
     openTasks as unknown as OpenTask[],
     lastEvent,
-    prospect.contact_name
+    prospect.contact_name,
+    prochainRdv
   );
 
   // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur

@@ -154,3 +154,25 @@ export function SqueletteEquipe() {
     </div>
   );
 }
+
+/** L'agenda — bandeau de commandes puis grille de la semaine. */
+export function SqueletteAgenda() {
+  return (
+    <div aria-busy="true" aria-label="Chargement de l'agenda">
+      <EnTete />
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <Bloc className="h-9 w-56 rounded-xl" />
+        <Bloc className="h-9 w-40 rounded-xl" />
+        <Bloc className="h-9 w-48 rounded-xl" />
+      </div>
+      <div className="card flex gap-px overflow-hidden p-0">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <span key={i} className="min-w-0 flex-1 p-2">
+            <Bloc className="h-6 w-full" />
+            <Bloc className="mt-2 h-[560px] w-full" />
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -62,7 +62,7 @@ export function NextActionCard({
     }
   );
 
-  const { task, context, when, overdue, isMeeting } = vue;
+  const { task, meeting, context, when, overdue, isMeeting } = vue;
 
   // Reporter en conservant l'heure (un RDV à 14:00 le reste).
   const dueTime = task ? isoToLocalInput(task.due_at).slice(11, 16) || "09:00" : "09:00";
@@ -123,7 +123,28 @@ export function NextActionCard({
         )}
       </p>
 
-      {task ? (
+      {meeting ? (
+        <>
+          {/* Un rendez-vous d'agenda : il se déplace ou se clôt depuis
+              l'agenda et la zone « À débriefer » — pas d'un « marquer fait »
+              qui le ferait disparaître sans compte rendu. */}
+          <p className="mt-2 font-display text-lg font-semibold leading-snug text-slate-50">
+            {meeting.title}
+          </p>
+          {when && (
+            <p className="mt-1.5 text-sm font-medium text-slate-200">
+              {when.charAt(0).toUpperCase()}
+              {when.slice(1)} ({relative(meeting.starts_at)}).
+            </p>
+          )}
+          {meeting.location && (
+            <p className="mt-1 text-sm text-slate-300">
+              <span aria-hidden>📍</span> {meeting.location}
+            </p>
+          )}
+          <p className="mt-1 text-sm leading-relaxed text-slate-400">{context}</p>
+        </>
+      ) : task ? (
         <>
           <p className="mt-2 font-display text-lg font-semibold leading-snug text-slate-50">
             {task.title}

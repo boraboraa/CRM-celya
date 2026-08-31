@@ -22,6 +22,13 @@ import {
 import { createProspectCore } from "@/lib/crm/prospects";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
+  poserRendezVous,
+  deplacerRendezVous,
+  cloturerRendezVous,
+  type MeetingConflit,
+} from "@/lib/crm/agenda";
+import { getSession } from "@/lib/auth";
+import {
   importProspectsCore,
   type ImportRow,
   type ImportResult,
@@ -322,6 +329,8 @@ export type SaveExchangeState = ActionState & {
   /** Étape avancée automatiquement par les faits, et son motif. */
   autoStatus?: ProspectStatus | null;
   autoReason?: string | null;
+  /** Rendez-vous posé qui chevauche un autre créneau — averti, jamais bloquant. */
+  conflit?: MeetingConflit | null;
 };
 
 export async function saveExchangeAction(
@@ -333,7 +342,13 @@ export async function saveExchangeAction(
   if (result.error) return { error: result.error };
 
   revalidateProspect(input.prospectId);
-  return { autoStatus: result.autoStatus, autoReason: result.autoReason };
+  // Un échange de type rendez-vous vient de créer un créneau dans l'agenda.
+  if (input.type === "rendez_vous") revalidatePath("/agenda");
+  return {
+    autoStatus: result.autoStatus,
+    autoReason: result.autoReason,
+    conflit: result.conflit ?? null,
+  };
 }
 
 // =====================================================================
@@ -428,8 +443,8 @@ export async function createTaskAction(fd: FormData): Promise<ActionState> {
   if (error) return { error: error.message };
 
   const prospectId = str(fd, "prospect_id");
-  // Une relance « RDV avec … » posée à la main est un fait : l'étape peut
-  // avancer vers « Rendez-vous ». applyAutoStatus respecte le verrou.
+  // Un fait a pu apparaître (le rendez-vous, lui, vit dans l'agenda) :
+  // applyAutoStatus confronte l'étape aux faits, et respecte le verrou.
   if (prospectId) {
     await applyAutoStatus(supabase, prospectId);
     await recalcConfidence(supabase, prospectId);
@@ -489,6 +504,91 @@ export async function deleteTaskAction(fd: FormData): Promise<ActionState> {
   const prospectId = str(fd, "prospect_id");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
   revalidatePath("/dashboard");
+  return {};
+}
+
+// =====================================================================
+// Agenda — les trois gestes du rendez-vous (lib/crm/agenda.ts)
+// =====================================================================
+
+export type RendezVousState = ActionState & {
+  /** Chevauchement détecté — averti, jamais bloquant. */
+  conflit?: MeetingConflit | null;
+};
+
+function revalidateAgenda(prospectId?: string | null) {
+  revalidatePath("/agenda");
+  revalidatePath("/dashboard");
+  if (prospectId) revalidatePath(`/prospects/${prospectId}`);
+}
+
+export async function poserRendezVousAction(input: {
+  prospectId?: string | null;
+  /** true : rendez-vous personnel, sans prospect. */
+  personnel?: boolean;
+  title?: string | null;
+  /** « YYYY-MM-DDTHH:mm » (Bruxelles) — l'heure est obligatoire. */
+  startsAt: string;
+  dureeMin?: number | null;
+  location?: string | null;
+  notes?: string | null;
+}): Promise<RendezVousState> {
+  const { supabase, userId } = await currentUserId();
+
+  const r = await poserRendezVous(supabase, userId, {
+    prospectId: input.personnel ? null : input.prospectId,
+    kind: input.personnel ? "perso" : "prospect",
+    title: input.title,
+    startsAt: input.startsAt,
+    dureeMin: input.dureeMin,
+    location: input.location,
+    notes: input.notes,
+  });
+  if (r.error) return { error: r.error };
+
+  revalidateAgenda(input.personnel ? null : input.prospectId);
+  return { conflit: r.conflit ?? null };
+}
+
+export async function deplacerRendezVousAction(input: {
+  id: string;
+  startsAt: string;
+  endsAt?: string | null;
+  motif?: string | null;
+}): Promise<RendezVousState> {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const supabase = await createClient();
+
+  // Le rôle est relu en base (getSession), jamais déclaré par le client. La
+  // RLS scope de toute façon la lecture ; ce drapeau ne fait qu'autoriser
+  // l'admin à déplacer un rendez-vous d'un membre depuis le mode équipe.
+  const r = await deplacerRendezVous(supabase, session.userId, {
+    ...input,
+    isAdmin: session.me?.role === "admin",
+  });
+  if (r.error) return { error: r.error };
+
+  revalidateAgenda(r.prospectId);
+  return { conflit: r.conflit ?? null };
+}
+
+export async function cloturerRendezVousAction(input: {
+  id: string;
+  resultat: "honore" | "annule";
+  compteRendu?: string | null;
+}): Promise<ActionState> {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const supabase = await createClient();
+
+  const r = await cloturerRendezVous(supabase, session.userId, {
+    ...input,
+    isAdmin: session.me?.role === "admin",
+  });
+  if (r.error) return { error: r.error };
+
+  revalidateAgenda(r.prospectId);
   return {};
 }
 

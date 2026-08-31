@@ -11,6 +11,7 @@ import { dateInputToISO } from "@/lib/time";
 import { STATUS_ORDER } from "@/lib/constants";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
+import { poserRendezVous, type MeetingConflit } from "@/lib/crm/agenda";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
 export type SaveExchangeInput = {
@@ -29,6 +30,10 @@ export type SaveExchangeInput = {
   motif?: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles). null : pas de relance. */
   dateLocale?: string | null;
+  /** Lieu du rendez-vous (type « rendez_vous » seulement) — porté par l'agenda. */
+  rdvLieu?: string | null;
+  /** Fin du rendez-vous « YYYY-MM-DDTHH:mm » — à défaut, début + 60 min. */
+  rdvFin?: string | null;
   /**
    * Cette note atteste-t-elle d'un échange réel avec le prospect ?
    * Défaut true (la saisie humaine passe par « Noter un échange ») ; le
@@ -63,6 +68,8 @@ export type SaveExchangeResult = {
   /** Étape avancée automatiquement par les faits, et son motif. */
   autoStatus?: ProspectStatus | null;
   autoReason?: string | null;
+  /** Rendez-vous posé qui chevauche un autre créneau — averti, jamais bloquant. */
+  conflit?: MeetingConflit | null;
 };
 
 export async function saveExchangeCore(
@@ -87,6 +94,29 @@ export async function saveExchangeCore(
 
   const dueAt = dateInputToISO(input.dateLocale ?? null);
   if (input.dateLocale && !dueAt) return { error: "Date invalide." };
+
+  // AUCUN rendez-vous sans date — le garde-fou vit à l'ÉCRITURE, pas
+  // seulement dans la proposition du modèle (analyzeNoteAction) : c'est par
+  // ici que passait l'humain pressé, et l'heure du rendez-vous se perdait.
+  // Un seul endroit : interface, connecteur MCP et tout futur appelant.
+  if ((newStatus === "rendez_vous" || input.type === "rendez_vous") && !dueAt) {
+    return {
+      error:
+        "Un rendez-vous demande une date ET une heure — sans elles il ne remontera nulle part.",
+    };
+  }
+  // Et l'heure ne se devine pas : un type « rendez_vous » avec une date sans
+  // heure serait complété à 09:00 en silence — refusé AVANT toute écriture.
+  if (
+    input.type === "rendez_vous" &&
+    dueAt &&
+    !/T\d{2}:\d{2}/.test((input.dateLocale ?? "").trim())
+  ) {
+    return {
+      error:
+        "Un rendez-vous a une heure précise — pas de rendez-vous « toute la journée ».",
+    };
+  }
 
   const isDraft = input.isDraft === true;
   // Un appel sans réponse n'est pas un échange — mais c'est un résultat.
@@ -160,6 +190,7 @@ export async function saveExchangeCore(
   const allOpen = openTasks ?? [];
 
   let scheduledTitle: string | null = null;
+  let conflit: MeetingConflit | null = null;
 
   if (newStatus === "perdu") {
     if (allOpen.length > 0) {
@@ -169,41 +200,54 @@ export async function saveExchangeCore(
         .in("id", allOpen.map((t) => t.id));
     }
   } else if (dueAt && !isDraft) {
-    // « RDV avec … » uniquement quand l'échange enregistré EST un rendez-vous
-    // (le titre commande la protection côté email : une tâche « RDV » n'est
-    // jamais annulée ni re-datée par une réponse). Une simple relance ne
-    // touche pas aux tâches RDV existantes.
-    const planningRdv = input.type === "rendez_vous";
-    const title = planningRdv
-      ? `RDV avec ${prospect.company_name}`
-      : `Relancer ${prospect.company_name}`;
-    const reusable = planningRdv
-      ? allOpen
-      : allOpen.filter((t) => !t.title.startsWith("RDV"));
-    const reusableIds = reusable.map((t) => t.id);
+    if (input.type === "rendez_vous") {
+      // Le rendez-vous vit dans l'AGENDA (meetings), plus dans une tâche
+      // « RDV avec … » : le créneau porte début, fin et lieu, et c'est lui
+      // que lisent les faits d'étape. Le journal est déjà tenu ci-dessus
+      // quand la note existe ; l'étape et la confiance suivent en 4 et 5.
+      const rdv = await poserRendezVous(supabase, userId, {
+        prospectId: prospect.id,
+        kind: "prospect",
+        startsAt: (input.dateLocale ?? "").trim().slice(0, 16),
+        endsAt: input.rdvFin,
+        location: input.rdvLieu,
+        ecrireActivite: !(note || resume),
+        avancerEtape: false,
+      });
+      if (rdv.error) return { error: rdv.error };
+      scheduledTitle = rdv.title ?? `RDV avec ${prospect.company_name}`;
+      conflit = rdv.conflit ?? null;
+    } else {
+      // Une simple relance — jamais de doublon : la tâche ouverte est
+      // re-datée, les surnuméraires annulées. Le filtre « RDV » ne protège
+      // plus que d'éventuelles tâches héritées d'avant l'agenda.
+      const title = `Relancer ${prospect.company_name}`;
+      const reusable = allOpen.filter((t) => !t.title.startsWith("RDV"));
+      const reusableIds = reusable.map((t) => t.id);
 
-    if (reusableIds.length > 0) {
-      await supabase
-        .from("tasks")
-        .update({ title, due_at: dueAt, assignee_id: userId })
-        .eq("id", reusableIds[0]);
-      if (reusableIds.length > 1) {
+      if (reusableIds.length > 0) {
         await supabase
           .from("tasks")
-          .update({ status: "annule" })
-          .in("id", reusableIds.slice(1));
+          .update({ title, due_at: dueAt, assignee_id: userId })
+          .eq("id", reusableIds[0]);
+        if (reusableIds.length > 1) {
+          await supabase
+            .from("tasks")
+            .update({ status: "annule" })
+            .in("id", reusableIds.slice(1));
+        }
+      } else {
+        await supabase.from("tasks").insert({
+          prospect_id: prospect.id,
+          title,
+          due_at: dueAt,
+          priority: 2,
+          assignee_id: userId,
+          created_by: userId,
+        });
       }
-    } else {
-      await supabase.from("tasks").insert({
-        prospect_id: prospect.id,
-        title,
-        due_at: dueAt,
-        priority: 2,
-        assignee_id: userId,
-        created_by: userId,
-      });
+      scheduledTitle = title;
     }
-    scheduledTitle = title;
   }
 
   // 4. L'étape suit les faits — sauf si Bora vient de la fixer lui-même
@@ -229,5 +273,6 @@ export async function saveExchangeCore(
     taskTitle: scheduledTitle,
     autoStatus: auto.changed ? (auto.status ?? null) : null,
     autoReason: auto.changed ? (auto.reason ?? null) : null,
+    conflit,
   };
 }

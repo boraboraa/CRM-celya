@@ -77,7 +77,8 @@ async function gatherSignals(
   supabase: SupabaseClient,
   prospectId: string
 ): Promise<{ text: string; events: number; locked: boolean } | null> {
-  const [prospectRes, activitiesRes, emailsRes, tasksRes] = await Promise.all([
+  const [prospectRes, activitiesRes, emailsRes, tasksRes, meetingsRes] =
+    await Promise.all([
     supabase
       .from("prospects")
       .select(
@@ -105,6 +106,16 @@ async function gatherSignals(
       .eq("status", "a_faire")
       .order("due_at", { ascending: true })
       .limit(5),
+    // Le « RDV posé » vit dans l'agenda depuis le 31 août — plus dans une
+    // tâche « RDV avec … ».
+    supabase
+      .from("meetings_visibles")
+      .select("title, starts_at, status")
+      .eq("prospect_id", prospectId)
+      .neq("status", "annule")
+      .gte("starts_at", new Date().toISOString())
+      .order("starts_at", { ascending: true })
+      .limit(1),
   ]);
 
   const prospect = prospectRes.data as {
@@ -162,7 +173,7 @@ async function gatherSignals(
 
   const silence = daysSince(prospect.last_contact_at);
   const openTasks = (tasksRes.data ?? []) as { title: string; due_at: string }[];
-  const meeting = openTasks.find((t) => t.title.startsWith("RDV"));
+  const meeting = ((meetingsRes.data ?? []) as { title: string; starts_at: string }[])[0];
 
   const lines: string[] = [
     `Étape du pipeline : ${STATUS_LABEL[normalizeStatus(prospect.status)]}`,
@@ -170,7 +181,7 @@ async function gatherSignals(
       ? "Dernier contact : jamais"
       : `Dernier contact : il y a ${silence} jour${silence > 1 ? "s" : ""}`,
     meeting
-      ? `Rendez-vous prévu : ${fmtDate(meeting.due_at)} (${meeting.title})`
+      ? `Rendez-vous prévu : ${fmtDate(meeting.starts_at)} (${meeting.title})`
       : "Rendez-vous prévu : aucun",
     prospect.proposal_sent_at
       ? `Proposition envoyée le ${fmtDate(prospect.proposal_sent_at)}`

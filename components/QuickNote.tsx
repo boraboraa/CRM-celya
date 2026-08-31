@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { saveExchangeAction } from "@/app/actions";
 import { analyzeNoteAction } from "@/app/ai-actions";
 import { ACTIVITY_LABEL, STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
 import { DateField } from "@/components/DateField";
+import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { TimelineEntry } from "@/components/Timeline";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
@@ -85,9 +86,108 @@ export function QuickNote({
   const [pending, startTransition] = useTransition();
   const [analyzing, startAnalyze] = useTransition();
 
-  // C'est le TYPE d'échange qui fait le rendez-vous, pas l'étape choisie :
-  // un rendez-vous se note avec sa date et son heure.
-  const withTime = type === "rendez_vous";
+  // ---- Les raccourcis — un parseur DÉTERMINISTE tourne à la frappe (150 ms
+  // de debounce, AUCUN appel réseau) et affiche en pastilles ce qui SERA
+  // enregistré. Chaque pastille se retire d'un clic : c'est la façon de dire
+  // « non ». Le texte de la note, lui, part au journal TEL QUEL.
+  const [raccourcis, setRaccourcis] = useState<Raccourci | null>(null);
+  /** Pastilles refusées d'un clic sur leur croix (par rôle). */
+  const [masques, setMasques] = useState<Set<string>>(new Set());
+  /** Jour/heure complétés d'un clic quand la note n'en donne qu'une moitié. */
+  const [complement, setComplement] = useState<{ jour?: string; heure?: string }>({});
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setRaccourcis(note.trim() ? lireRaccourcis(note, new Date()) : null);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [note]);
+
+  const masquer = (role: string) =>
+    setMasques((s) => {
+      const suivant = new Set(s);
+      suivant.add(role);
+      return suivant;
+    });
+
+  // Ce que les pastilles enregistreront — le complément (jour ou heure choisi
+  // en un clic) se fond dans ce qui a été lu : ZÉRO ressaisie.
+  const rdvBrut = raccourcis?.rdv && !masques.has("rdv") ? raccourcis.rdv : null;
+  let rdvJour: string | null = null;
+  let rdvHeure: string | null = null;
+  let rdvFinHM: string | null = null;
+  if (rdvBrut) {
+    if (!rdvBrut.manque) {
+      rdvJour = rdvBrut.debut.slice(0, 10);
+      rdvHeure = rdvBrut.debut.slice(11, 16);
+      rdvFinHM = rdvBrut.fin ? rdvBrut.fin.slice(11, 16) : null;
+    } else if (rdvBrut.manque === "jour") {
+      rdvHeure = rdvBrut.debut || null;
+      rdvJour = complement.jour ?? null;
+      rdvFinHM = rdvBrut.fin ?? null;
+      if (!rdvHeure && complement.heure) rdvHeure = complement.heure;
+    } else {
+      rdvJour = rdvBrut.debut;
+      rdvHeure = complement.heure ?? null;
+    }
+  }
+  const rdvComplet = Boolean(rdvBrut && rdvJour && rdvHeure);
+  const rdvIncomplet = Boolean(rdvBrut) && !rdvComplet;
+  const rdvLieu = rdvBrut && !masques.has("lieu") ? (rdvBrut.lieu ?? null) : null;
+  const relancePastille =
+    raccourcis?.relance && !masques.has("relance") ? raccourcis.relance : null;
+  const sansRepPastille =
+    Boolean(raccourcis?.sansReponse) && !masques.has("sans_reponse");
+  const propositionPastille =
+    Boolean(raccourcis?.propositionEnvoyee) && !masques.has("proposition");
+  const contactPastille =
+    raccourcis?.contact && !masques.has("contact") ? raccourcis.contact : null;
+  const perduSuggestion =
+    raccourcis?.suggestionPerdu && !masques.has("perdu")
+      ? raccourcis.suggestionPerdu
+      : null;
+  const pastillesActives = Boolean(
+    rdvBrut || relancePastille || sansRepPastille || propositionPastille || contactPastille
+  );
+
+  /** Les 14 prochains jours — pour compléter « Quel jour ? » d'un clic. */
+  const prochainsJours = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat("fr-BE", { weekday: "short", day: "numeric" });
+    return Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate()
+      ).padStart(2, "0")}`;
+      return { date, label: i === 0 ? "auj." : i === 1 ? "dem." : fmt.format(d) };
+    });
+  }, []);
+
+  /** Créneaux à la demi-heure, 8h → 19h — pour « Quelle heure ? ». */
+  const creneaux = useMemo(() => {
+    const liste: string[] = [];
+    for (let m = 8 * 60; m <= 19 * 60; m += 30) {
+      liste.push(
+        `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`
+      );
+    }
+    return liste;
+  }, []);
+
+  const fmtJourCourt = (jourISO: string) =>
+    new Intl.DateTimeFormat("fr-BE", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(new Date(`${jourISO}T12:00:00`));
+
+  // Un rendez-vous se note avec sa date ET son heure — que le rendez-vous
+  // vienne du type d'échange ou de l'étape forcée au menu déroulant. C'est ce
+  // second chemin (étape « Rendez-vous » choisie, champ date jamais touché)
+  // qui laissait passer des rendez-vous sans date : le serveur les refuse
+  // désormais (saveExchangeCore), et le bouton n'y envoie plus personne.
+  const withTime = type === "rendez_vous" || statut === "rendez_vous";
+  const rdvSansDate = withTime && dateLocale.length < 16;
 
   /** Garde la valeur du champ cohérente quand on passe date ↔ date+heure. */
   function coerceDate(value: string, needsTime: boolean): string {
@@ -99,7 +199,12 @@ export function QuickNote({
 
   function pickType(t: ActivityType) {
     setType(t);
-    setDateLocale((v) => coerceDate(v, t === "rendez_vous"));
+    setDateLocale((v) => coerceDate(v, t === "rendez_vous" || statut === "rendez_vous"));
+  }
+
+  function pickStatut(s: ProspectStatus | "") {
+    setStatut(s);
+    setDateLocale((v) => coerceDate(v, type === "rendez_vous" || s === "rendez_vous"));
   }
 
   function reset() {
@@ -115,6 +220,9 @@ export function QuickNote({
     setSuggestion(undefined);
     setAiNote(undefined);
     setError(undefined);
+    setRaccourcis(null);
+    setMasques(new Set());
+    setComplement({});
   }
 
   /** Propose date, contact, résumé — et SUGGÈRE l'étape, sans l'appliquer. */
@@ -152,30 +260,41 @@ export function QuickNote({
    * `saveExchangeCore` : la nature de la note décide du type d'événement, et
    * un appel sans réponse se trace même sans texte.
    */
+  // Les pastilles pilotent l'appel : un rdv complet devient un vrai
+  // rendez-vous d'agenda (type rendez_vous + date+heure+lieu), une relance
+  // devient la prochaine action, « pas de réponse » devient le résultat.
+  // Un champ rempli À LA MAIN (date, contact) garde la priorité.
+  const typeEffectif: ActivityType = rdvComplet ? "rendez_vous" : type;
+  const dateEffective = rdvComplet
+    ? `${rdvJour}T${rdvHeure}`
+    : dateLocale || relancePastille?.date || null;
+  const sansReponseEffectif =
+    typeEffectif === "note" && (nature === "sans_reponse" || sansRepPastille);
+
   function entreeProvisoire(): TimelineEntry | null {
     const texte = note.trim() || null;
     const resumeNet = resume.trim() || null;
-    const sansReponse = type === "note" && nature === "sans_reponse";
     // Le serveur n'écrit au journal que dans ces cas-là : on n'annonce rien
     // qu'il n'écrira pas.
-    if (!texte && !resumeNet && !sansReponse) return null;
+    if (!texte && !resumeNet && !sansReponseEffectif) return null;
 
     return {
       key: `provisoire-${Date.now()}`,
       id: "",
       source: "activity",
       kind:
-        type === "rendez_vous"
+        typeEffectif === "rendez_vous"
           ? "rendez_vous"
-          : type === "email"
+          : typeEffectif === "email"
             ? "email_sortant"
-            : sansReponse
+            : sansReponseEffectif
               ? "appel_sans_reponse"
               : nature === "reperage"
                 ? "note_interne"
                 : "note",
       at: new Date().toISOString(),
-      title: resumeNet ?? (sansReponse && !texte ? "Appel sans réponse" : null),
+      title:
+        resumeNet ?? (sansReponseEffectif && !texte ? "Appel sans réponse" : null),
       body: texte,
       by: null,
       pending: true,
@@ -190,19 +309,24 @@ export function QuickNote({
       if (provisoire) onOptimistic?.(provisoire);
       const res = await saveExchangeAction({
         prospectId,
-        type,
+        type: typeEffectif,
         note: note || null,
         resume: resume || null,
-        contactName: applyContact && contactProposal ? contactProposal : null,
+        contactName:
+          applyContact && contactProposal
+            ? contactProposal
+            : (contactPastille ?? null),
         statut: statut === "" ? null : statut,
         motif: motif || null,
-        dateLocale: dateLocale || null,
+        dateLocale: dateEffective,
+        rdvLieu: rdvComplet ? rdvLieu : null,
+        rdvFin: rdvComplet && rdvFinHM ? `${rdvJour}T${rdvFinHM}` : null,
         // Un email ou un rendez-vous sont des faits par construction ; une
         // note ne l'est que si Bora l'atteste. Un appel sans réponse est un
         // résultat, pas un échange — tracé même sans texte.
-        isExchange: type === "note" ? nature === "echange" : true,
-        noAnswer: type === "note" && nature === "sans_reponse",
-        proposalSent,
+        isExchange: typeEffectif === "note" ? nature === "echange" : true,
+        noAnswer: sansReponseEffectif,
+        proposalSent: proposalSent || propositionPastille,
       });
       if (res.error) {
         setError(res.error);
@@ -210,9 +334,16 @@ export function QuickNote({
       }
       reset();
       setFeedback(
-        res.autoStatus
-          ? `Enregistré. Étape → « ${STATUS_LABEL[res.autoStatus]} » — ${res.autoReason}.`
-          : "Enregistré."
+        [
+          res.autoStatus
+            ? `Enregistré. Étape → « ${STATUS_LABEL[res.autoStatus]} » — ${res.autoReason}.`
+            : "Enregistré.",
+          res.conflit
+            ? `⚠ Ce créneau chevauche « ${res.conflit.title} » — voir l'agenda.`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
       );
     });
   }
@@ -247,24 +378,130 @@ export function QuickNote({
         )}
       </div>
 
-      {/* Note + assistant */}
+      {/* Note + raccourcis + assistant */}
       <div>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
           className="input resize-y"
-          placeholder="Ce qu'il faut retenir de l'échange… ex. « revoir ça après les fêtes, le gérant c'est Marc »"
+          placeholder="Ce qu'il faut retenir de l'échange… ex. « rdv mardi 11h eghezée chaussée de namur 393 »"
         />
+
+        {/* ---- Les pastilles : ce qui SERA enregistré, lu à la frappe, sans
+             réseau. La croix d'une pastille = « non ». Le texte de la note,
+             lui, part au journal tel quel — jamais réécrit. ---- */}
+        {(pastillesActives || perduSuggestion) && (
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {rdvBrut && rdvComplet && (
+                <Pastille tone="bleu" onRetirer={() => masquer("rdv")}>
+                  📅 RDV {fmtJourCourt(rdvJour!)} {rdvHeure}
+                  {rdvFinHM ? `–${rdvFinHM}` : ""}
+                </Pastille>
+              )}
+              {rdvBrut && !rdvComplet && !rdvJour && (
+                <Pastille tone="ambre" onRetirer={() => masquer("rdv")}>
+                  📅 RDV {rdvHeure ?? ""} — Quel jour ?
+                </Pastille>
+              )}
+              {rdvBrut && !rdvComplet && rdvJour && (
+                <Pastille tone="ambre" onRetirer={() => masquer("rdv")}>
+                  📅 RDV {fmtJourCourt(rdvJour)} — Quelle heure ?
+                </Pastille>
+              )}
+              {rdvBrut && rdvLieu && (
+                <Pastille onRetirer={() => masquer("lieu")}>📍 {rdvLieu}</Pastille>
+              )}
+              {relancePastille && (
+                <Pastille onRetirer={() => masquer("relance")}>
+                  📆 Relance {fmtJourCourt(relancePastille.date)}
+                </Pastille>
+              )}
+              {sansRepPastille && (
+                <Pastille onRetirer={() => masquer("sans_reponse")}>
+                  📞 Appelé, pas de réponse
+                </Pastille>
+              )}
+              {propositionPastille && (
+                <Pastille onRetirer={() => masquer("proposition")}>
+                  ✉ Proposition envoyée
+                </Pastille>
+              )}
+              {contactPastille && (
+                <Pastille onRetirer={() => masquer("contact")}>
+                  👤 {contactPastille}
+                </Pastille>
+              )}
+              {perduSuggestion && statut !== "perdu" && (
+                <Pastille tone="ambre" onRetirer={() => masquer("perdu")}>
+                  Perdu ?
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // « Perdu » ne s'applique JAMAIS tout seul : ce clic
+                      // est la décision humaine.
+                      pickStatut("perdu");
+                      if (perduSuggestion.motif && !motif) {
+                        setMotif(perduSuggestion.motif);
+                      }
+                    }}
+                    className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-semibold hover:bg-white/[0.15]"
+                  >
+                    Confirmer
+                  </button>
+                </Pastille>
+              )}
+            </div>
+
+            {/* « Quel jour ? » — un clic complète, L'HEURE DÉJÀ LUE RESTE. */}
+            {rdvBrut && !rdvComplet && !rdvJour && (
+              <div className="flex flex-wrap gap-1">
+                {prochainsJours.map((j) => (
+                  <button
+                    key={j.date}
+                    type="button"
+                    onClick={() => setComplement((c) => ({ ...c, jour: j.date }))}
+                    className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200 ring-1 ring-amber-400/25 transition hover:bg-amber-500/20"
+                  >
+                    {j.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* « Quelle heure ? » — même mécanique, à la demi-heure. */}
+            {rdvBrut && !rdvComplet && rdvJour && (
+              <div className="flex flex-wrap gap-1">
+                {creneaux.map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setComplement((c) => ({ ...c, heure: h }))}
+                    className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200 ring-1 ring-amber-400/25 transition hover:bg-amber-500/20"
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          {/* Le modèle ne sert plus qu'au RATTRAPAGE : quand des pastilles
+              sont là, le déterministe a déjà fait le travail. */}
           <button
             type="button"
             onClick={analyze}
-            disabled={analyzing || !note.trim()}
-            title="Structurer la note avec l'assistant : date de relance, contact, résumé"
-            className="btn-ghost px-3 py-1.5 text-xs"
+            disabled={analyzing || !note.trim() || pastillesActives}
+            title={
+              pastillesActives
+                ? "Les raccourcis de la note sont déjà lus — les pastilles ci-dessus disent ce qui sera enregistré."
+                : "Structurer un texte libre avec l'assistant : date de relance, contact, résumé"
+            }
+            className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
           >
-            {analyzing ? "Analyse…" : "✨ Analyser"}
+            {analyzing ? "Analyse…" : "✨ Analyser le texte"}
           </button>
           {aiNote && <span className="text-[11px] text-slate-500">{aiNote}</span>}
         </div>
@@ -377,7 +614,7 @@ export function QuickNote({
           <select
             id="exchange-statut"
             value={statut}
-            onChange={(e) => setStatut(e.target.value as ProspectStatus | "")}
+            onChange={(e) => pickStatut(e.target.value as ProspectStatus | "")}
             className="input"
           >
             <option value="">Ne pas changer (suit les faits)</option>
@@ -417,12 +654,16 @@ export function QuickNote({
             onChange={setDateLocale}
             compact
           />
-          {withTime && (
+          {rdvSansDate ? (
+            <p className="mt-1.5 text-[11px] text-amber-300/90">
+              Choisissez la date et l&apos;heure du rendez-vous.
+            </p>
+          ) : withTime ? (
             <p className="mt-1.5 text-[11px] text-slate-500">
               Une date réelle fait passer {contactName ?? companyName} en
               « Rendez-vous ».
             </p>
-          )}
+          ) : null}
           {!dateLocale && !withTime && statut !== "perdu" && (
             <p className="mt-1.5 text-[11px] text-slate-500">
               Sans date, {companyName} ne remontera pas dans « À faire ».
@@ -435,16 +676,64 @@ export function QuickNote({
         <button
           type="button"
           onClick={save}
-          disabled={pending || (withTime && dateLocale.length > 0 && dateLocale.length < 16)}
+          disabled={pending || rdvSansDate || rdvIncomplet}
           className="btn-primary"
         >
           {pending ? "Enregistrement…" : "Enregistrer"}
         </button>
+        {rdvIncomplet && (
+          <span className="text-xs text-amber-300/90">
+            Le rendez-vous détecté est incomplet : choisissez{" "}
+            {rdvJour ? "l'heure" : "le jour"} ci-dessus, ou retirez la pastille.
+          </span>
+        )}
+        {rdvComplet && dateLocale && (
+          <span className="text-xs text-slate-500">
+            Le rendez-vous détecté dans la note prime sur le champ de date —
+            retirez la pastille pour utiliser le champ.
+          </span>
+        )}
         {feedback && !error && (
           <span className="text-xs text-emerald-300">{feedback}</span>
         )}
         {error && <span className="text-xs text-rose-300">{error}</span>}
       </div>
     </div>
+  );
+}
+
+/** Une pastille de raccourci : ce qui sera enregistré, retirable d'un clic. */
+function Pastille({
+  children,
+  tone = "neutre",
+  onRetirer,
+}: {
+  children: React.ReactNode;
+  tone?: "neutre" | "bleu" | "ambre";
+  onRetirer?: () => void;
+}) {
+  const classes =
+    tone === "ambre"
+      ? "bg-amber-500/15 text-amber-300 ring-amber-400/30"
+      : tone === "bleu"
+        ? "bg-celya-blue/15 text-blue-300 ring-blue-400/30"
+        : "bg-white/[0.06] text-slate-200 ring-white/15";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium ring-1 ${classes}`}
+    >
+      {children}
+      {onRetirer && (
+        <button
+          type="button"
+          onClick={onRetirer}
+          aria-label="Retirer cette pastille"
+          title="Ne pas enregistrer cet élément"
+          className="opacity-60 transition hover:opacity-100"
+        >
+          ✕
+        </button>
+      )}
+    </span>
   );
 }

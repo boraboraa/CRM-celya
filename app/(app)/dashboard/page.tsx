@@ -8,6 +8,7 @@ import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
 import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
+import { DebriefList, type DebriefMeeting } from "@/components/DebriefList";
 import { fmtDate, relative } from "@/lib/constants";
 import {
   LAST_ACTION_SELECT,
@@ -33,6 +34,27 @@ type WaitingProspect = {
   /** Date du dernier mail envoyé. */
   sent_at: string | null;
 };
+
+/** Une ligne de l'agenda lue via meetings_visibles. */
+type MeetingRow = {
+  id: string;
+  owner_id: string;
+  prospect_id: string | null;
+  kind: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  location: string | null;
+  status: string;
+};
+
+/** Heure de Bruxelles, « 11:00 ». */
+const heure = (iso: string) =>
+  new Date(iso).toLocaleTimeString("fr-BE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
 
 /**
  * À faire — trois états, jamais mélangés :
@@ -76,8 +98,16 @@ export default async function TodoPage({
   // Le périmètre s'applique aux CINQ : en oublier une remettrait du bruit
   // dans sa zone. La vue prospect_action_state, qui ne porte pas owner_id,
   // est restreinte en mémoire juste en dessous.
-  const [overdueRes, todayRes, repliesRes, waitingRes, openProspectsRes, membresRes] =
-    await Promise.all([
+  const [
+    overdueRes,
+    todayRes,
+    repliesRes,
+    waitingRes,
+    openProspectsRes,
+    membresRes,
+    meetingsTodayRes,
+    debriefRes,
+  ] = await Promise.all([
     // En retard — les plus anciennes d'abord.
     filtrerTaches(
       supabase
@@ -149,6 +179,40 @@ export default async function TodoPage({
           .eq("is_active", true)
           .order("full_name")
       : Promise.resolve({ data: [] }),
+
+    // L'agenda du jour — en tête d'écran, avant les relances. Le filtre de
+    // périmètre porte sur owner_id, la même colonne que pour les fiches.
+    filtrerProspects(
+      supabase
+        .from("meetings_visibles")
+        .select(
+          "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status"
+        )
+        .gte("starts_at", start)
+        .lte("starts_at", end)
+        .neq("status", "annule"),
+      perimetre,
+      viewer
+    )
+      .order("starts_at", { ascending: true })
+      .limit(30),
+
+    // Rendez-vous passés jamais débriefés — la boucle qui manquait : rien ne
+    // demandait jamais ce qu'un rendez-vous avait donné.
+    filtrerProspects(
+      supabase
+        .from("meetings_visibles")
+        .select(
+          "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status"
+        )
+        .lt("ends_at", new Date().toISOString())
+        .in("status", ["prevu", "confirme"])
+        .is("debriefed_at", null),
+      perimetre,
+      viewer
+    )
+      .order("ends_at", { ascending: false })
+      .limit(20),
   ]);
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
@@ -172,13 +236,58 @@ export default async function TodoPage({
   );
   const waitingMap = mapLastActions(waitingRows);
 
+  // ---- L'agenda : les rendez-vous du jour et ceux à débriefer. Les infos
+  // de fiche (contact, téléphone, lieu de la carte) viennent d'une requête
+  // groupée — c'est ce qui rend l'agenda utile depuis un téléphone.
+  const meetingsToday = (meetingsTodayRes.data ?? []) as unknown as MeetingRow[];
+  const aDebriefer = (debriefRes.data ?? []) as unknown as MeetingRow[];
+  const meetingProspectIds = [
+    ...new Set(
+      [...meetingsToday, ...aDebriefer]
+        .map((m) => m.prospect_id)
+        .filter(Boolean) as string[]
+    ),
+  ];
+  const meetingProspects = new Map<
+    string,
+    { id: string; company_name: string; contact_name: string | null; phone: string | null }
+  >();
+  if (meetingProspectIds.length > 0) {
+    const { data } = await supabase
+      .from("prospects")
+      .select("id, company_name, contact_name, phone")
+      .in("id", meetingProspectIds);
+    for (const p of (data ?? []) as {
+      id: string;
+      company_name: string;
+      contact_name: string | null;
+      phone: string | null;
+    }[]) {
+      meetingProspects.set(p.id, p);
+    }
+  }
+  const debriefMeetings: DebriefMeeting[] = aDebriefer.map((m) => ({
+    id: m.id,
+    title: m.title,
+    starts_at: m.starts_at,
+    ends_at: m.ends_at,
+    prospect: m.prospect_id
+      ? {
+          id: m.prospect_id,
+          company_name:
+            meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
+        }
+      : null,
+  }));
+
   // Une fiche qui a répondu vit en zone 3 — ses relances n'encombrent pas la
-  // zone 1 (seuls les « RDV … » restent : un rendez-vous s'honore).
+  // zone 1 le temps du tri. (Les rendez-vous ne passent plus par des tâches
+  // « RDV … » : ils vivent dans l'agenda, zone « Aujourd'hui ».)
   const replyIds = new Set(
     replies.map((e) => e.prospects?.id).filter(Boolean) as string[]
   );
   const inZone1 = (t: TaskWithProspect) =>
-    !t.prospect_id || t.title.startsWith("RDV") || !replyIds.has(t.prospect_id);
+    !t.prospect_id || !replyIds.has(t.prospect_id);
   const overdue = overdueAll.filter(inZone1);
   const today = todayAll.filter(inZone1);
 
@@ -217,7 +326,13 @@ export default async function TodoPage({
 
   const firstName = session?.me?.full_name?.split(" ")[0];
   const nothingAtAll =
-    overdue.length + today.length + waiting.length + replies.length === 0;
+    overdue.length +
+      today.length +
+      waiting.length +
+      replies.length +
+      meetingsToday.length +
+      debriefMeetings.length ===
+    0;
 
   return (
     <>
@@ -243,6 +358,74 @@ export default async function TodoPage({
             searchParams={params}
           />
         </div>
+      )}
+
+      {/* ---------- 0. Aujourd'hui — l'agenda du jour, avant les relances ---------- */}
+      {meetingsToday.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Aujourd&apos;hui
+            <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] text-blue-300">
+              {meetingsToday.length}
+            </span>
+            <span className="ml-auto text-[11px] font-normal normal-case tracking-normal">
+              <Link
+                href="/agenda"
+                className="text-slate-500 hover:text-slate-300"
+              >
+                Voir l&apos;agenda
+              </Link>
+            </span>
+          </h2>
+          <ul className="card animate-rise divide-y divide-white/[0.05]">
+            {meetingsToday.map((m) => {
+              const p = m.prospect_id
+                ? meetingProspects.get(m.prospect_id)
+                : undefined;
+              return (
+                <li
+                  key={m.id}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
+                >
+                  <span className="w-24 shrink-0 text-sm font-semibold tabular-nums text-blue-300">
+                    {heure(m.starts_at)}–{heure(m.ends_at)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-100">
+                      {p ? (
+                        <Link
+                          href={`/prospects/${p.id}`}
+                          prefetch={false}
+                          className="underline-offset-2 hover:text-celya-cyan hover:underline"
+                        >
+                          {m.title}
+                        </Link>
+                      ) : (
+                        m.title
+                      )}
+                    </p>
+                    <p className="flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
+                      {p?.contact_name && <span>{p.contact_name}</span>}
+                      {p?.phone && (
+                        <a
+                          href={`tel:${p.phone.replace(/\s/g, "")}`}
+                          className="text-celya-cyan hover:underline"
+                        >
+                          {p.phone}
+                        </a>
+                      )}
+                      {m.location && (
+                        <span>
+                          <span aria-hidden>📍</span> {m.location}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {nothingAtAll ? (
@@ -367,6 +550,21 @@ export default async function TodoPage({
           </ul>
         )}
       </section>
+
+      {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
+          Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
+          du produit, ne pas en ajouter d'autre. ---------- */}
+      {debriefMeetings.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Rendez-vous à débriefer
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+              {debriefMeetings.length}
+            </span>
+          </h2>
+          <DebriefList meetings={debriefMeetings} />
+        </section>
+      )}
     </>
   );
 }

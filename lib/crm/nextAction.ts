@@ -29,15 +29,26 @@ export type OpenTask = {
   prospect_id: string | null;
 };
 
+/** Le prochain rendez-vous de l'agenda (meetings), s'il y en a un. */
+export type NextMeeting = {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  location: string | null;
+};
+
 export type NextAction = {
   /** La relance ouverte la plus proche — ce qu'il y a concrètement à faire. */
   task: OpenTask | null;
+  /** Le rendez-vous d'agenda affiché à la place d'une relance, le cas échéant. */
+  meeting: NextMeeting | null;
   /** Où on en est : « En attente de réponse de Sébastien ». */
   context: string;
   /** Quand : « relance prévue le 11 août » / « rendez-vous le 11 août à 14:00 ». */
   when: string | null;
   overdue: boolean;
-  /** Une tâche « RDV avec … » : un rendez-vous, pas une simple relance. */
+  /** La prochaine action est un rendez-vous, pas une simple relance. */
   isMeeting: boolean;
 };
 
@@ -83,30 +94,53 @@ function describeContext(last: LastEvent, contact: string | null): string {
 
 /**
  * Assemble le bloc « Prochaine action ». `openTasks` doit être trié par
- * échéance croissante : la plus proche commande.
+ * échéance croissante : la plus proche commande. `meeting` est le prochain
+ * rendez-vous d'agenda (à venir, non annulé) : s'il précède la relance — ou
+ * qu'aucune relance n'est posée — c'est LUI la prochaine action.
  */
 export function deriveNextAction(
   openTasks: OpenTask[],
   lastEvent: LastEvent,
-  contactName: string | null
+  contactName: string | null,
+  meeting: NextMeeting | null = null
 ): NextAction {
   const task = openTasks[0] ?? null;
   const context = describeContext(lastEvent, contactName);
 
-  if (!task) {
-    return { task: null, context, when: null, overdue: false, isMeeting: false };
+  if (
+    meeting &&
+    (!task ||
+      new Date(meeting.starts_at).getTime() < new Date(task.due_at).getTime())
+  ) {
+    return {
+      task: null,
+      meeting,
+      context,
+      when: `rendez-vous le ${fmtDateTime(meeting.starts_at)}`,
+      overdue: false,
+      isMeeting: true,
+    };
   }
 
-  const isMeeting = task.title.startsWith("RDV");
+  if (!task) {
+    return {
+      task: null,
+      meeting: null,
+      context,
+      when: null,
+      overdue: false,
+      isMeeting: false,
+    };
+  }
+
   const overdue = new Date(task.due_at).getTime() < Date.now();
 
   return {
     task,
+    meeting: null,
     context,
-    when: isMeeting
-      ? `rendez-vous le ${fmtDateTime(task.due_at)}`
-      : `relance prévue le ${fmtDate(task.due_at)}`,
+    when: `relance prévue le ${fmtDate(task.due_at)}`,
     overdue,
-    isMeeting,
+    isMeeting: false,
   };
 }

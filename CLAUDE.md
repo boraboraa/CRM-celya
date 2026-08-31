@@ -200,6 +200,7 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 | `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `owner_id`, `next_action_at`, `last_contact_at` |
 | `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` (colonne de 001, réactivée le 7 août : `'sans_reponse'` = « Appelé, pas de réponse » — un résultat, pas un échange) |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
+| `meetings` | l'AGENDA (migration `017`, 31 août) : rendez-vous avec début ET fin, `kind` (`prospect`/`perso`), `location`, `status` (`prevu`/`confirme`/`honore`/`annule`/`reporte`), `debriefed_at`, `owner_id`. RLS : chacun les siens, l'admin tout. **Toute lecture passe par la vue `meetings_visibles`** (un RDV perso d'un autre membre = « Occupé », sans lieu ni notes — Rémi est indépendant, lire ses RDV privés serait un élément de requalification) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
 | `mcp_oauth_clients` / `mcp_oauth_codes` / `mcp_oauth_tokens` | état du serveur OAuth du connecteur MCP (migration `008`) — **RLS fermée sans policy** comme `email_accounts`, seul le `service_role` y accède. Ne pas « corriger » l'absence de policy. |
@@ -308,6 +309,42 @@ champ** au lieu de s'y substituer. Toujours modifiable à la main — c'était l
 défaut le plus gênant de la V1 (préréglages seuls, impossible de saisir « le
 14 octobre »).
 
+### L'agenda — le rendez-vous est un OBJET, plus une tâche (31 août)
+
+La tâche « RDV avec … » n'a jamais servi (zéro en base) : le rendez-vous vit
+désormais dans `meetings`, avec `lib/crm/agenda.ts` comme cœur partagé (même
+philosophie qu'`exchange.ts` — server actions ET connecteur MCP passent par le
+même chemin) :
+
+- **`poserRendezVous`** — REFUSE un début sans heure (« pas de rendez-vous
+  toute la journée »), fin par défaut à +60 min, trace une activité
+  `rendez_vous` au journal, laisse l'étape suivre le fait (`applyAutoStatus`,
+  **jamais de `status_locked` ici**), détecte le chevauchement avec un autre
+  RDV du même owner et le renvoie en avertissement (`conflit`) **sans
+  bloquer**. `saveExchangeCore` (type `rendez_vous`) délègue ici : plus AUCUNE
+  tâche « RDV avec … » n'est créée nulle part.
+- **`deplacerRendezVous`** — statut `reporte`, ancienne et nouvelle date au
+  journal.
+- **`cloturerRendezVous`** — le DÉBRIEF : `honore`/`annule` + `debriefed_at`,
+  compte rendu versé en note (attestée seulement si honoré).
+
+Le fait « rendez-vous » de `factsFromRows` se lit dans les `meetings` À VENIR
+non annulés (plus dans `openTasks.title.startsWith("RDV")` — `FactRows` a
+perdu `openTasks` et gagné `meetings`). Écrans : `/agenda` (vue semaine
+lun→sam 7h–21h / jour, clic sur plage vide → création « Avec un prospect » /
+« Personnel », glisser-déposer pour reporter, palette celya, un RDV annulé
+reste visible barré) ; tableau de bord : zone « **Aujourd'hui** » en tête
+(RDV du jour, téléphone cliquable + lieu — l'agenda en clientèle) et zone
+« **Rendez-vous à débriefer** » (passés, non débriefés : « Ça s'est fait /
+Annulé / Reporté » + compte rendu d'une ligne). **Un RDV passé non débriefé
+reste dans cette zone — c'est le SEUL rappel du produit, ne pas en ajouter.**
+
+Outils MCP : `agenda` (période, périmètre — le masquage « Occupé » des RDV
+perso d'autrui est RÉAPPLIQUÉ EN CODE, car sous service_role `auth.uid()` est
+nul et la vue ne masque rien), `poser_rendez_vous` (refuse « Il manque le
+jour » / « Il manque l'heure », ne pose JAMAIS une relance à la place — c'est
+ce qui a perdu le RDV du 31/08), `deplacer_rendez_vous` (report ou annulation).
+
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
 **La probabilité chiffrée à la main est retirée de l'interface** (décision de
@@ -373,10 +410,11 @@ rien sur l'état du compte (ni 500, ni « compte en attente »).
 
 ---
 
-## Écrans — trois, pas cinq
+## Écrans — quatre, pas six
 
-`/dashboard` (**À faire**) · `/prospects` (+ `/prospects/[id]`,
-`/prospects/nouveau`, `/prospects/import`) · `/equipe` (admin) ·
+`/dashboard` (**À faire**) · `/agenda` (depuis le 31 août — voir « L'agenda »)
+· `/prospects` (+ `/prospects/[id]`, `/prospects/nouveau`,
+`/prospects/import`) · `/equipe` (admin) ·
 et en périphérie : `/compte` (avec les liens admin vers `/reglages-email` et
 `/emails`) · `/acces-refuse`. `/taches` redirige vers `/dashboard`,
 `/pipeline` vers `/prospects?vue=colonnes`, `/clients` vers `/prospects`
@@ -1052,6 +1090,10 @@ lus sont inchangés). Et
 elle remplit les `emails.thread_key` restés null, en héritant du parent via
 `in_reply_to` plutôt qu'en posant bêtement `thread_key = message_id` (une
 réponse appartient au fil de son parent, pas à un fil à elle). Idempotente.
+`017_agenda.sql` a été appliquée le 31 août (table `meetings` + vue
+`meetings_visibles`) — **additive** : le code alors en production ignorait
+cette table, rien à casser. Contraintes, RLS, trigger `updated_at` et vue
+vérifiés en base dans une transaction annulée juste après l'application.
 
 L'edge function `crm-mail` est en ligne en **v11** (25 août) : `save_account`
 ouvert à tout membre actif (avec le garde-fou 409 sur une adresse déjà prise et

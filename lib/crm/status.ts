@@ -9,7 +9,8 @@
  *   contacte     au moins un échange réel (email envoyé/reçu, note d'appel
  *                attestée, rendez-vous)
  *   rendez_vous  UNIQUEMENT une activité « rendez_vous » réellement
- *                enregistrée, ou une relance « RDV avec … » ouverte
+ *                enregistrée, ou un rendez-vous À VENIR (non annulé) dans
+ *                l'agenda (meetings)
  *   proposition  UNIQUEMENT un signal explicite (proposal_sent_at)
  *   gagne/perdu  JAMAIS automatiques — décisions humaines irréversibles
  *
@@ -25,7 +26,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProspectStatus } from "@/lib/types";
-import { normalizeStatus, fmtDate } from "@/lib/constants";
+import { normalizeStatus, fmtDate, fmtDateTime } from "@/lib/constants";
 
 /** Ordre d'avancement. « Gagné » et « Perdu » sont des fins de parcours. */
 export const STATUS_RANK: Record<ProspectStatus, number> = {
@@ -79,8 +80,9 @@ export type FactRows = {
     is_draft: boolean | null;
   }[];
   emails: { direction: string; received_at: string }[];
-  /** Relances OUVERTES du prospect (le filtre « RDV … » est appliqué ici). */
-  openTasks: { title: string; due_at: string }[];
+  /** Rendez-vous de la fiche (agenda) — le filtre « à venir, non annulé »
+   *  est appliqué ici, pas chez l'appelant. */
+  meetings: { starts_at: string; status: string }[];
   proposalSentAt: string | null;
 };
 
@@ -131,13 +133,16 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
     });
   }
 
-  // Une relance « RDV avec … » ouverte : c'est la tâche que pose la fiche
-  // quand on date un rendez-vous. Un fait, pas une lecture de texte.
-  for (const t of rows.openTasks) {
-    if (!t.title.startsWith("RDV")) continue;
+  // Un rendez-vous À VENIR dans l'agenda (non annulé) : le fait que posait
+  // autrefois la tâche « RDV avec … ». Un rendez-vous passé n'est pas oublié
+  // pour autant — son activité `rendez_vous` (ci-dessus) reste un fait.
+  const now = Date.now();
+  for (const m of rows.meetings) {
+    if (m.status === "annule") continue;
+    if (new Date(m.starts_at).getTime() < now) continue;
     facts.meeting = latest(facts.meeting, {
-      at: t.due_at,
-      label: `un rendez-vous est prévu le ${fmtDate(t.due_at)}`,
+      at: m.starts_at,
+      label: `un rendez-vous est prévu le ${fmtDateTime(m.starts_at)}`,
     });
   }
 
@@ -160,7 +165,7 @@ export async function readProspectFacts(
   supabase: SupabaseClient,
   prospectId: string
 ): Promise<ProspectFacts> {
-  const [activitiesRes, emailsRes, tasksRes, prospectRes] = await Promise.all([
+  const [activitiesRes, emailsRes, meetingsRes, prospectRes] = await Promise.all([
     supabase
       .from("activities")
       .select("type, occurred_at, is_exchange, is_draft")
@@ -174,13 +179,16 @@ export async function readProspectFacts(
       .eq("prospect_id", prospectId)
       .order("received_at", { ascending: false })
       .limit(50),
+    // La lecture de l'agenda passe par la vue meetings_visibles (règle du
+    // projet) — les colonnes lues ici ne sont jamais masquées pour un
+    // rendez-vous de prospect.
     supabase
-      .from("tasks")
-      .select("title, due_at")
+      .from("meetings_visibles")
+      .select("starts_at, status")
       .eq("prospect_id", prospectId)
-      .eq("status", "a_faire")
-      .like("title", "RDV%")
-      .order("due_at", { ascending: false })
+      .neq("status", "annule")
+      .gte("starts_at", new Date().toISOString())
+      .order("starts_at", { ascending: true })
       .limit(10),
     supabase
       .from("prospects")
@@ -192,7 +200,7 @@ export async function readProspectFacts(
   return factsFromRows({
     activities: (activitiesRes.data ?? []) as FactRows["activities"],
     emails: (emailsRes.data ?? []) as FactRows["emails"],
-    openTasks: (tasksRes.data ?? []) as FactRows["openTasks"],
+    meetings: (meetingsRes.data ?? []) as FactRows["meetings"],
     proposalSentAt:
       (prospectRes.data as { proposal_sent_at: string | null } | null)
         ?.proposal_sent_at ?? null,

@@ -219,9 +219,16 @@ export function QuickNote({
       }
       reset();
       setFeedback(
-        res.autoStatus
-          ? `Enregistré. Étape → « ${STATUS_LABEL[res.autoStatus]} » — ${res.autoReason}.`
-          : "Enregistré."
+        [
+          res.autoStatus
+            ? `Enregistré. Étape → « ${STATUS_LABEL[res.autoStatus]} » — ${res.autoReason}.`
+            : "Enregistré.",
+          res.conflit
+            ? `⚠ Ce créneau chevauche « ${res.conflit.title} » — voir l'agenda.`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
       );
     });
   }

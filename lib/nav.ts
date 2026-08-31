@@ -6,6 +6,7 @@ export type NavItem = { href: string; label: string; icon: string };
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "À faire", icon: "◉" },
+  { href: "/agenda", label: "Agenda", icon: "▦" },
   { href: "/prospects", label: "Prospects", icon: "◇" },
 ];
 

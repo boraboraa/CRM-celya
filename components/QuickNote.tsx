@@ -85,9 +85,13 @@ export function QuickNote({
   const [pending, startTransition] = useTransition();
   const [analyzing, startAnalyze] = useTransition();
 
-  // C'est le TYPE d'échange qui fait le rendez-vous, pas l'étape choisie :
-  // un rendez-vous se note avec sa date et son heure.
-  const withTime = type === "rendez_vous";
+  // Un rendez-vous se note avec sa date ET son heure — que le rendez-vous
+  // vienne du type d'échange ou de l'étape forcée au menu déroulant. C'est ce
+  // second chemin (étape « Rendez-vous » choisie, champ date jamais touché)
+  // qui laissait passer des rendez-vous sans date : le serveur les refuse
+  // désormais (saveExchangeCore), et le bouton n'y envoie plus personne.
+  const withTime = type === "rendez_vous" || statut === "rendez_vous";
+  const rdvSansDate = withTime && dateLocale.length < 16;
 
   /** Garde la valeur du champ cohérente quand on passe date ↔ date+heure. */
   function coerceDate(value: string, needsTime: boolean): string {
@@ -99,7 +103,12 @@ export function QuickNote({
 
   function pickType(t: ActivityType) {
     setType(t);
-    setDateLocale((v) => coerceDate(v, t === "rendez_vous"));
+    setDateLocale((v) => coerceDate(v, t === "rendez_vous" || statut === "rendez_vous"));
+  }
+
+  function pickStatut(s: ProspectStatus | "") {
+    setStatut(s);
+    setDateLocale((v) => coerceDate(v, type === "rendez_vous" || s === "rendez_vous"));
   }
 
   function reset() {
@@ -377,7 +386,7 @@ export function QuickNote({
           <select
             id="exchange-statut"
             value={statut}
-            onChange={(e) => setStatut(e.target.value as ProspectStatus | "")}
+            onChange={(e) => pickStatut(e.target.value as ProspectStatus | "")}
             className="input"
           >
             <option value="">Ne pas changer (suit les faits)</option>
@@ -417,12 +426,16 @@ export function QuickNote({
             onChange={setDateLocale}
             compact
           />
-          {withTime && (
+          {rdvSansDate ? (
+            <p className="mt-1.5 text-[11px] text-amber-300/90">
+              Choisissez la date et l&apos;heure du rendez-vous.
+            </p>
+          ) : withTime ? (
             <p className="mt-1.5 text-[11px] text-slate-500">
               Une date réelle fait passer {contactName ?? companyName} en
               « Rendez-vous ».
             </p>
-          )}
+          ) : null}
           {!dateLocale && !withTime && statut !== "perdu" && (
             <p className="mt-1.5 text-[11px] text-slate-500">
               Sans date, {companyName} ne remontera pas dans « À faire ».
@@ -435,7 +448,7 @@ export function QuickNote({
         <button
           type="button"
           onClick={save}
-          disabled={pending || (withTime && dateLocale.length > 0 && dateLocale.length < 16)}
+          disabled={pending || rdvSansDate}
           className="btn-primary"
         >
           {pending ? "Enregistrement…" : "Enregistrer"}

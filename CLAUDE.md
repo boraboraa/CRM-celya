@@ -258,6 +258,18 @@ fait non ambigu**, **ne recule jamais** une étape toute seule, et **ne passe
 jamais par-dessus un choix humain**. Chaque avancement automatique inscrit son
 événement déclencheur (`status_auto_reason`), affiché sur la fiche.
 
+**Aucun rendez-vous sans date — et le garde-fou vit à l'ÉCRITURE** (31 août).
+Les 38 tâches de la base étaient toutes à 09:00 pile : l'heure d'un rendez-vous
+n'avait JAMAIS été enregistrée. Cause : le filet « pas de rendez-vous sans
+date » ne vivait que dans `analyzeNoteAction` (la proposition du modèle), pas
+dans `saveExchangeCore` (l'écriture), qui acceptait `statut='rendez_vous'` avec
+`dateLocale=null` — il protégeait le modèle et laissait passer l'humain pressé.
+Désormais `saveExchangeCore` REFUSE un rendez-vous (étape imposée ou type
+d'activité) sans `dueAt`, `QuickNote` désactive Enregistrer et le dit en ambre,
+et l'outil MCP `mettre_a_jour_statut` refuse `rendez_vous` tant qu'aucun
+rendez-vous réel n'existe sur la fiche (`readProspectFacts`). Un garde-fou se
+pose là où l'on ÉCRIT, jamais seulement là où l'on propose.
+
 **Le verrou — le point critique.** Dès que Bora fixe une étape à la main
 (glisser-déposer dans le pipeline, clic sur une étape de la fiche, formulaire,
 ou `mettre_a_jour_statut` du connecteur), `status_locked` passe à vrai et

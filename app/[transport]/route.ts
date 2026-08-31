@@ -44,7 +44,11 @@ import { SCOPE } from "@/lib/mcp/oauth";
 import { SUPABASE_URL } from "@/lib/env";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { saveExchangeCore } from "@/lib/crm/exchange";
-import { manualStatusPatch, applyAutoStatus } from "@/lib/crm/status";
+import {
+  manualStatusPatch,
+  applyAutoStatus,
+  readProspectFacts,
+} from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
 import {
@@ -548,7 +552,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ».",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -560,6 +564,19 @@ function register(server: McpServer) {
       const { admin, viewer } = ctx;
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
+
+      // « Rendez-vous » n'est pas une intention, c'est un FAIT : sans
+      // rendez-vous enregistré (activité datée ou rendez-vous à venir),
+      // l'étape ne se force pas — c'est ainsi qu'un RDV sans date a déjà
+      // été perdu. On pose le rendez-vous, l'étape suit toute seule.
+      if (args.statut === "rendez_vous") {
+        const facts = await readProspectFacts(admin, resolved.id);
+        if (!facts.meeting) {
+          return fail(
+            "Aucun rendez-vous enregistré sur cette fiche. Posez d'abord le rendez-vous, l'étape suivra toute seule."
+          );
+        }
+      }
 
       const { error } = await admin
         .from("prospects")

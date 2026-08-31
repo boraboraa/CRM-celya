@@ -88,6 +88,17 @@ export async function saveExchangeCore(
   const dueAt = dateInputToISO(input.dateLocale ?? null);
   if (input.dateLocale && !dueAt) return { error: "Date invalide." };
 
+  // AUCUN rendez-vous sans date — le garde-fou vit à l'ÉCRITURE, pas
+  // seulement dans la proposition du modèle (analyzeNoteAction) : c'est par
+  // ici que passait l'humain pressé, et l'heure du rendez-vous se perdait.
+  // Un seul endroit : interface, connecteur MCP et tout futur appelant.
+  if ((newStatus === "rendez_vous" || input.type === "rendez_vous") && !dueAt) {
+    return {
+      error:
+        "Un rendez-vous demande une date ET une heure — sans elles il ne remontera nulle part.",
+    };
+  }
+
   const isDraft = input.isDraft === true;
   // Un appel sans réponse n'est pas un échange — mais c'est un résultat.
   const noAnswer = !isDraft && input.type === "note" && input.noAnswer === true;

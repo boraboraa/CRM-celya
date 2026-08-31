@@ -562,6 +562,44 @@ Outil ouvert toute la journée : lisible d'un coup d'œil, sans saturation.
   (étape qui vient d'être choisie), colonne cible illuminée dans sa propre
   teinte. `prefers-reduced-motion` neutralise tout.
 
+## Les raccourcis dans les notes — le déterministe d'abord (31 août)
+
+Structurer une note demandait de cliquer « ✨ Analyser », donc d'appeler le
+modèle, donc d'attendre — ça n'arrivait jamais pendant un appel, tout finissait
+en texte libre. Le principe s'est inversé : **un parseur DÉTERMINISTE
+(`lib/crm/raccourcis.ts`, pur, testé par `npm run test:raccourcis`) tourne à la
+frappe** (debounce 150 ms, zéro réseau) et affiche sous la note des
+**pastilles** de ce qui sera enregistré (`QuickNote`). Le modèle ne sert plus
+qu'au rattrapage sur du texte libre (« Analyser le texte », grisé quand des
+pastilles sont là).
+
+- Grammaire tolérante (Bora dicte à la voix) : normalisation NFD sans
+  diacritiques avant comparaison — « 11H », « eghéeze », « onze heures »
+  passent. Déclencheurs : rdv/rendez-vous, rappeler/relance, pdr/pas de
+  réponse/messagerie, devis envoyé, perdu/pas intéressé (SUGGESTION seule),
+  contact/avec Prénom Nom/le gérant c'est X. Jours (demain, lundi…, 3/9,
+  1er septembre — jamais dans le passé sauf année explicite), heures (11h,
+  11h30, 11 h 30, onze heures, midi), durées (1h30, 90min, 11h-12h), lieu
+  (chez …, adresse par mot de voie : rue/chaussée/… — repris du texte
+  D'ORIGINE).
+- **Règles dures** : une heure SANS jour → pastille ambre « Quel jour ? »
+  (14 chips, un clic complète, l'heure lue RESTE) — jamais aujourd'hui par
+  défaut, c'est l'erreur qui a perdu le RDV du 31/08 ; un jour SANS heure →
+  « Quelle heure ? » (créneaux 8h–19h) ; Enregistrer est désactivé tant qu'un
+  rdv détecté est incomplet (compléter ou retirer la pastille — la croix,
+  c'est « non »).
+- À l'enregistrement, les pastilles pilotent l'appel : rdv complet →
+  `poserRendezVous` via `saveExchangeCore` (type rendez_vous + `rdvLieu` /
+  `rdvFin`), relance → tâche, pdr → `outcome='sans_reponse'`, proposition →
+  `proposalSent`. **Le texte de la note part au journal TEL QUEL, jamais
+  réécrit.**
+- `analyzeNoteAction` renvoie en plus `heure` (retenue MÊME quand le jour est
+  inconnu), `lieu` et `manque` — validés en code comme le reste.
+- MCP `ajouter_note` : paramètres `rdv_le` (YYYY-MM-DDTHH:mm, jour ET heure)
+  et `lieu`, délégués au cœur agenda ; sa description ordonne de POSER LA
+  QUESTION quand le jour ou l'heure manque, jamais de relance générique à la
+  place.
+
 ## Saisie assistée par IA
 
 L'abstraction fournisseur vit dans `lib/ai/provider.ts` : `AGENT_PROVIDER`

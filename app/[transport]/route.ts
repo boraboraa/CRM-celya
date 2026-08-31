@@ -645,7 +645,7 @@ function register(server: McpServer) {
   // --- ajouter_note ---------------------------------------------------------
   server.tool(
     "ajouter_note",
-    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. N'impose pas de date de relance — pour poser une relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
+    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. Si la note mentionne un rendez-vous daté, passez « rdv_le » (et « lieu ») : le rendez-vous est posé dans l'agenda en même temps. Si la note mentionne un rendez-vous dont le JOUR ou l'HEURE manque, POSEZ LA QUESTION à l'utilisateur. Ne posez jamais une relance générique à la place : le rendez-vous serait perdu. Pour une simple relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -653,6 +653,13 @@ function register(server: McpServer) {
       note: z.string().describe("Texte de l'échange."),
       resume: z.string().optional().describe("Résumé court (versé en sujet)."),
       contact: z.string().optional().describe("Nom du contact à mettre à jour sur la fiche."),
+      rdv_le: z
+        .string()
+        .optional()
+        .describe(
+          "Rendez-vous mentionné dans la note : « YYYY-MM-DDTHH:mm » (heure de Bruxelles), jour ET heure OBLIGATOIRES. Le rendez-vous est posé dans l'agenda et la note versée au journal."
+        ),
+      lieu: z.string().optional().describe("Lieu du rendez-vous (avec « rdv_le »)."),
       echange: z
         .boolean()
         .optional()
@@ -682,15 +689,26 @@ function register(server: McpServer) {
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
 
+      // Un rendez-vous mentionné dans la note : validé strictement (jour ET
+      // heure), puis délégué au cœur agenda via saveExchangeCore — la note
+      // devient une activité rendez_vous, le créneau part dans meetings.
+      let rdvLe: string | null = null;
+      if (args.rdv_le) {
+        const quand = litDateRendezVous(args.rdv_le);
+        if (quand.error) return fail(quand.error);
+        rdvLe = quand.ok!;
+      }
+
       const r = await saveExchangeCore(admin, viewer.userId, {
         prospectId: resolved.id,
-        type: args.type,
+        type: rdvLe ? "rendez_vous" : args.type,
         note: args.note,
         resume: args.resume,
         contactName: args.contact,
         statut: args.statut as ProspectStatus | undefined,
         motif: args.motif,
-        dateLocale: null,
+        dateLocale: rdvLe,
+        rdvLieu: rdvLe ? (args.lieu ?? null) : null,
         // Défaut prudent côté connecteur : sans déclaration explicite, une
         // note écrite par Claude n'atteste pas d'un échange (l'interface, elle,
         // coche la case par défaut — la saisie y est humaine).
@@ -703,8 +721,15 @@ function register(server: McpServer) {
       const bits = [
         args.brouillon
           ? `✅ Brouillon rangé sur ${resolved.company_name} (hors chronologie).`
-          : `✅ Note ajoutée sur ${resolved.company_name}.`,
+          : rdvLe
+            ? `✅ Note ajoutée sur ${resolved.company_name}, rendez-vous posé le ${fmtDateTime(r.scheduledAt)}${args.lieu ? ` — ${args.lieu}` : ""}.`
+            : `✅ Note ajoutée sur ${resolved.company_name}.`,
       ];
+      if (r.conflit) {
+        bits.push(
+          `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`
+        );
+      }
       if (r.statusChanged) {
         bits.push(
           `Étape → « ${STATUS_LABEL[r.newStatus as keyof typeof STATUS_LABEL]} » (fixée à la main, donc verrouillée).`

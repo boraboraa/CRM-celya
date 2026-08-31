@@ -282,6 +282,16 @@ export type NoteProposal = {
   statutReserve: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm », heure de Bruxelles. */
   dateLocale: string | null;
+  /**
+   * « HH:mm » — retenue MÊME quand le jour est inconnu. Avant, une note
+   * « rdv 11H … » sans jour perdait l'heure avec la date : c'est exactement
+   * ce qui a fait disparaître le rendez-vous du 31/08.
+   */
+  heure: string | null;
+  /** Lieu extrait de la note, au lieu de rester noyé dans son corps. */
+  lieu: string | null;
+  /** Ce qui manque pour dater un rendez-vous — à demander, jamais deviné. */
+  manque: "jour" | "heure" | null;
   contact_name: string | null;
   resume: string | null;
 };
@@ -324,24 +334,31 @@ Règles absolues :
      humaines — elles ne seront jamais appliquées sans un clic.
    Dans le doute, mets null : l'étape actuelle reste inchangée.
 3. "date_relance" : la date de relance ou de rendez-vous déduite de la note, convertie en date réelle "YYYY-MM-DD" (ou "YYYY-MM-DDTHH:mm" si l'heure est précisée) — « après les fêtes » = début janvier, « dans 3 mois » = +3 mois. null si la note ne mentionne aucune échéance.
-4. Ce sont des propositions : un humain valide avant tout enregistrement.
+4. "heure" : l'heure lue dans la note ("HH:mm"), retenue MÊME quand le jour est inconnu — ne la perds jamais. null si aucune heure n'est dite.
+5. "lieu" : le lieu du rendez-vous lu dans la note (adresse, ville, « chez … »), sinon null.
+6. "manque" : pour un rendez-vous, ce qui empêche de le dater — "jour" si l'heure est dite sans le jour, "heure" si le jour est dit sans l'heure, sinon null. Ne complète JAMAIS un jour ou une heure manquant : signale-le.
+7. Ce sont des propositions : un humain valide avant tout enregistrement.
 
 Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
-{ "etape": ..., "date_relance": ..., "contact_name": ..., "resume": "une phrase courte en français" }
+{ "etape": ..., "date_relance": ..., "heure": ..., "lieu": ..., "manque": ..., "contact_name": ..., "resume": "une phrase courte en français" }
 
 Exemples (en supposant que nous sommes le 2026-08-03) :
 
 Note : « rdv fixé mardi prochain 14h au garage, le gérant c'est Marc »
-{"etape":"rendez_vous","date_relance":"2026-08-11T14:00","contact_name":"Marc","resume":"Rendez-vous fixé mardi 11/08 à 14h au garage avec Marc, le gérant."}
+{"etape":"rendez_vous","date_relance":"2026-08-11T14:00","heure":"14:00","lieu":"au garage","manque":null,"contact_name":"Marc","resume":"Rendez-vous fixé mardi 11/08 à 14h au garage avec Marc, le gérant."}
+
+Note : « rdv 11H eghéeze chaussée de namur 393 »
+{"etape":null,"date_relance":null,"heure":"11:00","lieu":"Eghezée, chaussée de Namur 393",
+ "manque":"jour","contact_name":null,"resume":"Rendez-vous à 11h à Eghezée — jour à préciser."}
 
 Note : « pas intéressé, bosse déjà avec un concurrent »
-{"etape":"perdu","date_relance":null,"contact_name":null,"resume":"Pas intéressé : travaille déjà avec un concurrent."}
+{"etape":"perdu","date_relance":null,"heure":null,"lieu":null,"manque":null,"contact_name":null,"resume":"Pas intéressé : travaille déjà avec un concurrent."}
 
 Note : « la secrétaire dit de revoir ça après les fêtes »
-{"etape":null,"date_relance":"2027-01-04","contact_name":null,"resume":"À relancer début janvier, à la demande de la secrétaire."}
+{"etape":null,"date_relance":"2027-01-04","heure":null,"lieu":null,"manque":null,"contact_name":null,"resume":"À relancer début janvier, à la demande de la secrétaire."}
 
 Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la semaine prochaine »
-{"etape":"contacte","date_relance":"2026-08-10","contact_name":null,"resume":"Échange positif par téléphone, rendez-vous à planifier au prochain appel."}`;
+{"etape":"contacte","date_relance":"2026-08-10","heure":null,"lieu":null,"manque":null,"contact_name":null,"resume":"Échange positif par téléphone, rendez-vous à planifier au prochain appel."}`;
 
   const raw = await chatJSON({ system, user: note, maxTokens: 400 });
   if (!raw) return { unavailable: true };
@@ -379,11 +396,26 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
       "Cochez « j'ai envoyé une proposition » si le devis est bien parti : c'est ce geste qui fait foi.";
   }
 
+  // L'heure et le lieu — validés en code, comme le reste. L'heure survit
+  // même sans jour (c'est tout l'objet du champ) ; « manque » n'a de sens
+  // que si la date n'est pas complète.
+  const heureRaw = cleanStr(raw.heure, 5);
+  const heure =
+    heureRaw && /^([01]\d|2[0-3]):[0-5]\d$/.test(heureRaw) ? heureRaw : null;
+  const manqueRaw = cleanStr(raw.manque, 10);
+  const manque =
+    dateLocale === null && (manqueRaw === "jour" || manqueRaw === "heure")
+      ? manqueRaw
+      : null;
+
   return {
     proposal: {
       statut,
       statutReserve,
       dateLocale,
+      heure,
+      lieu: cleanStr(raw.lieu, 200),
+      manque,
       contact_name: cleanStr(raw.contact_name, 120),
       resume: cleanStr(raw.resume, 300),
     },

@@ -30,6 +30,10 @@ export type SaveExchangeInput = {
   motif?: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles). null : pas de relance. */
   dateLocale?: string | null;
+  /** Lieu du rendez-vous (type « rendez_vous » seulement) — porté par l'agenda. */
+  rdvLieu?: string | null;
+  /** Fin du rendez-vous « YYYY-MM-DDTHH:mm » — à défaut, début + 60 min. */
+  rdvFin?: string | null;
   /**
    * Cette note atteste-t-elle d'un échange réel avec le prospect ?
    * Défaut true (la saisie humaine passe par « Noter un échange ») ; le
@@ -205,6 +209,8 @@ export async function saveExchangeCore(
         prospectId: prospect.id,
         kind: "prospect",
         startsAt: (input.dateLocale ?? "").trim().slice(0, 16),
+        endsAt: input.rdvFin,
+        location: input.rdvLieu,
         ecrireActivite: !(note || resume),
         avancerEtape: false,
       });

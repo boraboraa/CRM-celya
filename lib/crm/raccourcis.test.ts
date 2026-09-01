@@ -53,6 +53,26 @@ const CAS: Cas[] = [
     maintenant: "2026-08-31T08:00",
     attendu: { rdv: { debut: "2026-09-01T09:30", fin: "2026-09-01T10:30" } },
   },
+  // --- un lien Google Maps collé EST le lieu : il ne reste pas noyé dans le
+  // corps de la note, et il n'est jamais réécrit.
+  {
+    note: "rdv demain 14h https://maps.app.goo.gl/abc123",
+    maintenant: "2026-08-31T08:00",
+    attendu: {
+      rdv: {
+        debut: "2026-09-01T14:00",
+        lieu: "https://maps.app.goo.gl/abc123",
+      },
+    },
+  },
+  // --- la même URL SANS rendez-vous : ses chiffres ne doivent devenir ni une
+  // date ni une heure (la plage du lien est réservée avant toute lecture).
+  {
+    note: "à rappeler lundi, sa fiche : https://maps.app.goo.gl/9x8/7y6",
+    maintenant: "2026-08-04T08:00",
+    attendu: { relance: { date: "2026-08-10" } },
+    absents: ["rdv"],
+  },
   // --- réelle : date numérique + durée 1h30.
   {
     note: "rdv 3/9 14h30 1h30",

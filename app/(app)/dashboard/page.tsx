@@ -9,6 +9,7 @@ import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
 import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { DebriefList, type DebriefMeeting } from "@/components/DebriefList";
+import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { fmtDate, relative } from "@/lib/constants";
 import {
   LAST_ACTION_SELECT,
@@ -250,18 +251,27 @@ export default async function TodoPage({
   ];
   const meetingProspects = new Map<
     string,
-    { id: string; company_name: string; contact_name: string | null; phone: string | null }
+    {
+      id: string;
+      company_name: string;
+      contact_name: string | null;
+      phone: string | null;
+      city: string | null;
+    }
   >();
   if (meetingProspectIds.length > 0) {
+    // `city` complète l'adresse du rendez-vous quand elle n'a pas de code
+    // postal — jamais `country`, qui n'est pas fiable (voir lib/crm/maps.ts).
     const { data } = await supabase
       .from("prospects")
-      .select("id, company_name, contact_name, phone")
+      .select("id, company_name, contact_name, phone, city")
       .in("id", meetingProspectIds);
     for (const p of (data ?? []) as {
       id: string;
       company_name: string;
       contact_name: string | null;
       phone: string | null;
+      city: string | null;
     }[]) {
       meetingProspects.set(p.id, p);
     }
@@ -414,10 +424,14 @@ export default async function TodoPage({
                           {p.phone}
                         </a>
                       )}
+                      {/* L'adresse en clientèle : un bouton, pas un texte à
+                          recopier dans Maps. */}
                       {m.location && (
-                        <span>
-                          <span aria-hidden>📍</span> {m.location}
-                        </span>
+                        <BoutonsMaps
+                          valeur={m.location}
+                          ville={p?.city}
+                          compact
+                        />
                       )}
                     </p>
                   </div>

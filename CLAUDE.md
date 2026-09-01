@@ -197,7 +197,7 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 | Table | Rôle |
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password` |
-| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `owner_id`, `next_action_at`, `last_contact_at` |
+| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at` |
 | `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` (colonne de 001, réactivée le 7 août : `'sans_reponse'` = « Appelé, pas de réponse » — un résultat, pas un échange) |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `meetings` | l'AGENDA (migration `017`, 31 août) : rendez-vous avec début ET fin, `kind` (`prospect`/`perso`), `location`, `status` (`prevu`/`confirme`/`honore`/`annule`/`reporte`), `debriefed_at`, `owner_id`. RLS : chacun les siens, l'admin tout. **Toute lecture passe par la vue `meetings_visibles`** (un RDV perso d'un autre membre = « Occupé », sans lieu ni notes — Rémi est indépendant, lire ses RDV privés serait un élément de requalification) |
@@ -562,6 +562,54 @@ Outil ouvert toute la journée : lisible d'un coup d'œil, sans saturation.
   (étape qui vient d'être choisie), colonne cible illuminée dans sa propre
   teinte. `prefers-reduced-motion` neutralise tout.
 
+## L'adresse et Google Maps — de l'URL, pas une intégration (1er septembre)
+
+Les commerciaux se repèrent avec Maps. Il leur manquait un endroit où **coller
+un lien** (ou taper une adresse) et le retrouver **en un bouton cliquable**.
+Ce n'est **pas une intégration** : pas de clé API, pas d'OAuth, pas de
+facturation, pas de carte encastrée, pas de géocodage — uniquement la
+[construction d'URL publiée par Google](https://developers.google.com/maps/documentation/urls/get-started),
+qui ouvre l'application Maps sur téléphone. Rien à configurer par compte,
+c'est précisément l'avantage.
+
+- **UN SEUL champ** : `prospects.address` (migration `018`, additive), libre —
+  une adresse **ou** un lien Maps collé. Pas de seconde colonne « maps_url » :
+  deux cases pour la même chose, et personne ne sait laquelle remplir. C'est
+  **`lib/crm/maps.ts`** (pur, testé par `npm run test:maps`) qui distingue les
+  deux. `meetings.location` joue le même rôle pour un rendez-vous ponctuel —
+  même helper, même affichage.
+- **La requête, dans cet ordre** (`requeteMaps`) : code postal dans l'adresse →
+  elle part **seule** ; sinon ville renseignée et absente de l'adresse →
+  « adresse, ville » ; sinon l'adresse seule. **Jamais `prospects.country`,
+  jamais le nom de la société.**
+- **`lienMaps`** renvoie un lien collé **TEL QUEL** (on ne réécrit pas la
+  saisie) et transforme du texte en recherche Maps. **`lienItineraire`** renvoie
+  `null` pour un lien Maps — un lien court `maps.app.goo.gl` ne nomme aucune
+  destination sans être résolu (donc sans réseau, donc sans clé) : le bouton
+  « Y aller » ne s'affiche simplement pas, Maps propose l'itinéraire au tap
+  suivant.
+- **Sécurité** : la valeur finit dans un `href`. Tout passe par `new URL()` en
+  try/catch, **seuls http et https sont acceptés** — `javascript:`, `data:`,
+  `file:` s'affichent comme du **texte**, jamais comme un lien — et tout `<a>`
+  porte `target="_blank" rel="noopener noreferrer"`.
+- **Où ça s'affiche** (`components/BoutonsMaps.tsx`, « 📍 Ouvrir dans Maps » +
+  « ➜ Y aller ») : tête de fiche prospect, à côté du téléphone ; zone
+  « Aujourd'hui » du tableau de bord ; cartes de l'agenda (version compacte).
+  La saisie passe par `components/AdresseField.tsx` — aperçu des boutons à la
+  frappe, « Lien Google Maps reconnu » sur un collage, et un avertissement
+  ambre « Ajoutez la ville ou le code postal » quand ni l'un ni l'autre n'est
+  connu. **Aucun rendu conditionnel sur le rôle** : c'est Rémi qui remplira le
+  plus ce champ.
+- **Ça se remplit tout seul, sans jamais rien inventer** : `meetings.location`
+  **hérite** de `prospects.address` quand il est vide (`poserRendezVous`) ; un
+  lien Maps collé dans une note est lu comme **lieu** par le parseur de
+  raccourcis (sa plage est réservée AVANT toute lecture de date — une URL est
+  pleine de chiffres qu'on prendrait pour une échéance) ; `extractProspectAction`
+  fait atterrir l'adresse extraite dans `address` (elle était captée puis
+  perdue, faute de colonne) ; et quand un rendez-vous porte un lieu que la fiche
+  n'a pas, la fiche **propose** « Enregistrer cette adresse ? » — un clic,
+  jamais un automatisme (« visio » n'est pas l'adresse d'un client).
+
 ## Les raccourcis dans les notes — le déterministe d'abord (31 août)
 
 Structurer une note demandait de cliquer « ✨ Analyser », donc d'appeler le
@@ -821,6 +869,9 @@ Toute opération destructrice, irréversible ou en lot (`envoyer_email`,
 `importer_prospects`, `supprimer_activite`) est d'abord une **simulation** ;
 l'écriture réelle exige `confirmer: true`. `creer_prospect` **avertit** en cas
 de doublon au lieu de créer (forçable par `forcer: true`).
+Depuis le 1er septembre, `creer_prospect` accepte `adresse` (adresse ou lien
+Maps, stocké tel quel), `obtenir_prospect` la renvoie, et le `lieu` de
+`poser_rendez_vous` **hérite de l'adresse de la fiche** s'il est laissé vide.
 
 Trois précautions dictées par la règle des faits (4 août) :
 
@@ -1128,6 +1179,11 @@ lus sont inchangés). Et
 elle remplit les `emails.thread_key` restés null, en héritant du parent via
 `in_reply_to` plutôt qu'en posant bêtement `thread_key = message_id` (une
 réponse appartient au fil de son parent, pas à un fil à elle). Idempotente.
+`018_adresse.sql` a été appliquée le 1er septembre (colonne
+`prospects.address`) — **additive**, et vérifiée en base juste après :
+insertion d'une fiche avec adresse dans une transaction annulée, colonne
+présente, 33 fiches intactes. Le code, lui, EXIGE la colonne (il l'insère) :
+l'ordre est donc bien migration d'abord, déploiement ensuite.
 `017_agenda.sql` a été appliquée le 31 août (table `meetings` + vue
 `meetings_visibles`) — **additive** : le code alors en production ignorait
 cette table, rien à casser. Contraintes, RLS, trigger `updated_at` et vue
@@ -1334,6 +1390,16 @@ contre un JWKS mis en cache pour tout le processus. Ne pas revenir à
 silhouette est peinte, pas quand les données sont là. Un test qui lit le DOM
 à `load` lira le squelette. Attendre le contenu réel (`networkidle`, ou un
 sélecteur du vrai contenu).
+
+**`prospects.country` n'est pas une donnée, c'est une valeur par défaut.**
+Les 13 fiches de Rémi portent toutes `country = 'Belgique'` — le défaut de la
+colonne, jamais corrigé — alors qu'elles sont manifestement lyonnaises
+(AUTOLUB Garibaldi, Midas Lyon Garibaldi, BYMYCAR Lyon…). S'en servir pour
+construire une requête Maps enverrait Rémi à 600 km. **La ville, elle, est
+saisie** : c'est elle qui désambiguïse (et sur 33 fiches, 5 seulement la
+portent — d'où l'avertissement ambre du champ d'adresse plutôt qu'un silence).
+Règle générale : **une colonne à `DEFAULT` non nul ne dit rien tant que
+personne ne l'a saisie** ; ne jamais la lire comme un fait.
 
 **Trier sur une valeur calculée.** PostgREST ne sait pas trier sur une
 expression : `weighted_value` est une **colonne générée**, pas un calcul

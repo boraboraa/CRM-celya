@@ -25,6 +25,11 @@
  *   · « perdu » / « gagné » ne produisent JAMAIS qu'une suggestion.
  */
 
+// Extension explicite : ce module est exécuté TEL QUEL par node (le test
+// `npm run test:raccourcis`), qui ne résout pas les specificateurs sans
+// extension. tsconfig l'autorise (allowImportingTsExtensions).
+import { HOTES_MAPS } from "./maps.ts";
+
 export type Raccourci = {
   rdv?: {
     /**
@@ -177,6 +182,19 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
     fin: (map[Math.max(span.a, span.b - 1)] ?? 0) + 1,
   });
 
+  /** L'inverse d'`orig` : une plage du texte D'ORIGINE, vue en normalisé. */
+  const spanDepuisOrigine = (debut: number, fin: number): Span | null => {
+    let a = -1;
+    let b = -1;
+    for (let i = 0; i < map.length; i++) {
+      if (map[i] >= debut && map[i] < fin) {
+        if (a === -1) a = i;
+        b = i + 1;
+      }
+    }
+    return a === -1 ? null : { a, b };
+  };
+
   const marque = (span: Span, role: string) => {
     pris.push(span);
     const o = orig(span);
@@ -192,6 +210,37 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
     }
     return null;
   };
+
+  // ---- 0. Un lien Google Maps collé dans la note EST le lieu -------------
+  // Repéré AVANT tout le reste, et sur le texte D'ORIGINE : une URL est pleine
+  // de chiffres et de séparateurs que les lecteurs de date et d'heure
+  // prendraient pour une échéance, et la découpe en mots la mettrait en
+  // pièces. Sa plage est réservée d'emblée ; le lien ne devient un « lieu »
+  // que si la note parle d'un rendez-vous (section 5).
+  let lienMaps: { texteOriginal: string; span: Span } | null = null;
+  {
+    const re = /https?:\/\/\S+/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(texte))) {
+      // La ponctuation finale (« … goo.gl/abc, on se voit ») n'appartient pas
+      // au lien.
+      const brut = m[0].replace(/[.,;:!?)\]]+$/, "");
+      let hote = "";
+      try {
+        const u = new URL(brut);
+        if (u.protocol !== "http:" && u.protocol !== "https:") continue;
+        hote = `${u.host}${u.pathname}`;
+      } catch {
+        continue;
+      }
+      if (!HOTES_MAPS.test(hote)) continue;
+      const span = spanDepuisOrigine(m.index, m.index + brut.length);
+      if (!span || chevauche(span, pris)) continue;
+      lienMaps = { texteOriginal: brut, span };
+      pris.push(span); // réservé : rien ne se relit à l'intérieur d'une URL
+      break;
+    }
+  }
 
   // ---- 1. Les déclencheurs sans paramètre --------------------------------
   const sansRep = premier(
@@ -473,15 +522,25 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
       return t.length >= 2 ? { texteOriginal: t, span } : null;
     };
 
-    // 5a. Une adresse : un mot de voie (rue, chaussée…) — la clause qui
+    // 5a. Un lien Maps collé prime sur tout : c'est le lieu, sans ambiguïté
+    // et sans interprétation. Sa plage est déjà réservée (section 0) ; seul
+    // le segment reste à poser.
+    if (lienMaps) {
+      lieu = lienMaps;
+      resultat.segments.push({ ...orig(lienMaps.span), role: "lieu" });
+    }
+
+    // 5b. Une adresse : un mot de voie (rue, chaussée…) — la clause qui
     // l'entoure est le lieu (« eghéeze chaussée de namur 393 »).
     const VOIES = /^(rue|chaussee|avenue|place|boulevard|chemin|route|quai)$/;
-    const idxVoie = tokens.findIndex((t) => libre(t) && VOIES.test(texteDe(t)));
+    const idxVoie = lieu
+      ? -1
+      : tokens.findIndex((t) => libre(t) && VOIES.test(texteDe(t)));
     if (idxVoie >= 0) {
       lieu = lieuDepuis(clauseAutour(idxVoie));
     }
 
-    // 5b. « chez … » — le lieu commence au mot « chez ».
+    // 5c. « chez … » — le lieu commence au mot « chez ».
     if (!lieu) {
       const idxChez = tokens.findIndex((t) => libre(t) && texteDe(t) === "chez");
       if (idxChez >= 0 && idxChez < tokens.length - 1 && libre(tokens[idxChez + 1])) {
@@ -490,7 +549,7 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
       }
     }
 
-    // 5c. « a … » / « @ … » — après l'heure seulement, pour ne pas confondre
+    // 5d. « a … » / « @ … » — après l'heure seulement, pour ne pas confondre
     // avec les « à » du texte courant. Le « a » lui-même n'entre pas au lieu.
     if (!lieu && heures.length > 0) {
       const apres = heures[0].span.b;
@@ -509,7 +568,7 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
       }
     }
 
-    if (lieu) marque(lieu.span, "lieu");
+    if (lieu && lieu !== lienMaps) marque(lieu.span, "lieu");
   }
 
   // ---- 6. Assemblage ------------------------------------------------------

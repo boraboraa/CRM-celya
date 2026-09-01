@@ -23,6 +23,7 @@ import { localInputToISO } from "@/lib/time";
 import { fmtDateTime } from "@/lib/constants";
 import { applyAutoStatus } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
+import { ADRESSE_MAX } from "@/lib/crm/maps";
 import type { ProspectStatus } from "@/lib/types";
 
 export type MeetingKind = "prospect" | "perso";
@@ -106,6 +107,7 @@ export type PoserRendezVousInput = {
   /** « YYYY-MM-DDTHH:mm » — à défaut, startsAt + dureeMin (défaut 60). */
   endsAt?: string | null;
   dureeMin?: number | null;
+  /** À défaut, HÉRITE de `prospects.address` (rien à ressaisir chez un client). */
   location?: string | null;
   notes?: string | null;
   /**
@@ -157,17 +159,25 @@ export async function poserRendezVous(
     return { error: "La fin du rendez-vous doit suivre son début." };
   }
 
-  // La fiche visée — son nom sert au titre par défaut et au journal.
+  // La fiche visée — son nom sert au titre par défaut et au journal, son
+  // adresse au lieu par défaut (voir plus bas).
   let companyName: string | null = null;
+  let prospectAddress: string | null = null;
   if (input.prospectId) {
     const { data: prospect } = await supabase
       .from("prospects")
-      .select("id, company_name")
+      .select("id, company_name, address")
       .eq("id", input.prospectId)
       .maybeSingle();
     if (!prospect) return { error: "Prospect introuvable." };
     companyName = prospect.company_name as string;
+    prospectAddress = (prospect.address as string | null) ?? null;
   }
+
+  // Le lieu HÉRITE de l'adresse de la fiche quand il n'est pas précisé :
+  // renseignée une fois, elle sert tous les rendez-vous suivants chez ce
+  // client — et les boutons Maps apparaissent dans l'agenda sans rien ressaisir.
+  const location = input.location?.trim().slice(0, ADRESSE_MAX) || prospectAddress;
 
   const title =
     input.title?.trim().slice(0, 200) ||
@@ -186,7 +196,7 @@ export async function poserRendezVous(
       title,
       starts_at: startsISO,
       ends_at: endsISO,
-      location: input.location?.trim().slice(0, 300) || null,
+      location: location || null,
       notes: input.notes?.trim().slice(0, 2000) || null,
       created_by: userId,
     })
@@ -204,7 +214,7 @@ export async function poserRendezVous(
       subject: title,
       body:
         `Rendez-vous le ${fmtDateTime(startsISO)}` +
-        (input.location?.trim() ? ` — ${input.location.trim()}` : "") +
+        (location ? ` — ${location}` : "") +
         (input.notes?.trim() ? `\n${input.notes.trim()}` : ""),
       occurred_at: new Date().toISOString(),
       is_draft: false,

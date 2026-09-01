@@ -408,6 +408,7 @@ function register(server: McpServer) {
         email: p.email,
         site: p.website,
         secteur: p.sector,
+        adresse: p.address,
         ville: p.city,
         etape: STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status,
         source: p.source,
@@ -519,6 +520,12 @@ function register(server: McpServer) {
       email: z.string().optional(),
       site: z.string().optional().describe("Site web."),
       secteur: z.string().optional(),
+      adresse: z
+        .string()
+        .optional()
+        .describe(
+          "Adresse postale OU lien Google Maps collé — un seul champ, stocké tel quel. N'y mettez JAMAIS le pays : la ville suffit."
+        ),
       ville: z.string().optional(),
       statut: z.enum(STATUS_ENUM).optional().describe("Étape (défaut « a_appeler »)."),
       source: z.string().optional(),
@@ -548,6 +555,7 @@ function register(server: McpServer) {
           email: args.email,
           website: args.site,
           sector: args.secteur,
+          address: args.adresse,
           city: args.ville,
           status: args.statut,
           source: args.source,
@@ -1074,7 +1082,12 @@ function register(server: McpServer) {
         .max(600)
         .optional()
         .describe("Durée en minutes (défaut 60)."),
-      lieu: z.string().optional().describe("Lieu du rendez-vous (adresse, visio…)."),
+      lieu: z
+        .string()
+        .optional()
+        .describe(
+          "Lieu du rendez-vous (adresse, visio…). Laissé vide, il reprend l'adresse de la fiche."
+        ),
       titre: z.string().optional().describe("Titre (défaut « RDV avec <société> »)."),
       notes: z.string().optional(),
     },

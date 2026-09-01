@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
+import { BoutonsMaps } from "@/components/BoutonsMaps";
+import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
 import { ProspectForm } from "@/components/ProspectForm";
 import { ProspectJournal } from "@/components/ProspectJournal";
@@ -196,6 +198,15 @@ export default async function ProspectDetailPage({
       (m) =>
         m.status !== "annule" && new Date(m.starts_at).getTime() >= Date.now()
     ) ?? null;
+  // Le lieu d'un rendez-vous, quand la fiche n'a pas encore d'adresse : le
+  // prochain rendez-vous d'abord, sinon le plus récent qui en porte un.
+  const lieuDepuisRdv =
+    prospect.address
+      ? null
+      : (prochainRdv?.location?.trim() ||
+          [...meetings].reverse().find((m) => m.location?.trim())?.location?.trim() ||
+          null);
+
   const nextAction = deriveNextAction(
     openTasks as unknown as OpenTask[],
     lastEvent,
@@ -249,6 +260,25 @@ export default async function ProspectDetailPage({
               )}
               {prospect.city && <span>{prospect.city}</span>}
             </p>
+
+            {/* L'adresse — à côté du téléphone, les deux gestes du terrain :
+                ouvrir la fiche Maps, ou lancer l'itinéraire. Sans adresse sur
+                la fiche, le lieu d'un rendez-vous est proposé d'un clic. */}
+            {prospect.address ? (
+              <div className="mt-2">
+                <BoutonsMaps valeur={prospect.address} ville={prospect.city} />
+              </div>
+            ) : (
+              lieuDepuisRdv && (
+                <div className="mt-2 max-w-md">
+                  <AdresseDepuisRdv
+                    prospectId={prospect.id}
+                    lieu={lieuDepuisRdv}
+                    ville={prospect.city}
+                  />
+                </div>
+              )
+            )}
 
             {/* La confiance — le signal, sa raison, et la main de Bora. */}
             <div className="mt-3">

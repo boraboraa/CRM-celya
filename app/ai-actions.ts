@@ -23,6 +23,7 @@ import { chatJSON, aiAvailable, type UserContent } from "@/lib/ai/provider";
 import { isoToLocalInput } from "@/lib/time";
 import { SOURCES, STATUS_ORDER, STATUS_LABEL } from "@/lib/constants";
 import type { ProspectStatus } from "@/lib/types";
+import { ADRESSE_MAX } from "@/lib/crm/maps";
 import {
   normalizeBelgianPhone,
   findDuplicates,
@@ -87,6 +88,12 @@ export type ExtractedProspect = {
   email: string | null;
   website: string | null;
   sector: string | null;
+  /**
+   * L'adresse postale lue dans le texte. Elle était captée puis PERDUE, faute
+   * de colonne où atterrir : elle alimente désormais `prospects.address`
+   * (migration 018), d'où sortent les boutons Maps.
+   */
+  address: string | null;
   city: string | null;
   source: string | null;
   status: Extract<ProspectStatus, "a_appeler" | "contacte">;
@@ -107,14 +114,15 @@ const EXTRACT_SYSTEM = `Tu extrais les coordonnées d'un prospect belge à parti
 Règles absolues :
 1. N'invente JAMAIS rien. Un champ absent du texte vaut null — jamais une supposition, jamais une reconstruction plausible. Recopie les valeurs telles qu'elles apparaissent (le numéro de téléphone dans son format d'origine).
 2. "status" suit une règle, pas ton jugement : "a_appeler" dans tous les cas, SAUF si le texte indique explicitement qu'un échange a déjà eu lieu avec ce prospect (il a répondu, on s'est parlé, rencontré, il a demandé à être recontacté…) — alors "contacte".
-3. "source" : une valeur de ${JSON.stringify(SOURCES)} uniquement si le texte la mentionne explicitement (ex. « rencontré au salon », « recommandé par »), sinon null.
-4. "confidence" : pour chaque champ non null, ta confiance entre 0 et 1 (1 = lu tel quel dans le texte ; plus bas si le texte est ambigu ou la capture peu lisible).
-5. "raw_notes" : ce qui est utile mais n'entre dans aucun champ (horaires, avis, contexte), sinon null.
+3. "address" : l'adresse postale telle qu'elle est écrite (rue, numéro, code postal, ville) — recopiée, jamais complétée, JAMAIS le pays. Si le texte contient un lien Google Maps, mets le lien tel quel dans "address". Sinon null. "city" reste la ville seule.
+4. "source" : une valeur de ${JSON.stringify(SOURCES)} uniquement si le texte la mentionne explicitement (ex. « rencontré au salon », « recommandé par »), sinon null.
+5. "confidence" : pour chaque champ non null, ta confiance entre 0 et 1 (1 = lu tel quel dans le texte ; plus bas si le texte est ambigu ou la capture peu lisible).
+6. "raw_notes" : ce qui est utile mais n'entre dans aucun champ (horaires, avis, contexte), sinon null.
 
 Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 {
   "company_name": ..., "contact_name": ..., "phone": ..., "email": ...,
-  "website": ..., "sector": ..., "city": ..., "source": ...,
+  "website": ..., "sector": ..., "address": ..., "city": ..., "source": ...,
   "status": "a_appeler" | "contacte",
   "confidence": { "company_name": 0.98, ... },
   "raw_notes": ...
@@ -130,7 +138,7 @@ Fermé · Ouvre à 08:00 ven.
 04 223 45 67
 garagemarchal.be
 Réponse :
-{"company_name":"Garage Marchal","contact_name":null,"phone":"04 223 45 67","email":null,"website":"garagemarchal.be","sector":"Garage automobile","city":"Liège","source":null,"status":"a_appeler","confidence":{"company_name":0.99,"phone":0.97,"website":0.95,"sector":0.95,"city":0.97},"raw_notes":"4,6 ★ (87 avis) sur Google"}
+{"company_name":"Garage Marchal","contact_name":null,"phone":"04 223 45 67","email":null,"website":"garagemarchal.be","sector":"Garage automobile","address":"Rue de la Station 12, 4000 Liège","city":"Liège","source":null,"status":"a_appeler","confidence":{"company_name":0.99,"phone":0.97,"website":0.95,"sector":0.95,"address":0.97,"city":0.97},"raw_notes":"4,6 ★ (87 avis) sur Google"}
 
 Texte :
 Bien à vous,
@@ -139,12 +147,12 @@ Office Manager — Cabinet dentaire Willems & Associés
 sophie@dentiste-willems.be | +32 2 345 67 89
 Chaussée de Waterloo 145, 1060 Bruxelles
 Réponse :
-{"company_name":"Cabinet dentaire Willems & Associés","contact_name":"Sophie Willems","phone":"+32 2 345 67 89","email":"sophie@dentiste-willems.be","website":null,"sector":"Cabinet dentaire","city":"Bruxelles","source":null,"status":"a_appeler","confidence":{"company_name":0.97,"contact_name":0.98,"phone":0.97,"email":0.98,"sector":0.85,"city":0.95},"raw_notes":"Contact : Office Manager"}
+{"company_name":"Cabinet dentaire Willems & Associés","contact_name":"Sophie Willems","phone":"+32 2 345 67 89","email":"sophie@dentiste-willems.be","website":null,"sector":"Cabinet dentaire","address":"Chaussée de Waterloo 145, 1060 Bruxelles","city":"Bruxelles","source":null,"status":"a_appeler","confidence":{"company_name":0.97,"contact_name":0.98,"phone":0.97,"email":0.98,"sector":0.85,"address":0.96,"city":0.95},"raw_notes":"Contact : Office Manager"}
 
 Texte :
 Toitures Vandenberghe bvba — Kortrijksesteenweg 210, 9000 Gand — 09 225 11 33 — info@toitures-vdb.be (rencontré au salon Batibouw, m'a demandé de le recontacter en septembre)
 Réponse :
-{"company_name":"Toitures Vandenberghe bvba","contact_name":null,"phone":"09 225 11 33","email":"info@toitures-vdb.be","website":null,"sector":"Toiture","city":"Gand","source":"Salon / événement","status":"contacte","confidence":{"company_name":0.98,"phone":0.97,"email":0.97,"sector":0.9,"city":0.97,"source":0.95},"raw_notes":"Rencontré au salon Batibouw, à recontacter en septembre"}`;
+{"company_name":"Toitures Vandenberghe bvba","contact_name":null,"phone":"09 225 11 33","email":"info@toitures-vdb.be","website":null,"sector":"Toiture","address":"Kortrijksesteenweg 210, 9000 Gand","city":"Gand","source":"Salon / événement","status":"contacte","confidence":{"company_name":0.98,"phone":0.97,"email":0.97,"sector":0.9,"address":0.96,"city":0.97,"source":0.95},"raw_notes":"Rencontré au salon Batibouw, à recontacter en septembre"}`;
 
 /** Seuil sous lequel un champ déduit est signalé « à vérifier ». */
 const CONFIDENCE_FLOOR = 0.7;
@@ -214,6 +222,7 @@ export async function extractProspectAction(input: {
     email: cleanEmail(raw.email),
     website: cleanWebsite(raw.website),
     sector: cleanStr(raw.sector, 80),
+    address: cleanStr(raw.address, ADRESSE_MAX),
     city: cleanStr(raw.city, 80),
     source: SOURCES.includes(cleanStr(raw.source) ?? "")
       ? cleanStr(raw.source)
@@ -247,6 +256,7 @@ export async function extractProspectAction(input: {
     "email",
     "website",
     "sector",
+    "address",
     "city",
     "source",
   ] as const) {

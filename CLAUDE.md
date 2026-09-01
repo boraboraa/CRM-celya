@@ -591,7 +591,10 @@ c'est précisément l'avantage.
 - **Sécurité** : la valeur finit dans un `href`. Tout passe par `new URL()` en
   try/catch, **seuls http et https sont acceptés** — `javascript:`, `data:`,
   `file:` s'affichent comme du **texte**, jamais comme un lien — et tout `<a>`
-  porte `target="_blank" rel="noopener noreferrer"`.
+  porte `target="_blank" rel="noopener noreferrer"`. La liste blanche porte sur
+  le **nom d'hôte seul, ancré des deux côtés** (`estHoteMaps`, **unique juge du
+  module** — ce test ne se refait nulle part à la main), et refuse un port
+  explicite. Voir le piège du sosie d'hôte.
 - **Où ça s'affiche** (`components/BoutonsMaps.tsx`, « 📍 Ouvrir dans Maps » +
   « ➜ Y aller ») : tête de fiche prospect, à côté du téléphone ; zone
   « Aujourd'hui » du tableau de bord ; cartes de l'agenda (version compacte).
@@ -1390,6 +1393,19 @@ contre un JWKS mis en cache pour tout le processus. Ne pas revenir à
 silhouette est peinte, pas quand les données sont là. Un test qui lit le DOM
 à `load` lira le squelette. Attendre le contenu réel (`networkidle`, ou un
 sélecteur du vrai contenu).
+
+**Une liste blanche d'hôtes sans ancre de fin ne filtre rien.** La première
+version de `HOTES_MAPS` testait `url.host + url.pathname` contre
+`/^(www\.)?(…|maps\.google\.[a-z.]{2,6}|maps\.app\.goo\.gl|…)/i` — sans `$`.
+`https://maps.google.com.evil.com/` et `https://maps.app.goo.gl.evil.com/x`
+passaient donc pour des liens Google Maps et repartaient **tels quels** dans un
+`href`, sous un bouton « 📍 Ouvrir dans Maps » qui inspire confiance. Deux
+leçons : **une liste blanche de domaines s'ancre des DEUX côtés et porte sur le
+`hostname` seul** (pas `host`, qui traîne le port ; pas host+chemin, qui invite
+à oublier l'ancre) ; et **le test ne s'écrit qu'une fois** — `lib/crm/raccourcis.ts`
+avait dupliqué la comparaison, si bien que corriger `maps.ts` seul aurait laissé
+passer le sosie collé dans une note. D'où `estHoteMaps` exporté, et
+`HOTES_MAPS` supprimé pour que personne ne puisse refaire le test à la main.
 
 **`prospects.country` n'est pas une donnée, c'est une valeur par défaut.**
 Les 13 fiches de Rémi portent toutes `country = 'Belgique'` — le défaut de la

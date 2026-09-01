@@ -65,6 +65,22 @@ const CAS: Cas[] = [
       },
     },
   },
+  // --- SOSIE D'HÔTE : « maps.google.com.evil.com » n'est PAS un lien Maps —
+  // il ne devient donc pas le lieu, et sa plage n'étant pas réservée, le reste
+  // de la note (l'heure) reste lisible.
+  {
+    note: "rdv demain 10h https://maps.google.com.evil.com/",
+    maintenant: "2026-08-31T08:00",
+    attendu: { rdv: { debut: "2026-09-01T10:00", lieu: undefined } },
+  },
+  // --- le vrai lien, lui, devient bien le lieu.
+  {
+    note: "rdv demain 10h https://maps.app.goo.gl/abc123",
+    maintenant: "2026-08-31T08:00",
+    attendu: {
+      rdv: { debut: "2026-09-01T10:00", lieu: "https://maps.app.goo.gl/abc123" },
+    },
+  },
   // --- la même URL SANS rendez-vous : ses chiffres ne doivent devenir ni une
   // date ni une heure (la plage du lien est réservée avant toute lecture).
   {

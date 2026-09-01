@@ -25,6 +25,14 @@
  *   · seuls les schémas http et https sont acceptés. `javascript:`, `data:`,
  *     `file:` et tout le reste ne produisent AUCUN lien — le texte s'affiche,
  *     et rien n'est cliquable ;
+ *   · la liste blanche porte sur le NOM D'HÔTE SEUL, **ancré des deux côtés**
+ *     (`estHoteMaps`, unique juge du module — personne ne refait ce test à la
+ *     main). Sans l'ancre de fin, `maps.google.com.evil.com` et
+ *     `maps.app.goo.gl.evil.com` étaient reconnus comme des liens Maps et
+ *     renvoyés TELS QUELS dans un href, sous un bouton « 📍 Ouvrir dans Maps »
+ *     qui inspire confiance : le sosie d'hôte est exactement l'attaque que
+ *     cette liste doit arrêter. Un port explicite est refusé au passage : un
+ *     vrai lien Maps n'en porte jamais ;
  *   · tout <a> construit à partir d'ici porte target="_blank" et
  *     rel="noopener noreferrer" (voir components/BoutonsMaps.tsx).
  */
@@ -36,9 +44,34 @@
  */
 export const ADRESSE_MAX = 1000;
 
-/** Les hôtes (et chemins) reconnus comme « lien Google Maps ». */
-export const HOTES_MAPS =
-  /^(www\.)?(google\.[a-z.]{2,6}\/maps|maps\.google\.[a-z.]{2,6}|maps\.app\.goo\.gl|goo\.gl\/maps)/i;
+/** Domaines Google (google.fr, www.google.co.uk, maps.google.be…). */
+const HOTES_GOOGLE = /^(www\.)?(maps\.)?google\.[a-z]{2,3}(\.[a-z]{2,3})?$/i;
+/** Raccourcisseurs Google. */
+const HOTES_COURTS = /^(maps\.app\.goo\.gl|goo\.gl)$/i;
+
+/**
+ * L'URL pointe-t-elle vraiment Google Maps ? **Le seul juge du module** : ce
+ * test ne se refait nulle part à la main, c'est cette duplication qui avait
+ * laissé passer le sosie d'hôte dans les notes.
+ *
+ * `hostname` et non `host` : le port ne fait pas partie du nom d'hôte, et
+ * l'ancre `$` est ce qui ferme la porte à « maps.google.com.evil.com ». Un
+ * port explicite est refusé séparément — aucun lien Maps réel n'en porte, et
+ * ne rien accepter d'inutile coûte zéro.
+ */
+export function estHoteMaps(url: URL): boolean {
+  if (url.port) return false;
+  const hote = url.hostname.toLowerCase();
+  if (HOTES_COURTS.test(hote)) {
+    // maps.app.goo.gl ne sert qu'à Maps ; goo.gl est générique.
+    return hote === "maps.app.goo.gl" || url.pathname.startsWith("/maps");
+  }
+  if (HOTES_GOOGLE.test(hote)) {
+    // maps.google.* est déjà Maps ; google.* exige le chemin /maps.
+    return hote.startsWith("maps.") || url.pathname.startsWith("/maps");
+  }
+  return false;
+}
 
 /** Un préfixe de schéma d'URL (« https: », « javascript: »…). */
 const SCHEMA = /^[a-z][a-z0-9+.-]*:/i;
@@ -80,7 +113,7 @@ export function estLienMaps(valeur: string | null | undefined): boolean {
   if (!v) return false;
   const { url } = lireUrl(v);
   if (!url) return false;
-  return HOTES_MAPS.test(`${url.host}${url.pathname}`);
+  return estHoteMaps(url);
 }
 
 /**
@@ -121,7 +154,7 @@ export function lienMaps(
 
   const { url, absolue } = lireUrl(v);
   if (url) {
-    if (HOTES_MAPS.test(`${url.host}${url.pathname}`)) return v;
+    if (estHoteMaps(url)) return v;
     // Une autre URL http(s) : on la cherche telle quelle, faute de mieux.
   } else if (absolue) {
     return null; // javascript:, data:, file:… : du texte, jamais un href.

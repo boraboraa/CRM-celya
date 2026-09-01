@@ -48,6 +48,56 @@ verifie("maps.google.be reconnu", estLienMaps("https://maps.google.be/?q=Eghezee
 verifie("goo.gl/maps reconnu", estLienMaps("https://goo.gl/maps/xyz"), true);
 verifie("un site quelconque n'est pas un lien Maps", estLienMaps("https://celya.be"), false);
 
+// --- SOSIE D'HÔTE : l'attaque que la liste blanche doit arrêter ------------
+// Sans ancre de fin, ces quatre-là passaient pour des liens Google Maps et
+// repartaient TELS QUELS dans un href, sous un bouton « 📍 Ouvrir dans Maps ».
+verifie(
+  "sosie : maps.google.com.evil.com",
+  estLienMaps("https://maps.google.com.evil.com/"),
+  false
+);
+verifie(
+  "sosie : maps.app.goo.gl.evil.com",
+  estLienMaps("https://maps.app.goo.gl.evil.com/x"),
+  false
+);
+verifie("sosie : goo.gl.evil.com", estLienMaps("https://goo.gl.evil.com/maps"), false);
+verifie(
+  "sosie : www.google.com.evil.com",
+  estLienMaps("https://www.google.com.evil.com/maps"),
+  false
+);
+// Un port explicite : aucun lien Maps réel n'en porte — on n'accepte rien
+// d'inutile.
+verifie("port explicite refusé", estLienMaps("https://maps.google.com:8080/x"), false);
+
+// Et les vrais, toujours reconnus.
+verifie(
+  "vrai : google.com/maps/place",
+  estLienMaps("https://www.google.com/maps/place/Eghezee"),
+  true
+);
+verifie("vrai : maps.google.be", estLienMaps("https://maps.google.be/?q=x"), true);
+verifie("vrai : maps.app.goo.gl", estLienMaps("https://maps.app.goo.gl/abc123"), true);
+verifie("vrai : goo.gl/maps", estLienMaps("https://goo.gl/maps/abc"), true);
+
+// google.com SANS /maps n'est pas un lien Maps — mais le repli reste sain :
+// l'URL devient le texte d'une RECHERCHE Maps, donc un href sur google.com,
+// jamais l'URL de l'utilisateur renvoyée telle quelle.
+const recherche = "https://www.google.com/search?q=x";
+verifie("google.com/search n'est pas un lien Maps", estLienMaps(recherche), false);
+verifie(
+  "google.com/search : repli en recherche Maps",
+  lienMaps(recherche),
+  RECHERCHE + encodeURIComponent(recherche)
+);
+// Le sosie suit le même repli : l'href pointe google.com, pas evil.com.
+verifie(
+  "sosie : repli en recherche Maps, href sur google.com",
+  lienMaps("https://maps.google.com.evil.com/"),
+  RECHERCHE + encodeURIComponent("https://maps.google.com.evil.com/")
+);
+
 // --- Du texte : la requête, dans l'ordre de la règle ------------------------
 // (a) réel — un code postal dans l'adresse : elle part SEULE.
 const eghezee = "Chaussée de Namur 393, 5310 Eghezée";

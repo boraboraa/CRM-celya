@@ -28,7 +28,7 @@
 // Extension explicite : ce module est exécuté TEL QUEL par node (le test
 // `npm run test:raccourcis`), qui ne résout pas les specificateurs sans
 // extension. tsconfig l'autorise (allowImportingTsExtensions).
-import { HOTES_MAPS } from "./maps.ts";
+import { estHoteMaps } from "./maps.ts";
 
 export type Raccourci = {
   rdv?: {
@@ -225,15 +225,16 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
       // La ponctuation finale (« … goo.gl/abc, on se voit ») n'appartient pas
       // au lien.
       const brut = m[0].replace(/[.,;:!?)\]]+$/, "");
-      let hote = "";
+      let u: URL;
       try {
-        const u = new URL(brut);
-        if (u.protocol !== "http:" && u.protocol !== "https:") continue;
-        hote = `${u.host}${u.pathname}`;
+        u = new URL(brut);
       } catch {
         continue;
       }
-      if (!HOTES_MAPS.test(hote)) continue;
+      if (u.protocol !== "http:" && u.protocol !== "https:") continue;
+      // Le juge est dans maps.ts, et nulle part ailleurs : refaire le test ici
+      // laissait passer un sosie d'hôte collé dans une note.
+      if (!estHoteMaps(u)) continue;
       const span = spanDepuisOrigine(m.index, m.index + brut.length);
       if (!span || chevauche(span, pris)) continue;
       lienMaps = { texteOriginal: brut, span };

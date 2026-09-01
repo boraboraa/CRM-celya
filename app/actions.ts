@@ -20,6 +20,7 @@ import {
   isConfidenceLevel,
 } from "@/lib/crm/confidence";
 import { createProspectCore } from "@/lib/crm/prospects";
+import { ADRESSE_MAX } from "@/lib/crm/maps";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
   poserRendezVous,
@@ -94,6 +95,7 @@ export async function createProspectAction(fd: FormData) {
       phone: str(fd, "phone"),
       website: str(fd, "website"),
       sector: str(fd, "sector"),
+      address: str(fd, "address"),
       city: str(fd, "city"),
       status: str(fd, "status"),
       source: str(fd, "source"),
@@ -132,6 +134,8 @@ export async function updateProspectAction(fd: FormData) {
     phone: str(fd, "phone"),
     website: str(fd, "website"),
     sector: str(fd, "sector"),
+    // Stockée TELLE QUELLE : adresse libre ou lien Maps, on ne réécrit pas.
+    address: str(fd, "address"),
     city: str(fd, "city"),
     source: str(fd, "source"),
     value_estimate: num(fd, "value_estimate"),
@@ -305,6 +309,31 @@ export async function evaluateConfidenceAction(
     };
   }
   return {};
+}
+
+/**
+ * « Enregistrer cette adresse sur la fiche ? » — le lieu d'un rendez-vous
+ * remonté sur `prospects.address`, d'un clic. JAMAIS un automatisme : un lieu
+ * ponctuel (« visio », « chez le comptable ») n'est pas l'adresse du client.
+ * Ne remplace jamais une adresse déjà saisie.
+ */
+export async function setProspectAddressAction(
+  fd: FormData
+): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const id = str(fd, "id");
+  const address = str(fd, "address");
+  if (!id || !address) return { error: "Adresse introuvable." };
+
+  // La RLS tranche la permission : un commercial n'atteint que ses fiches.
+  const { error } = await supabase
+    .from("prospects")
+    .update({ address: address.slice(0, ADRESSE_MAX) })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateProspect(id);
+  return { success: "Adresse enregistrée." };
 }
 
 export async function deleteProspectAction(fd: FormData) {

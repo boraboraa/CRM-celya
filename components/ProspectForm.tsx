@@ -1,3 +1,4 @@
+import { AdresseField } from "@/components/AdresseField";
 import {
   STATUS_ORDER,
   STATUS_LABEL,
@@ -125,6 +126,16 @@ export function ProspectForm({
             defaultValue={prospect?.sector ?? ""}
             className={cls("sector")}
             placeholder="Horeca, garage, cabinet…"
+          />
+        </div>
+
+        {/* L'adresse — UN SEUL champ : adresse libre ou lien Maps collé.
+            Affiché pour tout le monde, commercial comme admin. */}
+        <div className="sm:col-span-2">
+          <AdresseField
+            defaultValue={prospect?.address ?? ""}
+            ville={prospect?.city ?? null}
+            className={cls("address")}
           />
         </div>
 

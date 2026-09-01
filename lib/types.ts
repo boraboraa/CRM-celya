@@ -36,7 +36,17 @@ export type Prospect = {
   phone: string | null;
   website: string | null;
   sector: string | null;
+  /**
+   * Adresse libre OU lien Google Maps collé — un seul champ (migration 018),
+   * lu par lib/crm/maps.ts, qui distingue les deux.
+   */
+  address: string | null;
   city: string | null;
+  /**
+   * NE JAMAIS s'en servir pour localiser une fiche : la colonne porte sa
+   * valeur par défaut (« Belgique ») sur des fiches lyonnaises. C'est la ville
+   * qui fait foi — voir lib/crm/maps.ts.
+   */
   country: string | null;
   status: ProspectStatus;
   source: string | null;

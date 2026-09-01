@@ -93,6 +93,7 @@ export function NewProspectAssist({
         email: f.email,
         website: f.website,
         sector: f.sector,
+        address: f.address,
         city: f.city,
         source: f.source,
         status: f.status,

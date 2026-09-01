@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeStatus } from "@/lib/constants";
 import { findDuplicates, normalizeBelgianPhone, type DuplicateHit } from "./dedup";
+import { ADRESSE_MAX } from "./maps";
 import type { Viewer } from "./access";
 
 export type NewProspectInput = {
@@ -17,6 +18,8 @@ export type NewProspectInput = {
   phone?: string | null;
   website?: string | null;
   sector?: string | null;
+  /** Adresse libre OU lien Google Maps collé — stockée telle quelle. */
+  address?: string | null;
   city?: string | null;
   status?: string | null;
   source?: string | null;
@@ -95,6 +98,7 @@ export async function createProspectCore(
       phone,
       website: trimOrNull(input.website),
       sector: trimOrNull(input.sector, 80),
+      address: trimOrNull(input.address, ADRESSE_MAX),
       city: trimOrNull(input.city, 80),
       status: normalizeStatus(trimOrNull(input.status)),
       source: trimOrNull(input.source),

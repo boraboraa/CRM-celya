@@ -6,6 +6,7 @@ import {
   poserRendezVousAction,
   deplacerRendezVousAction,
 } from "@/app/actions";
+import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { fmtDateTime } from "@/lib/constants";
 
@@ -388,7 +389,11 @@ export function AgendaGrid({
                     id="rdv-lieu"
                     value={lieu}
                     onChange={(e) => setLieu(e.target.value)}
-                    placeholder="Adresse, visio…"
+                    placeholder={
+                      mode === "prospect"
+                        ? "Adresse, visio… (vide : l'adresse de la fiche)"
+                        : "Adresse, visio…"
+                    }
                     className="input py-1.5 text-xs"
                   />
                 </div>
@@ -559,10 +564,14 @@ export function AgendaGrid({
                               </a>
                             )}
                             {m.prospect?.phone && m.location ? " · " : ""}
+                            {/* L'adresse du rendez-vous : un bouton qui ouvre
+                                Maps, jamais un texte à recopier. */}
                             {m.location && (
-                              <span>
-                                <span aria-hidden>📍</span> {m.location}
-                              </span>
+                              <BoutonsMaps
+                                valeur={m.location}
+                                ville={m.prospect?.city}
+                                compact
+                              />
                             )}
                           </p>
                         )}

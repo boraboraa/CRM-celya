@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { Avatar } from "@/components/ui";
-import { BoutonsMaps } from "@/components/BoutonsMaps";
+import { AdresseInline } from "@/components/AdresseInline";
 import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
 import { ProspectForm } from "@/components/ProspectForm";
@@ -262,23 +262,28 @@ export default async function ProspectDetailPage({
             </p>
 
             {/* L'adresse — à côté du téléphone, les deux gestes du terrain :
-                ouvrir la fiche Maps, ou lancer l'itinéraire. Sans adresse sur
-                la fiche, le lieu d'un rendez-vous est proposé d'un clic. */}
-            {prospect.address ? (
-              <div className="mt-2">
-                <BoutonsMaps valeur={prospect.address} ville={prospect.city} />
-              </div>
-            ) : (
-              lieuDepuisRdv && (
-                <div className="mt-2 max-w-md">
+                ouvrir la fiche Maps, ou lancer l'itinéraire. Sans adresse, le
+                point d'entrée est ICI (« ＋ Ajouter une adresse ») : le champ
+                du formulaire complet est replié tout en bas, personne ne l'y
+                trouvait. Le lieu d'un rendez-vous, quand il y en a un à
+                proposer, garde la priorité — jamais les deux à la fois. */}
+            <div className="mt-2">
+              {!prospect.address && lieuDepuisRdv ? (
+                <div className="max-w-md">
                   <AdresseDepuisRdv
                     prospectId={prospect.id}
                     lieu={lieuDepuisRdv}
                     ville={prospect.city}
                   />
                 </div>
-              )
-            )}
+              ) : (
+                <AdresseInline
+                  prospectId={prospect.id}
+                  address={prospect.address}
+                  ville={prospect.city}
+                />
+              )}
+            </div>
 
             {/* La confiance — le signal, sa raison, et la main de Bora. */}
             <div className="mt-3">

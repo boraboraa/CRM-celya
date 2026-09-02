@@ -603,6 +603,16 @@ c'est précisément l'avantage.
   ambre « Ajoutez la ville ou le code postal » quand ni l'un ni l'autre n'est
   connu. **Aucun rendu conditionnel sur le rôle** : c'est Rémi qui remplira le
   plus ce champ.
+- **Le point d'entrée est EN TÊTE DE FICHE**, pas dans le formulaire
+  (`components/AdresseInline.tsx`) : « ＋ Ajouter une adresse » déplie le champ
+  EN PLACE, à côté du téléphone, et « Modifier » le rouvre quand une adresse
+  existe. Le champ vivait uniquement dans `ProspectForm`, à l'intérieur du
+  `<details>` replié sous la chronologie — sur 33 fiches sans adresse, **aucun
+  point d'entrée n'était visible**, donc personne ne collait rien. Il écrit par
+  `setProspectAddressAction`, qui ne touche QUE `address` : `updateProspectAction`
+  depuis un mini-formulaire viderait tous les champs qu'il ne porte pas. Le lieu
+  d'un rendez-vous (`AdresseDepuisRdv`) garde la priorité quand il y en a un à
+  proposer — jamais les deux à la fois.
 - **Ça se remplit tout seul, sans jamais rien inventer** : `meetings.location`
   **hérite** de `prospects.address` quand il est vide (`poserRendezVous`) ; un
   lien Maps collé dans une note est lu comme **lieu** par le parseur de

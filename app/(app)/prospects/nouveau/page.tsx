@@ -30,7 +30,11 @@ export default async function NewProspectPage() {
         }
       />
 
-      <NewProspectAssist members={members} currentUserId={session?.userId} />
+      <NewProspectAssist
+        members={members}
+        currentUserId={session?.userId}
+        isAdmin={session?.me?.role === "admin"}
+      />
     </>
   );
 }

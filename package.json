@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:raccourcis": "node --experimental-strip-types lib/crm/raccourcis.test.ts",
-    "test:maps": "node --experimental-strip-types lib/crm/maps.test.ts"
+    "test:maps": "node --experimental-strip-types lib/crm/maps.test.ts",
+    "test:ia": "node --experimental-strip-types lib/ai/provider.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

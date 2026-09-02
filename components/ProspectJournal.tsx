@@ -4,6 +4,7 @@ import { useEffect, useOptimistic, useRef, useState } from "react";
 import { Timeline, type TimelineEntry } from "@/components/Timeline";
 import { DeleteEntryButton } from "@/components/DeleteEntryButton";
 import { QuickNote } from "@/components/QuickNote";
+import { ResultatAppel } from "@/components/ResultatAppel";
 import { EmailComposer } from "@/components/EmailComposer";
 import { EmptyState } from "@/components/ui";
 import {
@@ -140,12 +141,23 @@ export function ProspectJournal({
         {onglet === "consigner" ? (
           /* Le sélecteur d'étape part sur « ne pas changer » : aucun état
              local ne peut plus rétrograder la fiche. */
-          <QuickNote
-            prospectId={prospectId}
-            companyName={companyName}
-            contactName={contactName}
-            onOptimistic={ajouter}
-          />
+          <>
+            {/* Le résultat d'appel, EN TÊTE de l'onglet : deux taps, sans
+                descendre dans le formulaire complet. QuickNote reste dessous
+                pour les cas riches. */}
+            <ResultatAppel
+              prospectId={prospectId}
+              companyName={companyName}
+              className="mb-3"
+            />
+            <QuickNote
+              prospectId={prospectId}
+              companyName={companyName}
+              contactName={contactName}
+              isAdmin={isAdmin}
+              onOptimistic={ajouter}
+            />
+          </>
         ) : prospectEmail ? (
           <EmailComposer
             key={cle}

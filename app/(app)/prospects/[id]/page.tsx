@@ -25,6 +25,8 @@ import {
   fmtDateTime,
   fmtMoney,
   relative,
+  isCallOutcome,
+  OUTCOME_LABEL,
 } from "@/lib/constants";
 import type { Activity, Prospect, Email, Profile } from "@/lib/types";
 
@@ -168,7 +170,11 @@ export default async function ProspectDetailPage({
                   ? ("note_interne" as const)
                   : ("note" as const),
         at: a.occurred_at,
-        title: a.subject,
+        // Sans texte, c'est le RÉSULTAT qui titre l'entrée (« Barrage »,
+        // « Intéressé ») : une ligne de journal ne doit jamais être muette.
+        title:
+          a.subject ??
+          (isCallOutcome(a.outcome) ? OUTCOME_LABEL[a.outcome] : null),
         body: a.body,
         by: a.crm_users?.full_name ?? null,
       })),

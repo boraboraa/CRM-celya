@@ -19,7 +19,15 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { chatJSON, aiAvailable, type UserContent } from "@/lib/ai/provider";
+import { getSession } from "@/lib/auth";
+import {
+  chatJSON,
+  aiAvailable,
+  etatFournisseur,
+  testerFournisseur,
+  type UserContent,
+} from "@/lib/ai/provider";
+import { messagePourCause } from "@/lib/ai/causes";
 import { isoToLocalInput } from "@/lib/time";
 import { SOURCES, STATUS_ORDER, STATUS_LABEL } from "@/lib/constants";
 import type { ProspectStatus } from "@/lib/types";
@@ -45,6 +53,59 @@ async function requireUser() {
   const userId = data?.claims?.sub;
   if (error || !userId) redirect("/login");
   return { supabase, userId };
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic de l'assistant — pourquoi l'IA ne marche pas
+// ---------------------------------------------------------------------------
+
+export type DiagnosticIA = {
+  error?: string;
+  fournisseur?: string;
+  modele?: string | null;
+  baseUrl?: string | null;
+  /** Jamais la clé elle-même : seulement qu'elle est là, et sa longueur. */
+  cleePresente?: boolean;
+  cleeLongueur?: number;
+  variablesManquantes?: string[];
+  /** "ok", ou la cause exacte — la même que la ligne `[IA] …` des logs. */
+  test?: string;
+  message?: string;
+  ms?: number;
+};
+
+/**
+ * L'état de l'assistant, et un appel RÉEL minimal pour en avoir le cœur net.
+ *
+ * Réservé à l'ADMIN, et vérifié ICI — pas seulement à l'affichage : masquer un
+ * bouton n'a jamais interdit d'appeler la route. Un commercial n'a rien à
+ * faire de la configuration de l'hébergeur, et la longueur d'une clé est déjà
+ * une information de trop.
+ *
+ * Ne renvoie JAMAIS la clé : sa présence et sa longueur suffisent à
+ * distinguer « variable absente » de « clé tronquée au copier-coller ».
+ */
+export async function diagnosticIA(): Promise<DiagnosticIA> {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (session.me?.role !== "admin" || !session.me.is_active) {
+    return { error: "Diagnostic réservé à l'administrateur." };
+  }
+
+  const etat = etatFournisseur();
+  const test = await testerFournisseur();
+
+  return {
+    ...etat,
+    test: test.cause,
+    message: messagePourCause(
+      test.cause,
+      test.cause === "config_absente"
+        ? etat.variablesManquantes.join(", ")
+        : test.detail
+    ),
+    ms: test.ms,
+  };
 }
 
 // ---------------------------------------------------------------------------

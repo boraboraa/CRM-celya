@@ -8,11 +8,11 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dateInputToISO } from "@/lib/time";
-import { STATUS_ORDER } from "@/lib/constants";
+import { STATUS_ORDER, isCallOutcome } from "@/lib/constants";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { poserRendezVous, type MeetingConflit } from "@/lib/crm/agenda";
-import type { ActivityType, ProspectStatus } from "@/lib/types";
+import type { ActivityType, CallOutcome, ProspectStatus } from "@/lib/types";
 
 export type SaveExchangeInput = {
   prospectId: string;
@@ -48,6 +48,16 @@ export type SaveExchangeInput = {
    * sans texte — c'est lui que la carte affiche.
    */
   noAnswer?: boolean;
+  /**
+   * Le RÉSULTAT de l'appel (migration 019) : 'sans_reponse', 'barrage',
+   * 'rappeler', 'interesse', 'refus'. C'est la forme générale de `noAnswer`,
+   * qui reste accepté et vaut exactement `outcome: 'sans_reponse'`.
+   *
+   * Seul 'sans_reponse' N'EST PAS un échange — les quatre autres attestent
+   * qu'on a eu quelqu'un au bout du fil. Un résultat se trace au journal même
+   * sans texte : c'est lui que la carte affiche.
+   */
+  outcome?: CallOutcome | null;
   /** Brouillon : versé hors chronologie, ne compte pour aucun fait. */
   isDraft?: boolean;
   /** Signal explicite : une proposition / un devis vient d'être envoyé. */
@@ -58,6 +68,8 @@ export type SaveExchangeResult = {
   error?: string;
   /** Renseigné en cas de succès. */
   ok?: boolean;
+  /** L'entrée de journal créée, s'il y en a une — pour la préciser ensuite. */
+  activiteId?: string | null;
   prospectId?: string;
   companyName?: string;
   statusChanged?: boolean;
@@ -119,8 +131,20 @@ export async function saveExchangeCore(
   }
 
   const isDraft = input.isDraft === true;
+  // Le résultat d'appel — borné en base par activities_outcome_connu (019) ;
+  // une valeur inconnue est ignorée ici plutôt que refusée par Postgres. Un
+  // email n'a pas de « résultat d'appel » ; une note et un rendez-vous en ont
+  // un (on décroche, et on cale le rendez-vous dans la foulée).
+  const outcome: CallOutcome | null =
+    !isDraft && input.type !== "email" && isCallOutcome(input.outcome)
+      ? input.outcome
+      : null;
   // Un appel sans réponse n'est pas un échange — mais c'est un résultat.
-  const noAnswer = !isDraft && input.type === "note" && input.noAnswer === true;
+  // `noAnswer` reste le chemin historique ; il vaut outcome='sans_reponse'.
+  const noAnswer =
+    !isDraft &&
+    input.type === "note" &&
+    (input.noAnswer === true || outcome === "sans_reponse");
   // Un brouillon n'est ni un échange, ni un fait : il ne déclenche aucune
   // relance et ne fait avancer aucune étape.
   const isExchange = isDraft || noAnswer ? false : input.isExchange !== false;
@@ -131,7 +155,8 @@ export async function saveExchangeCore(
     !statusChanged &&
     !dueAt &&
     !input.contactName?.trim() &&
-    !noAnswer
+    !noAnswer &&
+    !outcome
   ) {
     return { error: "Rien à enregistrer." };
   }
@@ -148,6 +173,13 @@ export async function saveExchangeCore(
       patch.lost_reason = input.motif?.trim() || "Sans précision";
     }
   }
+  //    « Pas intéressé » est un RÉSULTAT d'appel, pas une décision de perte :
+  //    la raison est conservée sur la fiche, mais l'étape « Perdu » reste un
+  //    geste humain explicite (invariant de lib/crm/status.ts) — elle n'est
+  //    que suggérée.
+  if (outcome === "refus" && input.motif?.trim()) {
+    patch.lost_reason = input.motif.trim().slice(0, 300);
+  }
   if (input.contactName?.trim()) {
     patch.contact_name = input.contactName.trim().slice(0, 120);
   }
@@ -163,20 +195,27 @@ export async function saveExchangeCore(
     if (error) return { error: error.message };
   }
 
-  // 2. Journal — met aussi à jour last_contact_at via trigger. Un appel sans
-  //    réponse se trace même sans texte : c'est le résultat qui compte.
-  if (note || resume || noAnswer) {
-    await supabase.from("activities").insert({
-      prospect_id: prospect.id,
-      author_id: userId,
-      type: input.type,
-      subject: resume ?? (noAnswer && !note ? "Appel sans réponse" : null),
-      body: note,
-      outcome: noAnswer ? "sans_reponse" : null,
-      occurred_at: new Date().toISOString(),
-      is_draft: isDraft,
-      is_exchange: isExchange,
-    });
+  // 2. Journal — met aussi à jour last_contact_at via trigger. Un résultat
+  //    d'appel se trace même sans texte : le sujet reste vide, c'est `outcome`
+  //    qui parle (la chronologie et les cartes le traduisent en clair).
+  let activiteId: string | null = null;
+  if (note || resume || noAnswer || outcome) {
+    const { data: ligne } = await supabase
+      .from("activities")
+      .insert({
+        prospect_id: prospect.id,
+        author_id: userId,
+        type: input.type,
+        subject: resume,
+        body: note,
+        outcome: outcome ?? (noAnswer ? "sans_reponse" : null),
+        occurred_at: new Date().toISOString(),
+        is_draft: isDraft,
+        is_exchange: isExchange,
+      })
+      .select("id")
+      .maybeSingle();
+    activiteId = ligne?.id ?? null;
   }
 
   // 3. Relance — jamais de doublon : la tâche ouverte est re-datée, les
@@ -265,6 +304,7 @@ export async function saveExchangeCore(
 
   return {
     ok: true,
+    activiteId,
     prospectId: prospect.id,
     companyName: prospect.company_name,
     statusChanged,

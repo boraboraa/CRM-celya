@@ -198,7 +198,7 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password` |
 | `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at` |
-| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` (colonne de 001, réactivée le 7 août : `'sans_reponse'` = « Appelé, pas de réponse » — un résultat, pas un échange) |
+| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` — le RÉSULTAT d'appel, colonne de 001 réactivée le 7 août, **bornée le 2 septembre** (migration `019`, contrainte `activities_outcome_connu`) à cinq valeurs : `sans_reponse` · `barrage` · `rappeler` · `interesse` · `refus`. Reste en `text` : on borne, on ne convertit pas |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `meetings` | l'AGENDA (migration `017`, 31 août) : rendez-vous avec début ET fin, `kind` (`prospect`/`perso`), `location`, `status` (`prevu`/`confirme`/`honore`/`annule`/`reporte`), `debriefed_at`, `owner_id`. RLS : chacun les siens, l'admin tout. **Toute lecture passe par la vue `meetings_visibles`** (un RDV perso d'un autre membre = « Occupé », sans lieu ni notes — Rémi est indépendant, lire ses RDV privés serait un élément de requalification) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
@@ -218,6 +218,26 @@ fiches. C'est elle qui alimente la ligne « dernière action » des cartes, la
 zone « En attente de réponse » (`last_kind = 'email_sortant'`) et le filtre
 « Emails envoyés ». Le module `lib/crm/lastAction.ts` (neutre) porte les
 libellés et pictogrammes.
+
+**Elle porte aussi le TEXTE depuis le 2 septembre** (migration `019`) : sans
+lui, une carte ne pouvait dire que « note · il y a 2 jours ». Trois colonnes
+ajoutées — `last_outcome` (le résultat d'appel), `last_text`
+(`subject`, à défaut les 140 premiers caractères du corps — jamais réécrit) et
+`last_no_answer_streak` (les « pas de réponse » **d'affilée** depuis le dernier
+échange réel, ce qui donne le « (3e fois) » des cartes). Le compteur est
+calculé **en SQL et pas côté app** : les écrans qui affichent la dernière
+action (liste, pipeline, tableau de bord) ne chargent pas les activités — dans
+la vue, c'est zéro requête de plus pour tout le monde et une seule définition
+de la règle.
+
+⚠ **Deux pièges de cette vue, à ne pas redécouvrir** : `create or replace view`
+**refuse de renommer ou de réordonner une colonne** (`42P16`) — toute colonne
+nouvelle s'AJOUTE EN FIN de liste, sinon il faudrait `drop` la vue (et perdre
+ses droits, et casser la prod le temps du déploiement) ; et l'option
+`security_invoker = on` doit être **restatée** à chaque réécriture — l'oublier
+servirait la dernière note de CHAQUE fiche à tous les membres. Vérifié en base
+après l'application (`pg_class.reloptions`, et un commercial ne voit toujours
+que ses 13 fiches sur 64).
 
 **La table s'appelle `crm_users`, pas `profiles`.** Le projet Supabase hébergeait
 l'ancienne app de comptabilité, qui avait déjà un `profiles`. Ce schéma comptable
@@ -295,8 +315,43 @@ répartition des défauts — **à conserver** :
   ne fait plus passer une fiche en « Contacté ». (Le cœur partagé accepte
   `noAnswer` ; l'outil MCP ne l'expose pas encore.)
 
-Le geste central est `saveExchangeAction` (`app/actions.ts`) : note au journal,
-étape si elle change, et relance à une date précise — **jamais de doublon** :
+### Le résultat d'appel — deux taps (2 septembre)
+
+Mesuré en base : `activities.outcome` n'était renseigné que sur **2 lignes sur
+85**, et 49 activités sur 85 n'avaient **aucun `subject`**. La cause n'était pas
+la discipline de Bora, elle était dans l'interface — consigner « il n'a pas
+répondu » demandait **cinq décisions** dans `QuickNote` (type · nature · case
+proposition · étape · date). Après un appel, personne ne les prend.
+
+`components/ResultatAppel.tsx` : cinq pastilles larges (44 px, cible tactile) —
+📵 Pas de réponse · 🚧 Barrage · ↩︎ À rappeler · 👍 Intéressé · ✕ Pas
+intéressé. **Un tap enregistre**, le reste est facultatif :
+
+- un champ d'une ligne, dictable **après** le tap, versé dans `subject` —
+  c'est lui que la carte affiche ; il passe par le **même** parseur de
+  raccourcis que `QuickNote` (`lireRaccourcis`), donc « rdv mardi 11h » pose un
+  vrai rendez-vous et « rappeler jeudi » une relance. Un rendez-vous auquel il
+  manque le jour ou l'heure n'est **PAS** posé — et le dit ;
+- « Pas intéressé » **exige** une raison, versée aussi dans
+  `prospects.lost_reason`, **sans jamais appliquer l'étape « Perdu »** ;
+- « À rappeler » : trois dates d'un tap (demain · +3 j · la semaine prochaine) ;
+- une **seconde pastille CORRIGE la première** (`preciserResultatAction`) au
+  lieu de s'empiler : un doigt qui vise mal ne doit pas créer deux entrées de
+  journal.
+
+Où : la carte PROCHAINE ACTION, **chaque ligne de « À faire »** (bouton
+« Résultat », déplié en place — sans ouvrir la fiche), et en tête de l'onglet
+« Consigner ». `QuickNote` n'est pas supprimé : il reste le formulaire complet
+des cas riches.
+
+Tout passe par `saveExchangeCore` (`outcome` étendu, `noAnswer` conservé et
+équivalent à `outcome: 'sans_reponse'`) — même journal, même règle d'échange,
+même cadence de relance, même recalcul de confiance. **Seul `sans_reponse`
+n'est pas un échange** ; les quatre autres attestent qu'on a eu quelqu'un.
+
+Le geste central reste `saveExchangeAction` (`app/actions.ts`) : note au
+journal, étape si elle change, et relance à une date précise — **jamais de
+doublon** :
 la tâche ouverte existante est re-datée, les surnuméraires annulées ; un
 prospect passé en Perdu n'a plus de relance ouverte. `normalizeStatus`
 (`lib/constants.ts`) tolère en lecture les anciennes valeurs de statut —
@@ -415,15 +470,22 @@ rien sur l'état du compte (ni 500, ni « compte en attente »).
 `/dashboard` (**À faire**) · `/agenda` (depuis le 31 août — voir « L'agenda »)
 · `/prospects` (+ `/prospects/[id]`, `/prospects/nouveau`,
 `/prospects/import`) · `/equipe` (admin) ·
-et en périphérie : `/compte` (avec les liens admin vers `/reglages-email` et
-`/emails`) · `/acces-refuse`. `/taches` redirige vers `/dashboard`,
+et en périphérie : `/compte` (liens vers `/reglages-email` et `/emails`, et —
+admin seulement — la section « **Assistant IA** » : le bouton qui dit pourquoi
+l'IA ne marche pas, ancre `#assistant-ia`) · `/acces-refuse`. `/taches` redirige vers `/dashboard`,
 `/pipeline` vers `/prospects?vue=colonnes`, `/clients` vers `/prospects`
 (next.config.mjs).
 
 - **À faire** — **trois zones, jamais mélangées** (refonte du 7 août) :
   1. « **À appeler / à rappeler** » — les tâches échues (En retard puis
      Aujourd'hui) : appel jamais passé, appel sans réponse, relance échue.
-     Une relance au 14 octobre n'y remonte que le 14 octobre.
+     Une relance au 14 octobre n'y remonte que le 14 octobre. Chaque ligne
+     porte depuis le 2 septembre **ce qu'a donné le dernier appel** (« 📵 Pas
+     de réponse (3e fois) », « 👍 Intéressé — « rappeler après les congés » »)
+     et un bouton « **Résultat** » qui déplie les cinq pastilles EN PLACE.
+     La dernière action des deux zones vient d'**une seule** lecture de
+     `prospect_action_state`, filtrée en mémoire — pas d'une sixième requête
+     sur l'écran le plus consulté.
   2. « **En attente de réponse** » — les fiches dont le dernier événement est
      un mail sortant (`prospect_action_state`). Zone **calme** : jamais « en
      retard », chaque ligne dit « Mail envoyé il y a X · Remonte le <date> ».
@@ -435,9 +497,14 @@ et en périphérie : `/compte` (avec les liens admin vers `/reglages-email` et
 - **Prospects** — une seule liste, filtres (recherche, étape) et **bascule
   liste ↔ colonnes par étape** (glisser-déposer) : la vue en colonnes est un
   mode d'affichage de la même liste, plus une page distincte. Chaque carte
-  (liste ET pipeline) porte la **dernière action** — canal + résultat + date
-  relative : « 📧 Mail envoyé · il y a 2 j », « 📞 Appelé, pas de réponse ·
-  il y a 3 j » (`LastActionLine`, `lib/crm/lastAction.ts`). La colonne
+  (liste ET pipeline) porte la **dernière action** — résultat + ce qui s'est
+  dit + date relative : « ✕ Pas intéressé — « bosse déjà avec un concurrent » ·
+  il y a 2 j », « 📵 Pas de réponse (3e fois) · hier », « 📧 Mail envoyé ·
+  il y a 2 j » (`LastActionLine`, `lib/crm/lastAction.ts` ; le texte est
+  tronqué à 70 caractères, entier en infobulle, **jamais réécrit**, et le
+  résultat prime sur le canal quand il existe). Aucune couleur nouvelle : rose
+  pour un refus, ambre pour un barrage, émeraude pour un intérêt — celles des
+  étapes correspondantes. La colonne
   « Dernier contact » de la liste a cédé sa place à « Dernière action ».
   Bouton-filtre « **📧 Emails envoyés** » (`?filtre=emails`) : seulement les
   fiches à qui un mail est parti, triées par date du dernier envoi, colonne
@@ -677,6 +744,53 @@ choisit le fournisseur. Deux familles :
   `<FOURNISSEUR>_API_KEY` / `_BASE_URL` / `_MODEL` / `_VISION_MODEL`.
   Aujourd'hui `MINIMAX_*` (variables déjà sur Vercel) ; revenir en arrière =
   remettre `AGENT_PROVIDER=minimax`, jamais de réécriture.
+
+### Quand l'IA ne marche pas, on doit pouvoir le dire (2 septembre)
+
+`chatJSON` **continue de renvoyer `null`** en cas d'échec — c'est un contrat,
+tous les appelants ont un chemin manuel et aucun ne doit se mettre à lever.
+Mais un échec avalé n'est pas un échec expliqué : chaque abandon écrit
+désormais **une ligne serveur** via un helper unique, `echecIA` :
+
+```
+[IA] base_resp_1004 — invalid api key
+[IA] config_absente — minimax : MINIMAX_MODEL
+[IA] http_404 — 404 page not found
+```
+
+Causes distinguées : `config_absente` (les VARIABLES manquantes, nommées —
+**jamais leur valeur**) · `http_<code>` (corps tronqué à 200 caractères) ·
+`base_resp_<code>` (avec `status_msg`) · `reponse_vide` · `timeout` ·
+`json_invalide` (début de la réponse brute) · `reseau` · `refus_modele`.
+**Ni la clé, ni l'en-tête `Authorization` ne sont jamais journalisés** — c'est
+vérifié par le test.
+
+**Le piège MiniMax, corrigé** : l'API répond **HTTP 200 même en cas d'échec**,
+l'erreur étant dans `base_resp.status_code` (1004 = clé refusée, 1008 = solde
+épuisé, 1002 = débit). `if (!res.ok)` ne se déclenchait donc jamais et le code
+allait chercher un `choices[0].message.content` absent : une clé morte et un
+compte à zéro étaient **indiscernables d'une panne réseau**. `base_resp` se lit
+maintenant **AVANT `choices`**.
+
+**L'écran** : `/compte` → « Assistant IA », **admin seulement** — bouton
+« Tester l'assistant » → `diagnosticIA()` (`app/ai-actions.ts`), qui fait un
+**appel réel minimal** et renvoie fournisseur, modèle, URL de base, variables
+manquantes, cause exacte et durée. Le rôle est vérifié **côté serveur** :
+masquer un bouton n'a jamais interdit d'appeler la route. **La clé n'en sort
+jamais** — seulement `cleePresente` et `cleeLongueur`, de quoi distinguer
+« variable absente » de « clé tronquée au copier-coller ». La traduction des
+causes en français vit dans `lib/ai/causes.ts` (module neutre). Un
+« Assistant indisponible » dans `QuickNote` et `NewProspectAssist` porte un
+lien « Pourquoi ? » vers cet écran — **pour l'admin seulement**, un commercial
+n'a rien à faire de la configuration de l'hébergeur.
+
+Testé par **`npm run test:ia`** (`lib/ai/provider.test.ts`) contre un faux
+MiniMax **HTTP local** qui répond comme le vrai : 1004, 1008, 404, hors format,
+réponse valide, variable retirée. Même leçon qu'`imapHint` — un traducteur
+d'erreurs se teste contre l'erreur RÉELLE du fournisseur, pas contre celle
+qu'on imagine. (C'est pourquoi `provider.ts` importe `./causes.ts` en chemin
+RELATIF : le test l'exécute tel quel sous node, qui ne connaît pas l'alias
+`@/`. Même motif que `raccourcis.ts` → `./maps.ts`.)
 
 ### L'extraction — le cahier des charges (ne pas régresser)
 
@@ -1202,6 +1316,18 @@ l'ordre est donc bien migration d'abord, déploiement ensuite.
 cette table, rien à casser. Contraintes, RLS, trigger `updated_at` et vue
 vérifiés en base dans une transaction annulée juste après l'application.
 
+`019_resultat_appel.sql` a été appliquée le 2 septembre (contrainte
+`activities_outcome_connu` + `last_outcome` / `last_text` /
+`last_no_answer_streak` **en fin** de `prospect_action_state`) — **additive**,
+et compatible avec le code alors en production : la contrainte accepte les 2
+lignes existantes (`sans_reponse`) et tout ce que le code écrivait ; les trois
+colonnes s'ajoutent en fin de liste, donc `select` par nom comme par position
+est inchangé. Vérifié en base juste après : `reloptions` porte toujours
+`security_invoker=on`, un commercial ne voit que ses 13 fiches sur 64, trois
+« sans réponse » d'affilée donnent `last_no_answer_streak = 3`, un échange
+réel le remet à 0, et un `outcome` inconnu est refusé (`23514`) — le tout dans
+des transactions annulées.
+
 L'edge function `crm-mail` est en ligne en **v11** (25 août) : `save_account`
 ouvert à tout membre actif (avec le garde-fou 409 sur une adresse déjà prise et
 le refus 403 d'un `user_id` visé par un non-admin), `pickAccount` sans repli,
@@ -1427,6 +1553,32 @@ portent — d'où l'avertissement ambre du champ d'adresse plutôt qu'un silence
 Règle générale : **une colonne à `DEFAULT` non nul ne dit rien tant que
 personne ne l'a saisie** ; ne jamais la lire comme un fait.
 
+**Un HTTP 200 n'est pas un succès.** MiniMax répond **200 même quand il
+refuse** — l'erreur est dans `base_resp.status_code` (1004 clé refusée, 1008
+solde épuisé, 1002 débit). Le test `if (!res.ok)` ne se déclenchait donc
+jamais, le code lisait un `choices[0].message.content` absent, et l'interface
+disait « Assistant indisponible » pour quatre pannes très différentes.
+**Règle générale : avant de lire le contenu utile d'une réponse, lire le champ
+d'erreur que le fournisseur y met** — et ne jamais déduire le succès du seul
+code HTTP.
+
+**Un `catch {}` vide est une panne qu'on ne pourra pas expliquer.** Quatre
+causes (variable absente, clé refusée, solde vide, URL fausse) rendaient
+exactement le même écran, et personne ne pouvait répondre à « pourquoi l'IA ne
+marche pas ». Le contrat « ne jamais lever, renvoyer `null` » est bon et reste
+en place — **ce qui manquait, c'était une ligne de log par abandon**, nommant
+la cause (jamais la clé). Corollaire : un diagnostic honnête exige un **appel
+réel**, pas une lecture de variables d'environnement.
+
+**Un `create or replace view` n'ajoute qu'À LA FIN.** Insérer une colonne au
+milieu d'une vue échoue en `42P16` (« cannot change name of view column »), et
+la contourner en `drop`ant la vue ferait perdre ses droits et casserait la
+production le temps du déploiement. **Toute colonne nouvelle se met en fin de
+liste** — et l'option `security_invoker` doit être **restatée** dans le
+`create or replace`, faute de quoi la vue se remet à lire avec les droits de
+son propriétaire (ici : la dernière note de chaque fiche servie à toute
+l'équipe). Vérifier `pg_class.reloptions` après coup, pas avant.
+
 **Trier sur une valeur calculée.** PostgREST ne sait pas trier sur une
 expression : `weighted_value` est une **colonne générée**, pas un calcul
 applicatif. Même réflexe pour tout futur indicateur dérivé qu'on voudra trier.
@@ -1484,7 +1636,13 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
    de bout en bout (fournisseur simulé en local — étape imposée, +32 normalisé,
    incertitudes surlignées), c'est donc la configuration MiniMax côté Vercel
    qui est absente ou invalide — invérifiable par le MCP (le connecteur ne
-   voit pas ce projet). Depuis vercel.com → Settings → Environment Variables :
+   voit pas ce projet).
+   **Depuis le 2 septembre, plus besoin de deviner** : `/compte` → « Assistant
+   IA » → « Tester l'assistant » nomme la cause exacte (variable manquante,
+   clé refusée, solde épuisé, URL fausse), et les logs Vercel portent la même
+   ligne `[IA] …`. **Rappel : une variable ajoutée sur Vercel n'agit
+   qu'après un redéploiement.** Ensuite, depuis vercel.com → Settings →
+   Environment Variables :
    contrôler `MINIMAX_API_KEY` / `MINIMAX_BASE_URL` / `MINIMAX_MODEL`, **ou**
    activer Claude : `AGENT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`
    (`ANTHROPIC_MODEL` optionnel, défaut `claude-opus-5`). Repasser sur MiniMax

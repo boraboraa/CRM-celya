@@ -13,6 +13,7 @@ import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { fmtDate, relative } from "@/lib/constants";
 import {
   LAST_ACTION_SELECT,
+  isWaitingReply,
   mapLastActions,
   type LastActionRow,
 } from "@/lib/crm/lastAction";
@@ -153,14 +154,14 @@ export default async function TodoPage({
       .order("received_at", { ascending: false })
       .limit(20),
 
-    // En attente de réponse — le dernier événement de la fiche est un mail
-    // sortant (toute réponse ou tout échange consigné depuis serait plus
-    // récent). Vue prospect_action_state, RLS appliquée.
-    supabase
-      .from("prospect_action_state")
-      .select(LAST_ACTION_SELECT)
-      .eq("last_kind", "email_sortant")
-      .limit(200),
+    // La dernière action de chaque fiche (vue prospect_action_state, RLS
+    // appliquée). Elle sert DEUX zones, d'où l'absence de filtre SQL :
+    //   · « En attente de réponse » — dernier événement = mail sortant ;
+    //   · « À appeler / à rappeler » — le résultat du dernier appel, affiché
+    //     sur la ligne (« 📵 Pas de réponse (3e fois) ») avant d'en passer un
+    //     autre. Filtrer ici aurait coûté une SIXIÈME requête sur l'écran le
+    //     plus consulté ; le tri se fait en mémoire, juste en dessous.
+    supabase.from("prospect_action_state").select(LAST_ACTION_SELECT).limit(500),
 
     // Les fiches encore ouvertes — celles qui peuvent peupler la zone calme.
     filtrerProspects(
@@ -230,12 +231,33 @@ export default async function TodoPage({
   >[];
   // La vue ne sait pas porter le filtre de périmètre (pas d'owner_id, pas de
   // jointure PostgREST possible) : on la restreint aux fiches du périmètre.
-  const waitingRows = restreindreAuxProspects(
+  const actionRows = restreindreAuxProspects(
     (waitingRes.data ?? []) as unknown as LastActionRow[],
     new Set(openProspectRows.map((p) => p.id)),
     perimetre
   );
+  // Zone calme : seules les fiches dont le dernier événement est un mail
+  // sortant. Le tri qui était fait en SQL se fait ici, sur les mêmes lignes.
+  const waitingRows = actionRows.filter(isWaitingReply);
   const waitingMap = mapLastActions(waitingRows);
+  const actionsMap = mapLastActions(actionRows);
+
+  /** Attache à chaque relance ce qu'a donné le dernier appel de la fiche. */
+  const avecDerniereAction = (t: TaskWithProspect): TaskWithProspect => {
+    const a = t.prospect_id ? actionsMap.get(t.prospect_id) : undefined;
+    return a
+      ? {
+          ...t,
+          derniere_action: {
+            kind: a.last_kind,
+            at: a.last_at,
+            outcome: a.last_outcome,
+            text: a.last_text,
+            streak: a.last_no_answer_streak,
+          },
+        }
+      : t;
+  };
 
   // ---- L'agenda : les rendez-vous du jour et ceux à débriefer. Les infos
   // de fiche (contact, téléphone, lieu de la carte) viennent d'une requête
@@ -298,8 +320,8 @@ export default async function TodoPage({
   );
   const inZone1 = (t: TaskWithProspect) =>
     !t.prospect_id || !replyIds.has(t.prospect_id);
-  const overdue = overdueAll.filter(inZone1);
-  const today = todayAll.filter(inZone1);
+  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction);
+  const today = todayAll.filter(inZone1).map(avecDerniereAction);
 
   // La zone calme ne liste que les fiches dont RIEN n'est encore dû : dès que
   // la relance « si pas de réponse » échoit, la fiche remonte en zone 1 et

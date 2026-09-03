@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { ProfileForm, PasswordForm } from "@/components/AccountForms";
+import { DiagnosticIA } from "@/components/DiagnosticIA";
 
 
 export default async function AccountPage() {
@@ -44,6 +45,24 @@ export default async function AccountPage() {
             </Link>
           </div>
         </section>
+
+        {/* L'assistant tombe en panne pour quatre raisons très différentes, et
+            l'interface disait toujours la même chose. Ici, un appel réel dit
+            laquelle. Admin seulement — et revérifié côté serveur. */}
+        {me.role === "admin" && (
+          <section id="assistant-ia" className="card scroll-mt-6 p-6">
+            <h2 className="mb-1 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Assistant IA
+            </h2>
+            <p className="mb-4 text-xs leading-relaxed text-slate-500">
+              L&apos;extraction «&nbsp;coller → fiche&nbsp;», l&apos;analyse des
+              notes, le tri des réponses et la confiance passent tous par le
+              même fournisseur. S&apos;il ne répond pas, rien ne casse — la
+              saisie manuelle fonctionne — mais autant savoir pourquoi.
+            </p>
+            <DiagnosticIA />
+          </section>
+        )}
       </div>
     </>
   );

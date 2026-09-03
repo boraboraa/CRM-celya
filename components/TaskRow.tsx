@@ -1,9 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { fmtDateTime, relative } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
+import { ResultatAppel } from "@/components/ResultatAppel";
+import { LastActionLine } from "@/components/ui";
+import type { LastActionKind } from "@/lib/crm/lastAction";
 
 export type TaskWithProspect = {
   id: string;
@@ -19,6 +23,18 @@ export type TaskWithProspect = {
     contact_name: string | null;
     phone?: string | null;
     email?: string | null;
+  } | null;
+  /**
+   * La dernière action de la fiche (vue prospect_action_state), quand
+   * l'appelant l'a chargée. C'est elle qui dit « 📵 Pas de réponse (3e fois) »
+   * AVANT de rappeler — l'information qui manquait le plus dans « À faire ».
+   */
+  derniere_action?: {
+    kind: LastActionKind | null;
+    at: string | null;
+    outcome: string | null;
+    text: string | null;
+    streak: number | null;
   } | null;
 };
 
@@ -54,6 +70,8 @@ export function TaskRow({
 }) {
   const done = task.status === "fait";
   const overdue = !done && new Date(task.due_at).getTime() < Date.now();
+  /** Le résultat d'appel se déplie EN PLACE — sans ouvrir la fiche. */
+  const [resultatOuvert, setResultatOuvert] = useState(false);
 
   const dueLocal = isoToLocalInput(task.due_at); // YYYY-MM-DDTHH:mm Bruxelles
   const dueDate = dueLocal.slice(0, 10);
@@ -160,6 +178,42 @@ export function TaskRow({
 
         {task.details && (
           <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{task.details}</p>
+        )}
+
+        {/* Ce qu'a donné le dernier appel — avant d'en passer un autre. */}
+        {task.derniere_action?.kind && (
+          <p className="mt-1 truncate">
+            <LastActionLine
+              kind={task.derniere_action.kind}
+              at={task.derniere_action.at}
+              outcome={task.derniere_action.outcome}
+              text={task.derniere_action.text}
+              streak={task.derniere_action.streak}
+            />
+          </p>
+        )}
+
+        {/* « Résultat » : deux taps depuis « À faire », sans ouvrir la fiche.
+            C'est le geste qui manquait — après un appel, on ne navigue pas. */}
+        {!done && task.prospects && (
+          <div className="mt-2">
+            {resultatOuvert ? (
+              <ResultatAppel
+                prospectId={task.prospects.id}
+                companyName={task.prospects.company_name}
+                compact
+                className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setResultatOuvert(true)}
+                className="rounded-lg px-2 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
+              >
+                Résultat
+              </button>
+            )}
+          </div>
         )}
       </div>
 

@@ -28,11 +28,21 @@ export type LastActionRow = {
   last_at: string | null;
   last_email_sent_at: string | null;
   last_reply_at: string | null;
+  /** Le résultat de la dernière action (migration 019) — souvent null. */
+  last_outcome: string | null;
+  /** Ce qui s'est dit, en un mot : sujet, à défaut début du corps (140 car.). */
+  last_text: string | null;
+  /** Appels sans réponse D'AFFILÉE depuis le dernier échange réel. */
+  last_no_answer_streak: number | null;
 };
 
-/** Les colonnes à sélectionner — un seul endroit, pas de dérive. */
+/**
+ * Les colonnes à sélectionner — un seul endroit, pas de dérive. L'ordre suit
+ * celui de la vue : les trois colonnes de 019 sont EN FIN DE LISTE, parce
+ * qu'un `create or replace view` refuse de réordonner l'existant.
+ */
 export const LAST_ACTION_SELECT =
-  "prospect_id, last_kind, last_at, last_email_sent_at, last_reply_at";
+  "prospect_id, last_kind, last_at, last_email_sent_at, last_reply_at, last_outcome, last_text, last_no_answer_streak";
 
 /** Le pictogramme ne porte jamais seul : le libellé l'accompagne toujours. */
 export const LAST_ACTION_ICON: Record<LastActionKind, string> = {

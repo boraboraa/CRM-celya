@@ -10,6 +10,10 @@ import {
   CONFIDENCE_PENDING_CHIP,
   CONFIDENCE_PENDING_LABEL,
   CONFIDENCE_PENDING_ICON,
+  OUTCOME_ICON,
+  OUTCOME_LABEL,
+  OUTCOME_TEXT,
+  isCallOutcome,
   initials,
   relative,
 } from "@/lib/constants";
@@ -68,35 +72,103 @@ export function ConfidenceBadge({
   );
 }
 
+/** Ce qui s'est dit, ramené à ce qui tient sur une ligne. */
+const TEXTE_MAX = 70;
+
 /**
- * La DERNIÈRE ACTION d'une fiche : canal + résultat + date relative —
- * « 📧 Mail envoyé · il y a 2 j », « 📞 Appelé, pas de réponse · il y a 3 j ».
- * Même ligne sur la liste et sur les cartes du pipeline, dérivée du dernier
- * événement réel du journal (vue prospect_action_state), jamais du texte.
+ * La DERNIÈRE ACTION d'une fiche : résultat + ce qui s'est dit + date relative
+ *
+ *   ✕ Pas intéressé — « bosse déjà avec un concurrent »   ·  il y a 2 j
+ *   📵 Pas de réponse (3e fois)                           ·  hier
+ *   👍 Intéressé — « rappeler après les congés »          ·  il y a 5 j
+ *
+ * Même ligne sur la liste, les cartes du pipeline et le tableau de bord,
+ * dérivée du dernier événement réel du journal (vue prospect_action_state).
+ * Le RÉSULTAT prime sur le canal quand il existe : « Pas intéressé » en dit
+ * infiniment plus que « note ».
+ *
+ * « (3e fois) » compte les appels sans réponse D'AFFILÉE depuis le dernier
+ * échange réel — c'est l'information qui dit « arrête d'appeler celui-là ».
  */
 export function LastActionLine({
   kind,
   at,
+  outcome,
+  text,
+  streak,
 }: {
   kind: LastActionKind | null | undefined;
   at: string | null | undefined;
+  /** Le résultat d'appel de la dernière entrée, s'il y en a un. */
+  outcome?: string | null;
+  /** Le sujet, à défaut le début du corps — jamais réécrit. */
+  text?: string | null;
+  /** Appels sans réponse consécutifs (vue prospect_action_state). */
+  streak?: number | null;
 }) {
   if (!kind || !at) {
     return <span className="text-xs text-slate-600">Aucune action</span>;
   }
+
+  const resultat = isCallOutcome(outcome) ? outcome : null;
+  const libelle = resultat ? OUTCOME_LABEL[resultat] : LAST_ACTION_LABEL[kind];
+  const icone = resultat ? OUTCOME_ICON[resultat] : LAST_ACTION_ICON[kind];
+  const ton = resultat ? OUTCOME_TEXT[resultat] : "text-slate-300";
+
+  const propre = text?.replace(/\s+/g, " ").trim() || null;
+  const court =
+    propre && propre.length > TEXTE_MAX
+      ? `${propre.slice(0, TEXTE_MAX)}…`
+      : propre;
+
+  // « (3e fois) » dès la deuxième tentative : c'est là que l'insistance
+  // commence à se voir, et le compteur reste muet sur un appel isolé.
+  const repetitions =
+    resultat === "sans_reponse" && (streak ?? 0) >= 2 ? streak! : null;
+
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-xs text-slate-300"
-      title={`${LAST_ACTION_LABEL[kind]} — ${relative(at)}`}
+      className={`inline-flex max-w-full items-center gap-1.5 text-xs ${ton}`}
+      title={[
+        libelle,
+        repetitions ? `(${repetitions}e fois)` : null,
+        propre ? `— « ${propre} »` : null,
+        `— ${relative(at)}`,
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <span aria-hidden className="text-[13px] leading-none">
-        {LAST_ACTION_ICON[kind]}
+        {icone}
       </span>
       <span className="truncate">
-        {LAST_ACTION_LABEL[kind]}
+        {libelle}
+        {repetitions && (
+          <span className="font-medium"> ({repetitions}e fois)</span>
+        )}
+        {court && <span className="text-slate-400"> — « {court} »</span>}
         <span className="text-slate-500"> · {relative(at)}</span>
       </span>
     </span>
+  );
+}
+
+/**
+ * « Pourquoi ? » — le lien qui mène au diagnostic de l'assistant, affiché à
+ * côté d'un « Assistant indisponible ». ADMIN SEULEMENT : c'est lui qui peut
+ * corriger une variable sur l'hébergeur ; pour un commercial, le message
+ * actuel suffit et la configuration de l'hébergeur ne le regarde pas.
+ */
+export function LienPourquoiIA({ isAdmin = false }: { isAdmin?: boolean }) {
+  if (!isAdmin) return null;
+  return (
+    <Link
+      href="/compte#assistant-ia"
+      prefetch={false}
+      className="text-[11px] font-medium text-celya-cyan underline-offset-2 hover:underline"
+    >
+      Pourquoi&nbsp;?
+    </Link>
   );
 }
 

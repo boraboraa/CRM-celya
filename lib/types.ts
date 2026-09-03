@@ -88,6 +88,22 @@ export type Prospect = {
 /** Confiance commerciale estimée par l'IA — trois niveaux, null = à évaluer. */
 export type ConfidenceLevel = "chaud" | "tiede" | "froid";
 
+/**
+ * Le RÉSULTAT d'un appel — le vocabulaire tiré des notes réelles de Bora, et
+ * borné en base par `activities_outcome_connu` (migration 019). Cinq valeurs,
+ * pas une de plus : au-delà, personne ne choisit sur un téléphone après un
+ * appel. `null` = aucune tentative d'appel consignée sur cette entrée.
+ *
+ * ⚠ « sans_reponse » n'est PAS un échange (la fiche reste « À appeler ») ;
+ * les quatre autres le sont. La règle vit dans lib/crm/exchange.ts.
+ */
+export type CallOutcome =
+  | "sans_reponse"
+  | "barrage"
+  | "rappeler"
+  | "interesse"
+  | "refus";
+
 export type Activity = {
   id: string;
   prospect_id: string;

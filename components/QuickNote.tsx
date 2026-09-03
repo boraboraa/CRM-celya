@@ -5,6 +5,8 @@ import { saveExchangeAction } from "@/app/actions";
 import { analyzeNoteAction } from "@/app/ai-actions";
 import { ACTIVITY_LABEL, STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
 import { DateField } from "@/components/DateField";
+import { LienPourquoiIA } from "@/components/ui";
+import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { TimelineEntry } from "@/components/Timeline";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
@@ -53,11 +55,14 @@ export function QuickNote({
   prospectId,
   companyName,
   contactName,
+  isAdmin = false,
   onOptimistic,
 }: {
   prospectId: string;
   companyName: string;
   contactName?: string | null;
+  /** Admin : « Assistant indisponible » gagne un lien « Pourquoi ? ». */
+  isAdmin?: boolean;
   /**
    * Inscrit l'échange en tête de la chronologie AVANT la réponse du serveur.
    * Fourni par ProspectJournal ; absent, le formulaire se comporte comme
@@ -81,6 +86,8 @@ export function QuickNote({
     reserve: string | null;
   }>();
   const [aiNote, setAiNote] = useState<string>();
+  /** L'assistant n'a pas répondu : l'admin peut aller voir pourquoi. */
+  const [aiIndisponible, setAiIndisponible] = useState(false);
   const [feedback, setFeedback] = useState<string>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
@@ -219,6 +226,7 @@ export function QuickNote({
     setProposalSent(false);
     setSuggestion(undefined);
     setAiNote(undefined);
+    setAiIndisponible(false);
     setError(undefined);
     setRaccourcis(null);
     setMasques(new Set());
@@ -229,6 +237,7 @@ export function QuickNote({
   function analyze() {
     if (!note.trim()) return;
     setAiNote(undefined);
+    setAiIndisponible(false);
     setError(undefined);
     startAnalyze(async () => {
       const res = await analyzeNoteAction({ note });
@@ -238,6 +247,7 @@ export function QuickNote({
       }
       if (res.unavailable || !res.proposal) {
         setAiNote("Assistant indisponible — remplissez les champs à la main.");
+        setAiIndisponible(true);
         return;
       }
       const p = res.proposal;
@@ -504,6 +514,7 @@ export function QuickNote({
             {analyzing ? "Analyse…" : "✨ Analyser le texte"}
           </button>
           {aiNote && <span className="text-[11px] text-slate-500">{aiNote}</span>}
+          {aiIndisponible && <LienPourquoiIA isAdmin={isAdmin} />}
         </div>
       </div>
 
@@ -699,41 +710,5 @@ export function QuickNote({
         {error && <span className="text-xs text-rose-300">{error}</span>}
       </div>
     </div>
-  );
-}
-
-/** Une pastille de raccourci : ce qui sera enregistré, retirable d'un clic. */
-function Pastille({
-  children,
-  tone = "neutre",
-  onRetirer,
-}: {
-  children: React.ReactNode;
-  tone?: "neutre" | "bleu" | "ambre";
-  onRetirer?: () => void;
-}) {
-  const classes =
-    tone === "ambre"
-      ? "bg-amber-500/15 text-amber-300 ring-amber-400/30"
-      : tone === "bleu"
-        ? "bg-celya-blue/15 text-blue-300 ring-blue-400/30"
-        : "bg-white/[0.06] text-slate-200 ring-white/15";
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium ring-1 ${classes}`}
-    >
-      {children}
-      {onRetirer && (
-        <button
-          type="button"
-          onClick={onRetirer}
-          aria-label="Retirer cette pastille"
-          title="Ne pas enregistrer cet élément"
-          className="opacity-60 transition hover:opacity-100"
-        >
-          ✕
-        </button>
-      )}
-    </span>
   );
 }

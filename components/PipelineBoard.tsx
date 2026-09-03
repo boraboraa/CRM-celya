@@ -65,9 +65,12 @@ export type BoardProspect = {
   confidence_reason: string | null;
   confidence_locked: boolean;
   next_action_at: string | null;
-  /** Dernière action (canal + date) — vue prospect_action_state. */
+  /** Dernière action (canal + résultat + texte + date) — prospect_action_state. */
   last_kind: LastActionKind | null;
   last_at: string | null;
+  last_outcome: string | null;
+  last_text: string | null;
+  last_no_answer_streak: number | null;
 };
 
 /**
@@ -286,7 +289,13 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                               ce qui manquait le plus sur la carte. */}
                           {c.last_kind && c.last_at && (
                             <p className="mt-1.5 truncate text-[11px]">
-                              <LastActionLine kind={c.last_kind} at={c.last_at} />
+                              <LastActionLine
+                                kind={c.last_kind}
+                                at={c.last_at}
+                                outcome={c.last_outcome}
+                                text={c.last_text}
+                                streak={c.last_no_answer_streak}
+                              />
                             </p>
                           )}
 

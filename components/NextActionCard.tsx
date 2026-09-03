@@ -9,6 +9,7 @@ import { relative } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { deriveNextAction, type NextAction } from "@/lib/crm/nextAction";
 import { openComposer, openNote } from "@/lib/crm/composer";
+import { ResultatAppel } from "@/components/ResultatAppel";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -245,6 +246,12 @@ export function NextActionCard({
             </span>
           </>
         )}
+      </div>
+
+      {/* Le résultat de l'appel, SOUS LE POUCE — c'est ici qu'on arrive après
+          avoir raccroché, pas dans un formulaire trois écrans plus bas. */}
+      <div className="mt-3 border-t border-white/[0.06] pt-3">
+        <ResultatAppel prospectId={prospectId} compact />
       </div>
     </section>
   );

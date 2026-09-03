@@ -179,6 +179,9 @@ export default async function ProspectsPage({
     next_action_at: p.next_action_at,
     last_kind: lastActions.get(p.id)?.last_kind ?? null,
     last_at: lastActions.get(p.id)?.last_at ?? null,
+    last_outcome: lastActions.get(p.id)?.last_outcome ?? null,
+    last_text: lastActions.get(p.id)?.last_text ?? null,
+    last_no_answer_streak: lastActions.get(p.id)?.last_no_answer_streak ?? null,
   }));
 
   /** URL de la page en conservant recherche, étape, tri, vue, filtre — et
@@ -407,6 +410,9 @@ export default async function ProspectsPage({
                       <LastActionLine
                         kind={lastActions.get(p.id)?.last_kind}
                         at={lastActions.get(p.id)?.last_at}
+                        outcome={lastActions.get(p.id)?.last_outcome}
+                        text={lastActions.get(p.id)?.last_text}
+                        streak={lastActions.get(p.id)?.last_no_answer_streak}
                       />
                     </td>
                     {filtreEmails && (

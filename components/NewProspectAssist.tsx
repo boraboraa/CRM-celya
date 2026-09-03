@@ -9,6 +9,7 @@ import {
   type ExtractedProspect,
   type DuplicateHit,
 } from "@/app/ai-actions";
+import { LienPourquoiIA } from "@/components/ui";
 import { STATUS_LABEL, normalizeStatus } from "@/lib/constants";
 import type { Profile, Prospect } from "@/lib/types";
 
@@ -26,9 +27,12 @@ type Members = Pick<Profile, "id" | "full_name" | "email">[];
 export function NewProspectAssist({
   members,
   currentUserId,
+  isAdmin = false,
 }: {
   members: Members;
   currentUserId?: string;
+  /** Admin : « Assistant indisponible » gagne un lien « Pourquoi ? ». */
+  isAdmin?: boolean;
 }) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<{ base64: string; mime: string }>();
@@ -37,6 +41,8 @@ export function NewProspectAssist({
   const [uncertain, setUncertain] = useState<string[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateHit[]>([]);
   const [notice, setNotice] = useState<string>();
+  /** L'assistant n'a pas répondu : l'admin peut aller voir pourquoi. */
+  const [indisponible, setIndisponible] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const [pending, startTransition] = useTransition();
 
@@ -62,6 +68,7 @@ export function NewProspectAssist({
   function analyze() {
     if (!text.trim() && !image) return;
     setNotice(undefined);
+    setIndisponible(false);
     startTransition(async () => {
       const res = await extractProspectAction({
         text: text || null,
@@ -78,6 +85,7 @@ export function NewProspectAssist({
         setNotice(
           "Assistant indisponible pour le moment — remplissez la fiche à la main."
         );
+        setIndisponible(true);
         return;
       }
 
@@ -164,7 +172,12 @@ export function NewProspectAssist({
           )}
         </div>
 
-        {notice && <p className="mt-3 text-xs text-cyan-300/90">{notice}</p>}
+        {notice && (
+          <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-cyan-300/90">
+            {notice}
+            {indisponible && <LienPourquoiIA isAdmin={isAdmin} />}
+          </p>
+        )}
       </div>
 
       {/* ------------------------------------------------ alerte doublons */}

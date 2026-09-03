@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
-import { normalizeStatus } from "@/lib/constants";
+import { normalizeStatus, isCallOutcome } from "@/lib/constants";
 import type { ProspectStatus } from "@/lib/types";
 import {
   manualStatusPatch,
@@ -378,6 +378,157 @@ export async function saveExchangeAction(
     autoReason: result.autoReason,
     conflit: result.conflit ?? null,
   };
+}
+
+// =====================================================================
+// Le RÉSULTAT d'appel — deux taps, depuis n'importe où
+// =====================================================================
+
+export type ResultatAppelState = ActionState & {
+  /** L'entrée de journal créée — c'est elle que « préciser » complètera. */
+  activiteId?: string | null;
+  autoStatus?: ProspectStatus | null;
+  autoReason?: string | null;
+  conflit?: MeetingConflit | null;
+};
+
+/**
+ * Consigner ce qu'a donné un appel, en un geste : 📵 pas de réponse, 🚧
+ * barrage, ↩︎ à rappeler, 👍 intéressé, ✕ pas intéressé.
+ *
+ * Mesuré le 02/09 : `outcome` n'était renseigné que sur 2 lignes sur 85, parce
+ * que le noter demandait CINQ décisions dans QuickNote. Ici il en faut une.
+ *
+ * Passe par le MÊME cœur que tout le reste (`saveExchangeCore`) : même
+ * journal, même règle d'échange, même cadence de relance, même recalcul de
+ * confiance. Deux invariants tenus par le cœur, pas par cet appelant :
+ *   · 'sans_reponse' n'est PAS un échange (la fiche reste « À appeler ») ;
+ *   · « Pas intéressé » enregistre la RAISON (prospects.lost_reason) mais
+ *     n'applique jamais l'étape « Perdu » — elle reste une décision humaine.
+ */
+export async function enregistrerResultatAction(input: {
+  prospectId: string;
+  outcome: string;
+  /** « En un mot, ce qui s'est dit » — versé dans activities.subject. */
+  texte?: string | null;
+  /** Relance ou rendez-vous lu dans le texte (« YYYY-MM-DD[THH:mm] »). */
+  dateLocale?: string | null;
+  /** Le texte porte un rendez-vous complet : c'est l'agenda qui le prend. */
+  rendezVous?: boolean;
+  rdvLieu?: string | null;
+  rdvFin?: string | null;
+}): Promise<ResultatAppelState> {
+  const { supabase, userId } = await currentUserId();
+
+  if (!isCallOutcome(input.outcome)) return { error: "Résultat inconnu." };
+  const texte = input.texte?.trim() || null;
+
+  // Le seul résultat qui EXIGE une raison : « pas intéressé » sans pourquoi
+  // ne s'exploite pas — ni pour l'apprendre, ni pour le raconter.
+  if (input.outcome === "refus" && !texte) {
+    return { error: "Dites en un mot pourquoi : c'est ce qui sert plus tard." };
+  }
+
+  const result = await saveExchangeCore(supabase, userId, {
+    prospectId: input.prospectId,
+    type: input.rendezVous ? "rendez_vous" : "note",
+    resume: texte,
+    outcome: input.outcome,
+    // Le cœur décide de l'attestation pour 'sans_reponse' ; pour les quatre
+    // autres, on a bien eu quelqu'un au bout du fil.
+    isExchange: input.outcome !== "sans_reponse",
+    motif: input.outcome === "refus" ? texte : null,
+    dateLocale: input.dateLocale ?? null,
+    rdvLieu: input.rdvLieu ?? null,
+    rdvFin: input.rdvFin ?? null,
+  });
+  if (result.error) return { error: result.error };
+
+  revalidateProspect(input.prospectId);
+  if (input.rendezVous) revalidatePath("/agenda");
+  return {
+    activiteId: result.activiteId ?? null,
+    autoStatus: result.autoStatus,
+    autoReason: result.autoReason,
+    conflit: result.conflit ?? null,
+  };
+}
+
+/**
+ * Compléter le résultat qu'on vient d'enregistrer : la phrase dictée après le
+ * tap, ou la date de rappel choisie d'un clic. Le tap a déjà écrit — on ne
+ * réécrit pas une seconde entrée de journal pour autant.
+ *
+ * La relance passe par `saveExchangeCore` SANS texte : il ne crée alors
+ * aucune activité et se contente de sa cadence (tâche ouverte re-datée,
+ * surnuméraires annulées) — un seul endroit sait poser une relance.
+ */
+export async function preciserResultatAction(input: {
+  prospectId: string;
+  activiteId: string;
+  texte?: string | null;
+  /** Une autre pastille tapée juste après : on CORRIGE, on n'empile pas. */
+  outcome?: string | null;
+  dateLocale?: string | null;
+  rendezVous?: boolean;
+  rdvLieu?: string | null;
+  rdvFin?: string | null;
+}): Promise<ActionState> {
+  const { supabase, userId } = await currentUserId();
+  const texte = input.texte?.trim().slice(0, 300) || null;
+  const correction = isCallOutcome(input.outcome) ? input.outcome : null;
+
+  if (texte || correction) {
+    // La RLS tranche : un membre ne modifie que ses propres entrées
+    // (activities_update : is_admin() ou author_id = auth.uid()).
+    const patch: Record<string, unknown> = {};
+    if (texte) patch.subject = texte;
+    if (correction) {
+      patch.outcome = correction;
+      // Même règle qu'à l'écriture : seul « pas de réponse » n'atteste rien.
+      patch.is_exchange = correction !== "sans_reponse";
+    }
+    const { data: ligne, error } = await supabase
+      .from("activities")
+      .update(patch)
+      .eq("id", input.activiteId)
+      .select("outcome")
+      .maybeSingle();
+    if (error) return { error: error.message };
+    if (!ligne) return { error: "Entrée introuvable." };
+
+    // « Pas intéressé » : la raison vit AUSSI sur la fiche. Toujours sans
+    // toucher à l'étape — « Perdu » ne s'applique jamais tout seul.
+    if (ligne.outcome === "refus" && texte) {
+      await supabase
+        .from("prospects")
+        .update({ lost_reason: texte })
+        .eq("id", input.prospectId);
+    }
+
+    // Une correction change ce que les FAITS disent : l'étape et la confiance
+    // se réévaluent, avec les mêmes garde-fous qu'ailleurs (jamais de recul,
+    // jamais par-dessus un verrou).
+    if (correction) {
+      await applyAutoStatus(supabase, input.prospectId);
+      await recalcConfidence(supabase, input.prospectId);
+    }
+  }
+
+  if (input.dateLocale) {
+    const res = await saveExchangeCore(supabase, userId, {
+      prospectId: input.prospectId,
+      type: input.rendezVous ? "rendez_vous" : "note",
+      dateLocale: input.dateLocale,
+      rdvLieu: input.rdvLieu ?? null,
+      rdvFin: input.rdvFin ?? null,
+    });
+    if (res.error) return { error: res.error };
+    if (input.rendezVous) revalidatePath("/agenda");
+  }
+
+  revalidateProspect(input.prospectId);
+  return { success: "Enregistré." };
 }
 
 // =====================================================================

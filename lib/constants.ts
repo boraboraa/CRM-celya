@@ -1,5 +1,6 @@
 import type {
   ActivityType,
+  CallOutcome,
   ConfidenceLevel,
   EmailIntent,
   ProspectStatus,
@@ -86,6 +87,68 @@ export function normalizeStatus(raw: string | null | undefined): ProspectStatus 
   if (!raw) return "a_appeler";
   if ((STATUS_ORDER as string[]).includes(raw)) return raw as ProspectStatus;
   return LEGACY_STATUS[raw] ?? "a_appeler";
+}
+
+// ---------------------------------------------------------------------------
+// Résultat d'appel — cinq issues, deux taps
+// ---------------------------------------------------------------------------
+
+/**
+ * L'ordre des pastilles, du plus fréquent au plus définitif. Il ne change pas
+ * d'un écran à l'autre : le pouce apprend une position, pas une liste.
+ */
+export const OUTCOME_ORDER: CallOutcome[] = [
+  "sans_reponse",
+  "barrage",
+  "rappeler",
+  "interesse",
+  "refus",
+];
+
+export const OUTCOME_LABEL: Record<CallOutcome, string> = {
+  sans_reponse: "Pas de réponse",
+  barrage: "Barrage",
+  rappeler: "À rappeler",
+  interesse: "Intéressé",
+  refus: "Pas intéressé",
+};
+
+/** Le pictogramme accompagne toujours le libellé — la couleur ne porte jamais seule. */
+export const OUTCOME_ICON: Record<CallOutcome, string> = {
+  sans_reponse: "📵",
+  barrage: "🚧",
+  rappeler: "↩︎",
+  interesse: "👍",
+  refus: "✕",
+};
+
+/**
+ * Aucune couleur nouvelle : on reprend celles déjà employées ailleurs —
+ * rose pour un refus (comme l'étape « Perdu »), ambre pour un barrage (comme
+ * « Proposition », ce qui demande de l'attention), émeraude pour un intérêt
+ * (comme « Gagné »), cyan pour un rappel à poser, ardoise pour un silence.
+ * Classes complètes, jamais interpolées (règle JIT).
+ */
+export const OUTCOME_CHIP: Record<CallOutcome, string> = {
+  sans_reponse: "bg-slate-500/15 text-slate-300 ring-slate-400/25",
+  barrage: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
+  rappeler: "bg-cyan-500/15 text-cyan-300 ring-cyan-400/25",
+  interesse: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/25",
+  refus: "bg-rose-500/15 text-rose-300 ring-rose-400/25",
+};
+
+/** La couleur du texte seul, pour la ligne « dernière action » des cartes. */
+export const OUTCOME_TEXT: Record<CallOutcome, string> = {
+  sans_reponse: "text-slate-300",
+  barrage: "text-amber-300",
+  rappeler: "text-cyan-300",
+  interesse: "text-emerald-300",
+  refus: "text-rose-300",
+};
+
+/** Une valeur inconnue (donnée ancienne) ne casse jamais l'affichage. */
+export function isCallOutcome(raw: unknown): raw is CallOutcome {
+  return typeof raw === "string" && (OUTCOME_ORDER as string[]).includes(raw);
 }
 
 // ---------------------------------------------------------------------------

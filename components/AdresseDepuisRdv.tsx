@@ -59,7 +59,7 @@ export function AdresseDepuisRdv({
             }
           })
         }
-        className="rounded-lg bg-white/[0.07] px-2.5 py-1 text-[11px] font-medium text-slate-100 ring-1 ring-white/15 transition hover:bg-white/[0.12] disabled:opacity-50"
+        className="btn-ghost px-2.5 py-1 text-[11px]"
       >
         Enregistrer
       </button>

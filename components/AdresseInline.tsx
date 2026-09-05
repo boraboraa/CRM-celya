@@ -4,6 +4,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import { setProspectAddressAction } from "@/app/actions";
 import { AdresseField } from "@/components/AdresseField";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
+import { Icone } from "@/components/ui";
 
 /**
  * L'adresse EN TÊTE DE FICHE — le seul point d'entrée visible.
@@ -15,8 +16,11 @@ import { BoutonsMaps } from "@/components/BoutonsMaps";
  *
  *   · pas d'adresse → « ＋ Ajouter une adresse », qui déplie le champ EN PLACE
  *     (aucune navigation, aucune modale) ;
- *   · une adresse → les boutons Maps, et « Modifier » rouvre le même champ,
- *     pré-rempli.
+ *   · une adresse → les boutons Maps, et rien d'autre.
+ *
+ * « Modifier » est parti d'ici : corriger une adresse déjà saisie est rare, et
+ * le champ existe déjà dans « Modifier la fiche » (AdresseField, le même
+ * composant). L'AJOUT, lui, ne l'était pas — c'est le geste qui reste en tête.
  *
  * Aucun rendu conditionnel sur le rôle : la RLS tranche qui peut écrire, et un
  * commercial remplit ce champ plus souvent que l'admin.
@@ -73,16 +77,7 @@ export function AdresseInline({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         {vue ? (
-          <>
-            <BoutonsMaps valeur={vue} ville={ville} />
-            <button
-              type="button"
-              onClick={ouvrir}
-              className="text-[11px] text-slate-500 underline-offset-2 transition hover:text-slate-300 hover:underline"
-            >
-              Modifier
-            </button>
-          </>
+          <BoutonsMaps valeur={vue} ville={ville} />
         ) : (
           !ouvert && (
             <button
@@ -90,7 +85,7 @@ export function AdresseInline({
               onClick={ouvrir}
               className="btn-ghost px-2.5 py-1.5 text-xs"
             >
-              <span aria-hidden>＋</span> Ajouter une adresse
+              <Icone nom="plus" className="h-3 w-3" /> Ajouter une adresse
             </button>
           )
         )}
@@ -135,7 +130,7 @@ export function AdresseInline({
                 setOuvert(false);
                 setErreur(undefined);
               }}
-              className="text-xs text-slate-500 transition hover:text-slate-300"
+              className="btn-link text-xs"
             >
               Annuler
             </button>

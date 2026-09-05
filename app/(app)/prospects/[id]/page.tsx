@@ -213,12 +213,17 @@ export default async function ProspectDetailPage({
           [...meetings].reverse().find((m) => m.location?.trim())?.location?.trim() ||
           null);
 
+  const relances = openTasks as unknown as OpenTask[];
   const nextAction = deriveNextAction(
-    openTasks as unknown as OpenTask[],
+    relances,
     lastEvent,
     prospect.contact_name,
     prochainRdv
   );
+  // La relance ouverte la plus proche (la liste est triée par échéance), même
+  // quand un rendez-vous lui passe devant dans la carte : c'est elle que
+  // « Relancer » re-date, jamais une nouvelle.
+  const relanceOuverte = relances[0] ?? null;
 
   // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur
   // s'ouvre pré-rempli, destinataire et objet repris du message reçu. Le
@@ -318,6 +323,7 @@ export default async function ProspectDetailPage({
           action={nextAction}
           prospectId={prospect.id}
           companyName={prospect.company_name}
+          relanceOuverte={relanceOuverte}
           canEmail={Boolean(prospect.email)}
         />
       </div>
@@ -342,9 +348,12 @@ export default async function ProspectDetailPage({
           />
 
           <section>
-            <details id="modifier-la-fiche" className="card scroll-mt-6 p-6">
+            <details id="modifier-la-fiche" className="group card scroll-mt-6 p-6">
               <summary className="btn-link cursor-pointer list-none text-xs">
-                <Icone nom="chevron" className="h-3 w-3" />
+                <Icone
+                  nom="chevron"
+                  className="h-3 w-3 transition-transform group-open:rotate-180"
+                />
                 Modifier la fiche
               </summary>
               <div className="mt-5">
@@ -430,8 +439,12 @@ export default async function ProspectDetailPage({
             <RelancesSection prospectId={prospect.id} openTasks={openTasks} />
 
             {doneTasks.length > 0 && (
-              <details className="mt-3">
+              <details className="group mt-3">
                 <summary className="btn-link cursor-pointer list-none text-xs">
+                  <Icone
+                    nom="chevron"
+                    className="h-3 w-3 transition-transform group-open:rotate-180"
+                  />
                   {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} passée
                   {doneTasks.length > 1 ? "s" : ""}
                 </summary>

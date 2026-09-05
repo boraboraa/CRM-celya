@@ -52,9 +52,10 @@ function pad(n: number): string {
  * relance figeait l'écran une seconde et demie.
  *
  * Deux modes. Sur « À faire », la ligne se travaille : case à cocher, date,
- * raccourcis, suppression, « Résultat ». Sur la fiche (`lecture`), elle se LIT
- * seulement — les gestes de la prochaine relance vivent dans la carte
- * PROCHAINE ACTION, un geste à un seul endroit.
+ * raccourcis, suppression, « Résultat ». Sur la fiche, seule la PREMIÈRE
+ * relance passe en `lecture` — celle-là se pilote dans la carte PROCHAINE
+ * ACTION, un geste à un seul endroit. Une deuxième, rare, garde ses commandes
+ * là où elle s'affiche, parce qu'À faire ne la montrera qu'à sa date.
  */
 export function TaskRow({
   task,
@@ -81,6 +82,8 @@ export function TaskRow({
   const overdue = !done && new Date(task.due_at).getTime() < Date.now();
   /** Le résultat d'appel se déplie EN PLACE — sans ouvrir la fiche. */
   const [resultatOuvert, setResultatOuvert] = useState(false);
+  /** « À rappeler » vient d'être tapé : la ligne réclame une date. */
+  const [pourQuand, setPourQuand] = useState(false);
 
   const dueLocal = isoToLocalInput(task.due_at); // YYYY-MM-DDTHH:mm Bruxelles
   const dueDate = dueLocal.slice(0, 10);
@@ -89,6 +92,7 @@ export function TaskRow({
   /** Reprogramme à une date précise en conservant l'heure existante. */
   function reschedule(date: string) {
     if (!date || !onReschedule) return;
+    setPourQuand(false);
     const local = `${date}T${dueTime}`;
     // La date affichée tout de suite doit être la vraie : même conversion que
     // le serveur (heure de Bruxelles → UTC), par le même utilitaire.
@@ -181,7 +185,12 @@ export function TaskRow({
               <span aria-hidden>·</span>
             </>
           )}
-          <span className={overdue ? "text-amber-300" : ""}>
+          {/* En lecture, la date est le seul signal de retard qui reste : elle
+              porte donc son pictogramme — la couleur ne parle jamais seule. */}
+          <span
+            className={overdue ? "inline-flex items-center gap-1 text-amber-300" : ""}
+          >
+            {overdue && lecture && <Icone nom="alerte" className="h-3 w-3" />}
             {overdue ? "En retard — " : ""}
             {fmtDateTime(task.due_at)}
           </span>
@@ -216,12 +225,14 @@ export function TaskRow({
             {resultatOuvert ? (
               <ResultatAppel
                 prospectId={task.prospects.id}
+                onRappeler={() => setPourQuand(true)}
                 className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]"
               />
             ) : (
               <button
                 type="button"
                 onClick={() => setResultatOuvert(true)}
+                aria-expanded={resultatOuvert}
                 className="btn-link text-[11px]"
               >
                 Résultat
@@ -237,6 +248,11 @@ export function TaskRow({
             compact ? "col-start-2 mt-2" : "shrink-0"
           }`}
         >
+          {/* « À rappeler » vient d'être enregistré : il ne manque plus que le
+              jour, et c'est ce champ-ci qui le porte. */}
+          {pourQuand && (
+            <span className="text-[11px] text-amber-300">Pour quand&nbsp;?</span>
+          )}
           {/* Champ de date réel : reprogrammer au jour près. Les raccourcis
               remplissent la même date (et l'appliquent aussitôt) — mêmes mots
               que la ligne « Relancer » de la carte, ils viennent du même

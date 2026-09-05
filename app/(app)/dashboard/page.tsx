@@ -561,7 +561,7 @@ export default async function TodoPage({
         <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
           Réponses reçues
           {replies.length > 0 && (
-            <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[11px] text-cyan-300">
+            <span className="rounded-full bg-celya-blue/15 px-2 py-0.5 text-[11px] text-blue-300">
               {replies.length}
             </span>
           )}

@@ -118,6 +118,8 @@ export function SqueletteFiche() {
             <Bloc key={i} className="h-11 w-32 rounded-xl" />
           ))}
         </div>
+        {/* Le champ d'une ligne du résultat d'appel, sous les cinq pastilles. */}
+        <Bloc className="mt-2.5 h-11 w-full rounded-xl" />
         <div className="mt-4 flex flex-wrap gap-2">
           <Bloc className="h-8 w-24 rounded-xl" />
           <Bloc className="h-8 w-48 rounded-xl" />

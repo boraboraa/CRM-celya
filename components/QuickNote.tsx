@@ -552,9 +552,9 @@ export function QuickNote({
 
       {/* Les trois faits que ni le texte ni le parseur ne donnent — rares,
           donc repliés : on les déclare, on ne les devine jamais. */}
-      <details className="rounded-xl bg-white/[0.02] px-3.5 py-3 ring-1 ring-white/[0.06]">
+      <details className="group rounded-xl bg-white/[0.02] px-3.5 py-3 ring-1 ring-white/[0.06]">
         <summary className="btn-link list-none text-xs cursor-pointer">
-          <Icone nom="chevron" />
+          <Icone nom="chevron" className="transition-transform group-open:rotate-180" />
           Plus d&apos;options
         </summary>
         <div className="mt-3 space-y-2">

@@ -89,12 +89,12 @@ export function ProspectJournal({
     const surOuverture = (e: Event) => {
       const detail = (e as CustomEvent<JournalOpen>).detail;
       if (!detail) return;
-      setOnglet(detail.onglet);
-      if (detail.onglet === "email") {
-        setPrefill({ to: detail.to, subject: detail.subject, body: detail.body });
-        setCle((k) => k + 1);
-        setAutoFocus(true);
-      }
+      // Un seul geste passe par cet événement : écrire. L'onglet est donc
+      // toujours « email » — il n'a plus à voyager avec le pré-remplissage.
+      setOnglet("email");
+      setPrefill({ to: detail.to, subject: detail.subject, body: detail.body });
+      setCle((k) => k + 1);
+      setAutoFocus(true);
       defiler();
     };
 

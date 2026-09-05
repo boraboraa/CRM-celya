@@ -80,18 +80,21 @@ export function StatusControl({
   return (
     <div className={`space-y-2.5 ${pending ? "opacity-60" : ""} transition-opacity`}>
       {/* L'étape actuelle. Elle se lit ; elle ouvre les autres si on la touche.
-          La clé la remonte à chaque changement d'étape, pour que `animate-pop`
-          rejoue sur la nouvelle valeur au lieu de rester figé. */}
+          Le bouton, lui, reste MONTÉ : une clé posée dessus le remontait à
+          chaque choix, et le clavier perdait le focus juste après. C'est le
+          contenu qui porte la clé — `animate-pop` rejoue donc sur la nouvelle
+          valeur sans que le bouton disparaisse sous le doigt. */}
       <button
-        key={vue.status}
         type="button"
         onClick={() => setDeplie((d) => !d)}
         aria-expanded={deplie}
         title={`Étape actuelle : ${STATUS_LABEL[vue.status]} — cliquer pour en changer`}
-        className={`chip min-h-[36px] animate-pop transition duration-200 ${STATUS_CHIP[vue.status]}`}
+        className={`chip min-h-[36px] transition duration-200 ${STATUS_CHIP[vue.status]}`}
       >
-        <Icone nom={STATUS_ICON[vue.status]} className="h-3 w-3" />
-        {STATUS_LABEL[vue.status]}
+        <span key={vue.status} className="inline-flex items-center gap-1.5 animate-pop">
+          <Icone nom={STATUS_ICON[vue.status]} className="h-3 w-3" />
+          {STATUS_LABEL[vue.status]}
+        </span>
         <Icone
           nom="chevron"
           className={`h-3 w-3 transition-transform duration-200 ${deplie ? "rotate-180" : ""}`}

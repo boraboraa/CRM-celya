@@ -26,9 +26,11 @@ import { dateInputToISO } from "@/lib/time";
  * ouvertes quelle que soit leur date — une relance au 14 octobre y a donc bien
  * sa place tout de suite.
  *
- * Ici, la liste se LIT : « Fait » et « Relancer » vivent dans la carte
- * PROCHAINE ACTION, un geste à un seul endroit. Une deuxième relance ouverte
- * se traite depuis « À faire », le jour de son échéance.
+ * Ici, la PREMIÈRE ligne se LIT : « Fait » et « Relancer » vivent dans la
+ * carte PROCHAINE ACTION, un geste à un seul endroit. Une deuxième relance,
+ * rare, garde ses commandes ici — parce qu'À faire ne la montrera qu'à sa
+ * date : sans elles, une relance ouverte au 14 octobre ne serait modifiable
+ * nulle part.
  */
 export function RelancesSection({
   prospectId,
@@ -100,15 +102,20 @@ export function RelancesSection({
             enCours={enCours}
             geste={geste}
             compact
-            lecture
+            lecture={(i) => i === 0}
             provisoires={provisoires}
           />
         </ul>
       )}
 
-      <details className="mt-3">
+      <details className="group mt-3">
         <summary className="btn-link cursor-pointer list-none text-xs">
-          <Icone nom="plus" className="h-3 w-3" />
+          {/* Le ＋ pivote en ✕ une fois le formulaire ouvert : l'état du bloc
+              se lit sur son propre bouton. */}
+          <Icone
+            nom="plus"
+            className="h-3 w-3 transition-transform group-open:rotate-45"
+          />
           Planifier une relance
         </summary>
         <form ref={formRef} action={planifier} className="card mt-2 space-y-3 p-5">

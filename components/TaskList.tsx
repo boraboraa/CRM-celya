@@ -107,8 +107,10 @@ export function MessageErreur({ message }: { message?: string }) {
  * sans commandes — on ne coche pas une relance qui n'existe pas encore.
  *
  * `lecture` traverse jusqu'à `TaskRow`, qui n'affiche alors plus aucune
- * commande. Les rappels restent branchés : c'est la ligne qui les ignore, et
- * l'état optimiste reste le même des deux côtés.
+ * commande. Elle se décide ligne par ligne (`(index) => boolean`) : sur la
+ * fiche, seule la PREMIÈRE relance se lit — c'est celle que pilote la carte
+ * PROCHAINE ACTION. Les rappels restent branchés : c'est la ligne qui les
+ * ignore, et l'état optimiste reste le même des deux côtés.
  */
 type Geste = ReturnType<typeof useOptimisticTasks>["geste"];
 
@@ -124,21 +126,26 @@ export function TaskRows({
   enCours: string | null;
   geste: Geste;
   compact?: boolean;
-  /** Lecture seule : la ligne se lit, les gestes vivent ailleurs. */
-  lecture?: boolean;
+  /**
+   * Lecture seule : la ligne se lit, les gestes vivent ailleurs. En fonction,
+   * elle se décide ligne par ligne à partir du rang dans la liste.
+   */
+  lecture?: boolean | ((index: number) => boolean);
   /** Identifiants pas encore connus du serveur (lignes provisoires). */
   provisoires?: Set<string>;
 }) {
   return (
     <>
-      {vue.map((t) => {
+      {vue.map((t, i) => {
         const provisoire = provisoires?.has(t.id) ?? false;
+        const enLecture =
+          typeof lecture === "function" ? lecture(i) : Boolean(lecture);
         return (
           <TaskRow
             key={t.id}
             task={t}
             compact={compact}
-            lecture={lecture}
+            lecture={enLecture}
             pending={enCours === t.id || provisoire}
             onComplete={
               provisoire
@@ -181,18 +188,16 @@ export function TaskRows({
 }
 
 /**
- * La liste seule — dashboard, et relances passées de la fiche. `lecture` passe
- * jusqu'aux lignes : une liste qui se lit n'affiche plus de commandes.
+ * La liste seule — dashboard, et relances passées de la fiche. Ses lignes
+ * gardent toujours leurs commandes : une relance passée se rouvre d'un clic.
  */
 export function TaskList({
   tasks,
   compact = false,
-  lecture = false,
   className = "card divide-y divide-white/[0.05]",
 }: {
   tasks: TaskWithProspect[];
   compact?: boolean;
-  lecture?: boolean;
   className?: string;
 }) {
   const { vue, erreur, enCours, geste } = useOptimisticTasks(tasks);
@@ -203,13 +208,7 @@ export function TaskList({
     <>
       <MessageErreur message={erreur} />
       <ul className={className}>
-        <TaskRows
-          vue={vue}
-          enCours={enCours}
-          geste={geste}
-          compact={compact}
-          lecture={lecture}
-        />
+        <TaskRows vue={vue} enCours={enCours} geste={geste} compact={compact} />
       </ul>
     </>
   );

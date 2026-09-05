@@ -207,7 +207,18 @@ export function ResultatAppel({
         return;
       }
       setTexteEnregistre(nouveauTexte);
-      setNote("Enregistré.");
+      // Même précision qu'au tap : un rendez-vous auquel il manque le jour ou
+      // l'heure n'est pas posé, et le silence laissait croire le contraire.
+      setNote(
+        [
+          "Enregistré.",
+          rdvIncomplet
+            ? "Le rendez-vous n'a PAS été posé : il manque le jour ou l'heure."
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
     });
   }
 

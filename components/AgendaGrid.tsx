@@ -574,7 +574,7 @@ export function AgendaGrid({
                             {m.prospect?.phone && (
                               <a
                                 href={`tel:${m.prospect.phone.replace(/\s/g, "")}`}
-                                className="text-celya-cyan hover:underline"
+                                className="text-celya-blue hover:underline"
                               >
                                 {m.prospect.phone}
                               </a>

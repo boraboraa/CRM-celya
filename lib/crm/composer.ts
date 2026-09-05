@@ -31,7 +31,12 @@ export type ComposerPrefill = {
  */
 export type JournalTab = "consigner" | "email";
 
-export type JournalOpen = ComposerPrefill & { onglet: JournalTab };
+/**
+ * Ce que porte l'événement : le seul pré-remplissage. L'onglet n'y figure
+ * plus — il ne pouvait plus valoir qu'« email », et un champ à valeur unique
+ * ne se transporte pas.
+ */
+export type JournalOpen = ComposerPrefill;
 
 /** Événement de fenêtre écouté par ProspectJournal. */
 export const COMPOSER_EVENT = "celya:agir";
@@ -55,5 +60,5 @@ function dispatch(detail: JournalOpen): void {
  * Sans effet côté serveur (rendu initial), par construction.
  */
 export function openComposer(prefill: ComposerPrefill = {}): void {
-  dispatch({ ...prefill, onglet: "email" });
+  dispatch({ ...prefill });
 }

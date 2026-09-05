@@ -40,15 +40,6 @@ export const STATUS_CHIP: Record<ProspectStatus, string> = {
   perdu: "bg-rose-500/15 text-rose-300 ring-rose-400/25",
 };
 
-export const STATUS_DOT: Record<ProspectStatus, string> = {
-  a_appeler: "bg-slate-400",
-  contacte: "bg-cyan-400",
-  rendez_vous: "bg-blue-400",
-  proposition: "bg-amber-400",
-  gagne: "bg-emerald-400",
-  perdu: "bg-rose-400",
-};
-
 /** Pictogramme d'étape — la couleur ne porte jamais seule (daltonisme). */
 export const STATUS_ICON: Record<ProspectStatus, IconeNom> = {
   a_appeler: "telephone",

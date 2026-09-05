@@ -12,12 +12,8 @@ body {
   color: #e6ebf5;
 }
 
-body {
-  background-image:
-    radial-gradient(70rem 40rem at 8% -12%, rgba(34, 211, 238, 0.1), transparent 60%),
-    radial-gradient(60rem 36rem at 96% 0%, rgba(168, 85, 247, 0.1), transparent 60%);
-  background-attachment: fixed;
-}
+/* Fond plat : les halos cyan/violet ne portaient aucune information et
+   teintaient tout ce qui se posait dessus. */
 
 @layer components {
   .card {
@@ -58,13 +54,22 @@ body {
            text-sm font-medium transition disabled:opacity-50 disabled:pointer-events-none;
   }
 
+  /* Le bleu porte tout ce qui se clique — un seul geste principal par écran. */
   .btn-primary {
-    @apply btn bg-celya-gradient text-slate-950 font-semibold shadow-glow
+    @apply btn bg-celya-blue text-white font-semibold
            hover:brightness-110 active:brightness-95;
   }
 
+  /* Le geste secondaire : un contour, pas une surface. */
   .btn-ghost {
-    @apply btn bg-white/[0.04] text-slate-200 ring-1 ring-white/10 hover:bg-white/[0.08];
+    @apply btn bg-transparent text-slate-200 ring-1 ring-white/[0.12] hover:bg-white/[0.05];
+  }
+
+  /* Les gestes rares (Rendre la main, Analyser, Planifier, Modifier, Annuler,
+     Voir le texte…) : du texte, pas un bouton. */
+  .btn-link {
+    @apply inline-flex items-center gap-1 text-slate-400 underline-offset-2
+           transition hover:text-slate-100 hover:underline disabled:opacity-50;
   }
 
   .btn-danger {
@@ -74,10 +79,6 @@ body {
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1
            text-[11px] font-medium ring-1;
-  }
-
-  .gradient-text {
-    @apply bg-celya-gradient bg-clip-text text-transparent;
   }
 
   .nav-link {

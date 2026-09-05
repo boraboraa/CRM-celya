@@ -12,26 +12,10 @@ import {
   OUTCOME_ORDER,
   STATUS_LABEL,
 } from "@/lib/constants";
+import { Icone } from "@/components/ui";
 import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { CallOutcome } from "@/lib/types";
-
-/** Les trois rappels qui couvrent l'immense majorité des cas. */
-const RAPPELS: { jours: number; label: string }[] = [
-  { jours: 1, label: "demain" },
-  { jours: 3, label: "dans 3 jours" },
-  { jours: 7, label: "la semaine prochaine" },
-];
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function dansNJours(jours: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + jours);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 function fmtJourCourt(jourISO: string): string {
   return new Intl.DateTimeFormat("fr-BE", {
@@ -56,8 +40,11 @@ function fmtJourCourt(jourISO: string): string {
  *     carte affichera (`activities.subject`) ;
  *   · pour « Pas intéressé », ce champ devient obligatoire et la raison va
  *     AUSSI dans `prospects.lost_reason` — sans jamais appliquer l'étape
- *     « Perdu », qui reste une décision humaine (invariant de status.ts) ;
- *   · pour « À rappeler », trois dates d'un tap.
+ *     « Perdu », qui reste une décision humaine (invariant de status.ts).
+ *
+ * « À rappeler » ne date rien ici : la carte PROCHAINE ACTION porte la ligne
+ * « Relancer », et un rappel s'y pose d'un tap. `onRappeler` sert exactement à
+ * ça — prévenir la carte qu'il manque une date.
  *
  * Le champ passe par le MÊME parseur de raccourcis que QuickNote
  * (lib/crm/raccourcis.ts) : « rdv mardi 11h » pose un vrai rendez-vous,
@@ -68,14 +55,12 @@ function fmtJourCourt(jourISO: string): string {
  */
 export function ResultatAppel({
   prospectId,
-  companyName,
-  compact = false,
+  onRappeler,
   className = "",
 }: {
   prospectId: string;
-  companyName?: string;
-  /** Version resserrée : dans une ligne de « À faire », sous une carte. */
-  compact?: boolean;
+  /** « À rappeler » vient d'être enregistré : il reste à dire pour quand. */
+  onRappeler?: () => void;
   className?: string;
 }) {
   /**
@@ -163,6 +148,8 @@ export function ResultatAppel({
         }
         setTexteEnregistre(texte.trim());
         setNote("Corrigé.");
+        // Corrigé EN « à rappeler » : la date manque toujours, la carte le dit.
+        if (o === "rappeler") onRappeler?.();
       });
       return;
     }
@@ -195,36 +182,42 @@ export function ResultatAppel({
           .filter(Boolean)
           .join(" ")
       );
+      // « À rappeler » : la date se choisit dans la ligne « Relancer » de la
+      // carte, pas ici — on lui passe la main.
+      if (o === "rappeler") onRappeler?.();
     });
   }
 
-  /** La phrase dictée après le tap, ou une date de rappel choisie d'un clic. */
-  function preciser(dateLocale?: string) {
+  /** La phrase dictée après le tap — avec ce que ses raccourcis ajoutent. */
+  function preciser() {
     if (!activiteId) return;
     const nouveauTexte = texte.trim();
-    if (!dateLocale && nouveauTexte === texteEnregistre) return;
+    if (nouveauTexte === texteEnregistre) return;
     setErreur(undefined);
 
     startTransition(async () => {
       const res = await preciserResultatAction({
         prospectId,
         activiteId,
-        texte: nouveauTexte !== texteEnregistre ? nouveauTexte : null,
-        ...(dateLocale
-          ? { dateLocale, rendezVous: false }
-          : nouveauTexte !== texteEnregistre
-            ? chargeRaccourcis()
-            : {}),
+        texte: nouveauTexte,
+        ...chargeRaccourcis(),
       });
       if (res.error) {
         setErreur(res.error);
         return;
       }
       setTexteEnregistre(nouveauTexte);
+      // Même précision qu'au tap : un rendez-vous auquel il manque le jour ou
+      // l'heure n'est pas posé, et le silence laissait croire le contraire.
       setNote(
-        dateLocale
-          ? `Rappel posé pour le ${fmtJourCourt(dateLocale)}.`
-          : "Enregistré."
+        [
+          "Enregistré.",
+          rdvIncomplet
+            ? "Le rendez-vous n'a PAS été posé : il manque le jour ou l'heure."
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
       );
     });
   }
@@ -232,21 +225,7 @@ export function ResultatAppel({
   const enregistre = activiteId !== null;
 
   return (
-    <div
-      className={`${compact ? "" : "card p-4"} space-y-2.5 ${className}`}
-      aria-label="Résultat de l'appel"
-    >
-      {!compact && (
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Résultat de l&apos;appel
-          {companyName && (
-            <span className="ml-1 font-normal normal-case tracking-normal text-slate-500">
-              — {companyName}
-            </span>
-          )}
-        </p>
-      )}
-
+    <div className={`space-y-2.5 ${className}`} aria-label="Résultat de l'appel">
       {/* Cinq cibles LARGES : c'est un pouce qui vise, pas une souris. */}
       <div className="flex flex-wrap gap-1.5">
         {OUTCOME_ORDER.map((o) => {
@@ -264,9 +243,9 @@ export function ResultatAppel({
                   : "bg-white/[0.04] text-slate-300 ring-white/10 hover:bg-white/[0.08] hover:text-slate-100"
               }`}
             >
-              <span aria-hidden>{OUTCOME_ICON[o]}</span>
+              <Icone nom={OUTCOME_ICON[o]} />
               {OUTCOME_LABEL[o]}
-              {actif && enregistre && <span aria-hidden>✓</span>}
+              {actif && enregistre && <Icone nom="coche" className="h-3 w-3" />}
             </button>
           );
         })}
@@ -330,37 +309,27 @@ export function ResultatAppel({
         <div className="flex flex-wrap items-center gap-1.5">
           {rdvComplet && rdv && (
             <Pastille tone="bleu" onRetirer={() => setRdvRefuse(true)}>
-              📅 RDV {fmtJourCourt(rdv.debut.slice(0, 10))} {rdv.debut.slice(11, 16)}
+              <Icone nom="calendrier" /> RDV {fmtJourCourt(rdv.debut.slice(0, 10))}{" "}
+              {rdv.debut.slice(11, 16)}
             </Pastille>
           )}
           {rdvIncomplet && (
             <Pastille tone="ambre" onRetirer={() => setRdvRefuse(true)}>
-              📅 RDV — {rdv?.manque === "jour" ? "quel jour ?" : "quelle heure ?"} · à
-              compléter dans « Consigner »
+              <Icone nom="calendrier" /> RDV —{" "}
+              {rdv?.manque === "jour" ? "quel jour ?" : "quelle heure ?"} · à compléter
+              dans la note
             </Pastille>
           )}
-          {rdv?.lieu && rdvComplet && <Pastille>📍 {rdv.lieu}</Pastille>}
-          {!rdvComplet && relance && (
-            <Pastille>📆 Relance {fmtJourCourt(relance.date)}</Pastille>
+          {rdv?.lieu && rdvComplet && (
+            <Pastille>
+              <Icone nom="epingle" /> {rdv.lieu}
+            </Pastille>
           )}
-        </div>
-      )}
-
-      {/* « À rappeler » : trois dates, un tap — pas un calendrier. */}
-      {choisi === "rappeler" && enregistre && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-slate-500">Rappeler</span>
-          {RAPPELS.map((r) => (
-            <button
-              key={r.jours}
-              type="button"
-              disabled={pending}
-              onClick={() => preciser(dansNJours(r.jours))}
-              className="min-h-[36px] rounded-lg bg-white/[0.04] px-2.5 text-[11px] text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.08] hover:text-slate-100"
-            >
-              {r.label}
-            </button>
-          ))}
+          {!rdvComplet && relance && (
+            <Pastille>
+              <Icone nom="calendrier" /> Relance {fmtJourCourt(relance.date)}
+            </Pastille>
+          )}
         </div>
       )}
 

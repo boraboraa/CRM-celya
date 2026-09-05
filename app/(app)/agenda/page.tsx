@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, Icone } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import {
   AgendaGrid,
@@ -205,8 +205,8 @@ export default async function AgendaPage({
         <div className="flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
           {(
             [
-              ["semaine", "▤ Semaine"],
-              ["jour", "▢ Jour"],
+              ["semaine", "Semaine"],
+              ["jour", "Jour"],
             ] as const
           ).map(([v, label]) => (
             <Link
@@ -227,9 +227,9 @@ export default async function AgendaPage({
           <Link
             href={href({ ref: vueJour ? decale(jour, -1) : decale(lundi, -7) })}
             aria-label={vueJour ? "Jour précédent" : "Semaine précédente"}
-            className="rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
+            className="inline-flex rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
           >
-            ←
+            <Icone nom="chevron" className="h-4 w-4 rotate-90" />
           </Link>
           <span className="min-w-[180px] text-center text-sm font-medium text-slate-200">
             {titrePeriode.charAt(0).toUpperCase() + titrePeriode.slice(1)}
@@ -237,9 +237,9 @@ export default async function AgendaPage({
           <Link
             href={href({ ref: vueJour ? decale(jour, 1) : decale(lundi, 7) })}
             aria-label={vueJour ? "Jour suivant" : "Semaine suivante"}
-            className="rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
+            className="inline-flex rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
           >
-            →
+            <Icone nom="chevron" className="h-4 w-4 -rotate-90" />
           </Link>
           <Link
             href={href({ ref: vueJour ? aujourdHui : lundiDe(aujourdHui) })}

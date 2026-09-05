@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { PageHeader, EmptyState, Icone } from "@/components/ui";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
@@ -158,7 +158,7 @@ export default async function TodoPage({
     // appliquée). Elle sert DEUX zones, d'où l'absence de filtre SQL :
     //   · « En attente de réponse » — dernier événement = mail sortant ;
     //   · « À appeler / à rappeler » — le résultat du dernier appel, affiché
-    //     sur la ligne (« 📵 Pas de réponse (3e fois) ») avant d'en passer un
+    //     sur la ligne (« Pas de réponse (3e fois) ») avant d'en passer un
     //     autre. Filtrer ici aurait coûté une SIXIÈME requête sur l'écran le
     //     plus consulté ; le tri se fait en mémoire, juste en dessous.
     supabase.from("prospect_action_state").select(LAST_ACTION_SELECT).limit(500),
@@ -428,7 +428,7 @@ export default async function TodoPage({
                         <Link
                           href={`/prospects/${p.id}`}
                           prefetch={false}
-                          className="underline-offset-2 hover:text-celya-cyan hover:underline"
+                          className="underline-offset-2 hover:text-celya-blue hover:underline"
                         >
                           {m.title}
                         </Link>
@@ -441,7 +441,7 @@ export default async function TodoPage({
                       {p?.phone && (
                         <a
                           href={`tel:${p.phone.replace(/\s/g, "")}`}
-                          className="text-celya-cyan hover:underline"
+                          className="text-celya-blue hover:underline"
                         >
                           {p.phone}
                         </a>
@@ -499,7 +499,7 @@ export default async function TodoPage({
             <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
               En attente de réponse
               {waiting.length > 0 && (
-                <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[11px] text-violet-300">
+                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] text-slate-300">
                   {waiting.length}
                 </span>
               )}
@@ -522,14 +522,15 @@ export default async function TodoPage({
                       key={p.id}
                       className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
                     >
-                      <span aria-hidden className="text-[13px]">
-                        📧
-                      </span>
+                      <Icone
+                        nom="enveloppe"
+                        className="h-3.5 w-3.5 text-slate-400"
+                      />
                       <div className="min-w-0 flex-1">
                         <Link
                           href={`/prospects/${p.id}`}
                           prefetch={false}
-                          className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-cyan hover:underline"
+                          className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-blue hover:underline"
                         >
                           {p.company_name}
                         </Link>
@@ -538,7 +539,7 @@ export default async function TodoPage({
                           {p.contact_name ? ` à ${p.contact_name}` : ""}
                         </p>
                       </div>
-                      <span className="shrink-0 text-xs text-violet-300/90">
+                      <span className="shrink-0 text-xs text-slate-400">
                         {p.next_action_at
                           ? `Remonte le ${fmtDate(p.next_action_at)}`
                           : "Aucune relance posée"}
@@ -560,7 +561,7 @@ export default async function TodoPage({
         <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
           Réponses reçues
           {replies.length > 0 && (
-            <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[11px] text-cyan-300">
+            <span className="rounded-full bg-celya-blue/15 px-2 py-0.5 text-[11px] text-blue-300">
               {replies.length}
             </span>
           )}
@@ -623,7 +624,7 @@ function TaskSection({
         <span
           className={`rounded-full px-2 py-0.5 text-[11px] ${
             tone === "late"
-              ? "bg-rose-500/15 text-rose-300"
+              ? "bg-amber-500/15 text-amber-300"
               : "bg-white/[0.06] text-slate-400"
           }`}
         >

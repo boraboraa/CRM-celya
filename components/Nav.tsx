@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { NavItem } from "@/lib/nav";
+import { Icone } from "@/components/ui";
 
 export function NavLinks({
   items,
@@ -32,9 +33,7 @@ export function NavLinks({
               orientation === "horizontal" ? "shrink-0 whitespace-nowrap" : ""
             }`}
           >
-            <span aria-hidden className="text-base leading-none opacity-70">
-              {item.icon}
-            </span>
+            <Icone nom={item.icon} className="h-4 w-4 opacity-70" />
             {item.label}
           </Link>
         );

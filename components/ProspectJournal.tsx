@@ -4,9 +4,8 @@ import { useEffect, useOptimistic, useRef, useState } from "react";
 import { Timeline, type TimelineEntry } from "@/components/Timeline";
 import { DeleteEntryButton } from "@/components/DeleteEntryButton";
 import { QuickNote } from "@/components/QuickNote";
-import { ResultatAppel } from "@/components/ResultatAppel";
 import { EmailComposer } from "@/components/EmailComposer";
-import { EmptyState } from "@/components/ui";
+import { EmptyState, Icone, type IconeNom } from "@/components/ui";
 import {
   COMPOSER_ANCHOR,
   COMPOSER_EVENT,
@@ -15,9 +14,9 @@ import {
   type JournalTab,
 } from "@/lib/crm/composer";
 
-const ONGLETS: { value: JournalTab; label: string }[] = [
-  { value: "consigner", label: "✎ Consigner" },
-  { value: "email", label: "✉ Envoyer un email" },
+const ONGLETS: { value: JournalTab; label: string; icone: IconeNom }[] = [
+  { value: "consigner", label: "Note", icone: "note" },
+  { value: "email", label: "Email", icone: "enveloppe" },
 ];
 
 /**
@@ -31,6 +30,11 @@ const ONGLETS: { value: JournalTab; label: string }[] = [
  * faire plusieurs milliers de pixels : Claude rédigeait, le texte atterrissait
  * en brouillon, et il fallait le recopier à la main. Le bloc « Agir » passe
  * donc AU-DESSUS du fil (lui-même ramené à ses dix dernières entrées).
+ *
+ * Ce qui se fait ICI : la note détaillée, et l'email. Le résultat d'un appel
+ * ne s'y consigne plus — il vit dans la carte PROCHAINE ACTION, sous le
+ * pouce, là où l'on arrive en raccrochant. Deux surfaces pour un même geste,
+ * c'était une de trop.
  *
  * Le geste consigné s'inscrit en tête du fil à l'instant du clic, en retrait
  * et marqué « Enregistrement… », puis la version du serveur la remplace. En
@@ -85,12 +89,12 @@ export function ProspectJournal({
     const surOuverture = (e: Event) => {
       const detail = (e as CustomEvent<JournalOpen>).detail;
       if (!detail) return;
-      setOnglet(detail.onglet);
-      if (detail.onglet === "email") {
-        setPrefill({ to: detail.to, subject: detail.subject, body: detail.body });
-        setCle((k) => k + 1);
-        setAutoFocus(true);
-      }
+      // Un seul geste passe par cet événement : écrire. L'onglet est donc
+      // toujours « email » — il n'a plus à voyager avec le pré-remplissage.
+      setOnglet("email");
+      setPrefill({ to: detail.to, subject: detail.subject, body: detail.body });
+      setCle((k) => k + 1);
+      setAutoFocus(true);
       defiler();
     };
 
@@ -120,44 +124,31 @@ export function ProspectJournal({
       <section id="noter-un-echange" ref={blocRef} className="scroll-mt-6">
         <span id={COMPOSER_ANCHOR} aria-hidden className="block scroll-mt-6" />
 
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <div className="mb-3 flex flex-wrap items-center gap-4">
           {ONGLETS.map((o) => (
             <button
               key={o.value}
               type="button"
               onClick={() => setOnglet(o.value)}
               aria-pressed={onglet === o.value}
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wider ring-1 transition duration-200 ${
+              className={`inline-flex items-center gap-1.5 border-b-2 pb-1.5 text-xs font-semibold uppercase tracking-wider transition duration-200 ${
                 onglet === o.value
-                  ? "bg-celya-gradient text-slate-950 ring-transparent shadow-glow"
-                  : "bg-white/[0.04] text-slate-400 ring-white/10 hover:bg-white/[0.08] hover:text-slate-200"
+                  ? "border-celya-blue text-slate-50"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
               }`}
             >
+              <Icone nom={o.icone} />
               {o.label}
             </button>
           ))}
         </div>
 
         {onglet === "consigner" ? (
-          /* Le sélecteur d'étape part sur « ne pas changer » : aucun état
-             local ne peut plus rétrograder la fiche. */
-          <>
-            {/* Le résultat d'appel, EN TÊTE de l'onglet : deux taps, sans
-                descendre dans le formulaire complet. QuickNote reste dessous
-                pour les cas riches. */}
-            <ResultatAppel
-              prospectId={prospectId}
-              companyName={companyName}
-              className="mb-3"
-            />
-            <QuickNote
-              prospectId={prospectId}
-              companyName={companyName}
-              contactName={contactName}
-              isAdmin={isAdmin}
-              onOptimistic={ajouter}
-            />
-          </>
+          <QuickNote
+            prospectId={prospectId}
+            isAdmin={isAdmin}
+            onOptimistic={ajouter}
+          />
         ) : prospectEmail ? (
           <EmailComposer
             key={cle}

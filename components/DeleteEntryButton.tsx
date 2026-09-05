@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { deleteActivityAction, deleteEmailAction } from "@/app/actions";
+import { Icone } from "@/components/ui";
 
 /**
  * Corbeille sur une entrée du journal — admin uniquement (le contrôle est
@@ -59,9 +60,7 @@ export function DeleteEntryButton({
           aria-label={`Supprimer ${label}`}
           className="rounded-lg px-1.5 py-1 text-slate-600 transition hover:bg-rose-500/10 hover:text-rose-400"
         >
-          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor" aria-hidden>
-            <path d="M7.5 2h5l.5 1H16v2H4V3h3l.5-1Zm-2 4h9l-.7 10.1a1 1 0 0 1-1 .9H7.2a1 1 0 0 1-1-.9L5.5 6Z" />
-          </svg>
+          <Icone nom="corbeille" className="h-3.5 w-3.5" />
         </button>
       </span>
     );
@@ -86,7 +85,7 @@ export function DeleteEntryButton({
         type="button"
         onClick={() => setAsking(false)}
         disabled={pending}
-        className="rounded-lg px-2 py-1 text-[11px] text-slate-500 transition hover:text-slate-300"
+        className="btn-link text-[11px]"
       >
         Annuler
       </button>

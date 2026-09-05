@@ -3,11 +3,11 @@
 import { useActionState } from "react";
 import { sendDraftAction } from "@/app/mail-actions";
 import { openComposer } from "@/lib/crm/composer";
-import { FormError } from "@/components/ui";
+import { FormError, Icone } from "@/components/ui";
 import type { ActionState } from "@/app/actions";
 
 /**
- * « ✉ Envoyer » sur un brouillon — le geste qui manquait.
+ * « Envoyer » sur un brouillon — le geste qui manquait.
  *
  * Un brouillon est un texte écrit par Claude via le connecteur MCP. Jusqu'ici
  * il fallait le sélectionner, le copier, dérouler le composeur enterré en bas
@@ -63,13 +63,20 @@ export function DraftSendButton({
           title={empeche ?? `Envoyer ce brouillon à ${to}`}
           className="btn-primary px-2.5 py-1 text-[11px]"
         >
-          {pending ? "Envoi…" : "✉ Envoyer"}
+          {pending ? (
+            "Envoi…"
+          ) : (
+            <>
+              <Icone nom="enveloppe" className="h-3 w-3" />
+              Envoyer
+            </>
+          )}
         </button>
         <button
           type="button"
           onClick={() => openComposer({ to, subject, body })}
           title="Reprendre ce texte dans le composeur avant d'envoyer"
-          className="btn-ghost px-2.5 py-1 text-[11px]"
+          className="btn-link text-[11px]"
         >
           Modifier
         </button>

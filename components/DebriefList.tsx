@@ -7,6 +7,7 @@ import {
   deplacerRendezVousAction,
 } from "@/app/actions";
 import { fmtDateTime, relative } from "@/lib/constants";
+import { Icone } from "@/components/ui";
 
 export type DebriefMeeting = {
   id: string;
@@ -91,16 +92,14 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
             }`}
           >
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span aria-hidden className="text-[13px]">
-                🤝
-              </span>
+              <Icone nom="calendrier" className="h-4 w-4 text-slate-400" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-slate-100">
                   {m.prospect ? (
                     <Link
                       href={`/prospects/${m.prospect.id}`}
                       prefetch={false}
-                      className="underline-offset-2 hover:text-celya-cyan hover:underline"
+                      className="underline-offset-2 hover:text-celya-blue hover:underline"
                     >
                       {m.title}
                     </Link>
@@ -128,26 +127,29 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
                 type="button"
                 onClick={() => cloturer(m.id, "honore")}
                 disabled={enCours === m.id}
-                className="rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-400/25 transition hover:bg-emerald-500/25"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-400/25 transition hover:bg-emerald-500/25"
               >
-                ✓ Ça s&apos;est fait
+                <Icone nom="coche" className="h-3 w-3" />
+                Ça s&apos;est fait
               </button>
               <button
                 type="button"
                 onClick={() => cloturer(m.id, "annule")}
                 disabled={enCours === m.id}
-                className="rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-medium text-rose-300 ring-1 ring-rose-400/20 transition hover:bg-rose-500/20"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-medium text-rose-300 ring-1 ring-rose-400/20 transition hover:bg-rose-500/20"
               >
-                ✕ Annulé
+                <Icone nom="croix" className="h-3 w-3" />
+                Annulé
               </button>
               <button
                 type="button"
                 onClick={() => setReportId((r) => (r === m.id ? null : m.id))}
                 disabled={enCours === m.id}
                 aria-expanded={reportId === m.id}
-                className="rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.08]"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.08]"
               >
-                ↷ Reporté
+                <Icone nom="report" className="h-3 w-3" />
+                Reporté
               </button>
               {reportId === m.id && (
                 <input

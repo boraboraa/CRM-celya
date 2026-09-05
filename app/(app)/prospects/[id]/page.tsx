@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { Avatar } from "@/components/ui";
+import { Avatar, Icone } from "@/components/ui";
 import { AdresseInline } from "@/components/AdresseInline";
 import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
@@ -213,12 +213,17 @@ export default async function ProspectDetailPage({
           [...meetings].reverse().find((m) => m.location?.trim())?.location?.trim() ||
           null);
 
+  const relances = openTasks as unknown as OpenTask[];
   const nextAction = deriveNextAction(
-    openTasks as unknown as OpenTask[],
+    relances,
     lastEvent,
     prospect.contact_name,
     prochainRdv
   );
+  // La relance ouverte la plus proche (la liste est triée par échéance), même
+  // quand un rendez-vous lui passe devant dans la carte : c'est elle que
+  // « Relancer » re-date, jamais une nouvelle.
+  const relanceOuverte = relances[0] ?? null;
 
   // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur
   // s'ouvre pré-rempli, destinataire et objet repris du message reçu. Le
@@ -234,11 +239,9 @@ export default async function ProspectDetailPage({
     <>
       {/* ---------- En-tête : qui, et où on en est ---------- */}
       <div className="mb-6">
-        <Link
-          href="/prospects"
-          className="text-xs text-slate-500 transition hover:text-slate-300"
-        >
-          ← Tous les prospects
+        <Link href="/prospects" className="btn-link text-xs">
+          <Icone nom="chevron" className="h-3 w-3 rotate-90" />
+          Tous les prospects
         </Link>
 
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
@@ -251,7 +254,7 @@ export default async function ProspectDetailPage({
               {prospect.phone && (
                 <a
                   href={`tel:${prospect.phone.replace(/\s/g, "")}`}
-                  className="text-celya-cyan hover:underline"
+                  className="text-celya-blue hover:underline"
                 >
                   {prospect.phone}
                 </a>
@@ -259,7 +262,7 @@ export default async function ProspectDetailPage({
               {prospect.email && (
                 <a
                   href={`mailto:${prospect.email}`}
-                  className="text-celya-cyan hover:underline"
+                  className="text-celya-blue hover:underline"
                 >
                   {prospect.email}
                 </a>
@@ -269,7 +272,7 @@ export default async function ProspectDetailPage({
 
             {/* L'adresse — à côté du téléphone, les deux gestes du terrain :
                 ouvrir la fiche Maps, ou lancer l'itinéraire. Sans adresse, le
-                point d'entrée est ICI (« ＋ Ajouter une adresse ») : le champ
+                point d'entrée est ICI (« Ajouter une adresse ») : le champ
                 du formulaire complet est replié tout en bas, personne ne l'y
                 trouvait. Le lieu d'un rendez-vous, quand il y en a un à
                 proposer, garde la priorité — jamais les deux à la fois. */}
@@ -319,6 +322,8 @@ export default async function ProspectDetailPage({
         <NextActionCard
           action={nextAction}
           prospectId={prospect.id}
+          companyName={prospect.company_name}
+          relanceOuverte={relanceOuverte}
           canEmail={Boolean(prospect.email)}
         />
       </div>
@@ -343,8 +348,12 @@ export default async function ProspectDetailPage({
           />
 
           <section>
-            <details id="modifier-la-fiche" className="card scroll-mt-6 p-6">
-              <summary className="cursor-pointer font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+            <details id="modifier-la-fiche" className="group card scroll-mt-6 p-6">
+              <summary className="btn-link cursor-pointer list-none text-xs">
+                <Icone
+                  nom="chevron"
+                  className="h-3 w-3 transition-transform group-open:rotate-180"
+                />
                 Modifier la fiche
               </summary>
               <div className="mt-5">
@@ -399,7 +408,7 @@ export default async function ProspectDetailPage({
                   className={`mt-0.5 text-sm font-medium ${
                     prospect.next_action_at &&
                     new Date(prospect.next_action_at).getTime() < Date.now()
-                      ? "text-rose-400"
+                      ? "text-amber-300"
                       : "text-slate-100"
                   }`}
                 >
@@ -430,8 +439,12 @@ export default async function ProspectDetailPage({
             <RelancesSection prospectId={prospect.id} openTasks={openTasks} />
 
             {doneTasks.length > 0 && (
-              <details className="mt-3">
-                <summary className="cursor-pointer px-1 text-xs text-slate-500 transition hover:text-slate-300">
+              <details className="group mt-3">
+                <summary className="btn-link cursor-pointer list-none text-xs">
+                  <Icone
+                    nom="chevron"
+                    className="h-3 w-3 transition-transform group-open:rotate-180"
+                  />
                   {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} passée
                   {doneTasks.length > 1 ? "s" : ""}
                 </summary>

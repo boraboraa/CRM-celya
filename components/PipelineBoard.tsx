@@ -10,7 +10,7 @@ import {
   STATUS_EDGE,
   relative,
 } from "@/lib/constants";
-import { ConfidenceBadge, LastActionLine } from "@/components/ui";
+import { ConfidenceBadge, Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
 
@@ -195,9 +195,7 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                       COLUMN_BANNER[status]
                     } ${isTarget ? "brightness-125" : ""}`}
                   >
-                    <span aria-hidden className="text-xs opacity-80">
-                      {STATUS_ICON[status]}
-                    </span>
+                    <Icone nom={STATUS_ICON[status]} className="h-3.5 w-3.5 opacity-80" />
                     {STATUS_LABEL[status]}
                     <span
                       className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${COLUMN_COUNT[status]}`}
@@ -258,13 +256,13 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                           isDragged
                             ? "scale-[0.97] rotate-[-1.5deg] opacity-45 ring-celya-blue/40"
                             : ""
-                        } ${landed ? "ring-2 ring-celya-cyan/60 shadow-glow" : ""}`}
+                        } ${landed ? "ring-2 ring-celya-blue/60" : ""}`}
                       >
                         {enregistre && (
                           <span
                             aria-label="Enregistrement en cours"
                             title="Enregistrement…"
-                            className="float-right ml-2 mt-0.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-celya-cyan/70 border-t-transparent"
+                            className="float-right ml-2 mt-0.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-celya-blue/70 border-t-transparent"
                           />
                         )}
                         {/* prefetch désactivé : une colonne peut porter des
@@ -307,7 +305,7 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                               locked={c.confidence_locked}
                             />
                             <span
-                              className={`shrink-0 text-[11px] ${overdue ? "text-rose-400" : "text-slate-400"}`}
+                              className={`shrink-0 text-[11px] ${overdue ? "text-amber-300" : "text-slate-400"}`}
                             >
                               {c.next_action_at ? relative(c.next_action_at) : "—"}
                             </span>

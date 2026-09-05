@@ -3,7 +3,7 @@ export function Logo({ className = "" }: { className?: string }) {
     <div className={`flex items-center gap-2.5 ${className}`}>
       <span
         aria-hidden
-        className="grid h-8 w-8 place-items-center rounded-xl bg-celya-gradient shadow-glow"
+        className="grid h-8 w-8 place-items-center rounded-xl bg-celya-gradient"
       >
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
           <path

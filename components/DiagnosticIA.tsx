@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { diagnosticIA, type DiagnosticIA as Diagnostic } from "@/app/ai-actions";
+import { Icone } from "@/components/ui";
 
 /**
  * « Pourquoi l'IA ne marche pas ? » — l'écran qui répond.
@@ -52,13 +53,13 @@ export function DiagnosticIA() {
       {res && !res.error && (
         <div className="space-y-3">
           <p
-            className={`rounded-xl px-3.5 py-2.5 text-sm ring-1 ${
+            className={`flex items-start gap-2 rounded-xl px-3.5 py-2.5 text-sm ring-1 ${
               ok
                 ? "bg-emerald-500/10 text-emerald-300 ring-emerald-400/20"
                 : "bg-rose-500/10 text-rose-200 ring-rose-400/20"
             }`}
           >
-            <span aria-hidden>{ok ? "✓ " : "✕ "}</span>
+            <Icone nom={ok ? "coche" : "croix"} className="mt-0.5 h-3.5 w-3.5" />
             {res.message}
           </p>
 

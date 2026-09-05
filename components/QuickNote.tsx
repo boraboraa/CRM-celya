@@ -3,64 +3,44 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { saveExchangeAction } from "@/app/actions";
 import { analyzeNoteAction } from "@/app/ai-actions";
-import { ACTIVITY_LABEL, STATUS_LABEL, STATUS_ORDER } from "@/lib/constants";
-import { DateField } from "@/components/DateField";
-import { LienPourquoiIA } from "@/components/ui";
+import { STATUS_LABEL } from "@/lib/constants";
+import { Icone, LienPourquoiIA } from "@/components/ui";
 import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { TimelineEntry } from "@/components/Timeline";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
-const TYPES: ActivityType[] = ["note", "email", "rendez_vous"];
-
 /**
- * Ce qu'une note ATTESTE — le fait que le CRM ne devine jamais. Trois natures :
- * l'échange a eu lieu, l'appel est resté sans réponse (un résultat, pas un
- * échange — c'est lui que la carte affiche), ou simple repérage.
- */
-type NoteNature = "echange" | "sans_reponse" | "reperage";
-
-const NOTE_NATURES: { value: NoteNature; label: string; hint: string }[] = [
-  {
-    value: "echange",
-    label: "J'ai réellement eu cet échange (appel, visite)",
-    hint: "Un échange attesté peut faire passer la fiche en « Contacté ».",
-  },
-  {
-    value: "sans_reponse",
-    label: "Appelé, pas de réponse",
-    hint: "La fiche reste « À appeler » ; la carte affichera « Appelé, pas de réponse ».",
-  },
-  {
-    value: "reperage",
-    label: "Note de repérage",
-    hint: "Aucun échange : rien ne bouge sur la fiche.",
-  },
-];
-
-/**
- * Noter un échange : le geste central de la fiche. Une note (ce qu'il faut
- * retenir), la prochaine action à une date précise — et l'étape, qui suit
- * désormais les FAITS et non le texte :
+ * La note redevient une note : du TEXTE, et ce que le parseur en lit.
  *
- *  · un rendez-vous daté fait passer la fiche en « Rendez-vous » ;
- *  · une note ne compte comme échange que si la case est cochée ;
- *  · « Gagné » / « Perdu » restent des décisions manuelles ;
- *  · fixer l'étape ici est une décision humaine — elle verrouille la fiche.
+ * Ce qui reste ici :
+ *  · la zone de texte — elle part au journal telle quelle, jamais réécrite ;
+ *  · les pastilles du parseur déterministe (rendez-vous, lieu, relance, appel
+ *    sans réponse, proposition, contact, « Perdu ? ») : ce qui SERA
+ *    enregistré, retirable d'un clic sur la croix ;
+ *  · « Analyser le texte » pour les notes que le parseur ne sait pas lire ;
+ *  · trois options rares, repliées sous « Plus d'options » : un email déjà
+ *    parti d'ailleurs, une note de repérage, une proposition envoyée.
  *
- * Le bouton ✨ propose date, contact et résumé à partir de la note ; l'étape
- * n'est jamais appliquée par l'assistant, seulement suggérée.
+ * Ce qui est parti, et où :
+ *  · le RÉSULTAT d'un appel → la carte PROCHAINE ACTION, sous le pouce ;
+ *  · l'ÉTAPE → la pastille de l'en-tête de fiche ; ici elle ne se pose plus
+ *    qu'en confirmant « Perdu ? » ou en retenant la suggestion de
+ *    l'assistant, et la pastille ambre dit alors qu'elle sera verrouillée ;
+ *  · la DATE de relance → la ligne « Relancer » de la carte, et le parseur
+ *    (« rdv mardi 11h », « je le rappelle le 12 »).
+ *
+ * Le type d'échange ne se choisit plus : il se DÉDUIT. Un rendez-vous complet
+ * lu dans la note en fait un rendez-vous, la case « Email déjà envoyé » en
+ * fait un email, sinon c'est une note. Trois chips de moins pour une décision
+ * que les faits prenaient déjà.
  */
 export function QuickNote({
   prospectId,
-  companyName,
-  contactName,
   isAdmin = false,
   onOptimistic,
 }: {
   prospectId: string;
-  companyName: string;
-  contactName?: string | null;
   /** Admin : « Assistant indisponible » gagne un lien « Pourquoi ? ». */
   isAdmin?: boolean;
   /**
@@ -70,16 +50,18 @@ export function QuickNote({
    */
   onOptimistic?: (entree: TimelineEntry) => void;
 }) {
-  const [type, setType] = useState<ActivityType>("note");
   const [note, setNote] = useState("");
   /** "" = ne pas changer l'étape (elle suit les faits). */
   const [statut, setStatut] = useState<ProspectStatus | "">("");
-  const [dateLocale, setDateLocale] = useState("");
   const [motif, setMotif] = useState("");
   const [resume, setResume] = useState("");
   const [contactProposal, setContactProposal] = useState("");
   const [applyContact, setApplyContact] = useState(true);
-  const [nature, setNature] = useState<NoteNature>("echange");
+  /** Relance proposée par l'assistant — affichée en pastille, retirable. */
+  const [dateProposee, setDateProposee] = useState<string | null>(null);
+  // Les trois options rares, repliées sous « Plus d'options ».
+  const [emailDeja, setEmailDeja] = useState(false);
+  const [reperage, setReperage] = useState(false);
   const [proposalSent, setProposalSent] = useState(false);
   const [suggestion, setSuggestion] = useState<{
     statut: ProspectStatus;
@@ -186,43 +168,46 @@ export function QuickNote({
       weekday: "short",
       day: "numeric",
       month: "short",
-    }).format(new Date(`${jourISO}T12:00:00`));
+    }).format(new Date(`${jourISO.slice(0, 10)}T12:00:00`));
 
-  // Un rendez-vous se note avec sa date ET son heure — que le rendez-vous
-  // vienne du type d'échange ou de l'étape forcée au menu déroulant. C'est ce
-  // second chemin (étape « Rendez-vous » choisie, champ date jamais touché)
-  // qui laissait passer des rendez-vous sans date : le serveur les refuse
-  // désormais (saveExchangeCore), et le bouton n'y envoie plus personne.
-  const withTime = type === "rendez_vous" || statut === "rendez_vous";
-  const rdvSansDate = withTime && dateLocale.length < 16;
+  // ---- Les faits envoyés au serveur, tous DÉDUITS de ce qui précède.
+  // Un rendez-vous complet lu dans la note prime sur tout : c'est le seul
+  // chemin qui pose un créneau d'agenda. Sinon, la case « Email déjà
+  // envoyé » dit qu'un mail est parti d'ailleurs ; à défaut, c'est une note.
+  const typeEffectif: ActivityType = rdvComplet
+    ? "rendez_vous"
+    : emailDeja
+      ? "email"
+      : "note";
+  // Un email ou un rendez-vous sont des faits par construction ; une note ne
+  // l'est que si elle n'est pas un simple repérage. Cocher « repérage » ET
+  // « email déjà envoyé » ne fait pas disparaître le mail : un email est un
+  // fait, il l'emporte.
+  const isExchange = typeEffectif === "note" ? !reperage : true;
+  // Un appel sans réponse est un résultat, pas un échange — tracé même sans
+  // texte. Il ne peut venir que d'une note.
+  const noAnswer = typeEffectif === "note" && sansRepPastille;
+  // La date : le rendez-vous lu dans la note, sinon la relance lue dans la
+  // note, sinon celle que l'assistant a proposée (tant qu'on ne l'a pas
+  // retirée d'un clic sur sa croix).
+  const dateEffective = rdvComplet
+    ? `${rdvJour}T${rdvHeure}`
+    : (relancePastille?.date ?? dateProposee ?? null);
 
-  /** Garde la valeur du champ cohérente quand on passe date ↔ date+heure. */
-  function coerceDate(value: string, needsTime: boolean): string {
-    if (!value) return value;
-    if (needsTime && value.length === 10) return `${value}T09:00`;
-    if (!needsTime && value.length > 10) return value.slice(0, 10);
-    return value;
-  }
-
-  function pickType(t: ActivityType) {
-    setType(t);
-    setDateLocale((v) => coerceDate(v, t === "rendez_vous" || statut === "rendez_vous"));
-  }
-
-  function pickStatut(s: ProspectStatus | "") {
-    setStatut(s);
-    setDateLocale((v) => coerceDate(v, type === "rendez_vous" || s === "rendez_vous"));
-  }
+  // Une étape « Rendez-vous » retenue de la suggestion de l'assistant, sans
+  // rendez-vous daté dans le texte : le serveur la refuserait (saveExchangeCore),
+  // le bouton n'y envoie donc plus personne — la date s'écrit dans la note.
+  const rdvSansDate = statut === "rendez_vous" && !rdvComplet;
 
   function reset() {
-    setType("note");
     setNote("");
     setStatut("");
-    setDateLocale("");
     setMotif("");
     setResume("");
     setContactProposal("");
-    setNature("echange");
+    setDateProposee(null);
+    setEmailDeja(false);
+    setReperage(false);
     setProposalSent(false);
     setSuggestion(undefined);
     setAiNote(undefined);
@@ -251,9 +236,9 @@ export function QuickNote({
         return;
       }
       const p = res.proposal;
-      if (p.dateLocale) {
-        setDateLocale(coerceDate(p.dateLocale, type === "rendez_vous"));
-      }
+      // La date proposée n'a plus de champ : elle devient une pastille comme
+      // celles du parseur, et se refuse de la même façon — d'une croix.
+      setDateProposee(p.dateLocale ?? null);
       setResume(p.resume ?? "");
       setContactProposal(p.contact_name ?? "");
       setApplyContact(true);
@@ -267,26 +252,15 @@ export function QuickNote({
 
   /**
    * L'entrée telle qu'elle apparaîtra dans la chronologie — mêmes règles que
-   * `saveExchangeCore` : la nature de la note décide du type d'événement, et
-   * un appel sans réponse se trace même sans texte.
+   * `saveExchangeCore` : le type déduit décide de l'événement, et un appel
+   * sans réponse se trace même sans texte.
    */
-  // Les pastilles pilotent l'appel : un rdv complet devient un vrai
-  // rendez-vous d'agenda (type rendez_vous + date+heure+lieu), une relance
-  // devient la prochaine action, « pas de réponse » devient le résultat.
-  // Un champ rempli À LA MAIN (date, contact) garde la priorité.
-  const typeEffectif: ActivityType = rdvComplet ? "rendez_vous" : type;
-  const dateEffective = rdvComplet
-    ? `${rdvJour}T${rdvHeure}`
-    : dateLocale || relancePastille?.date || null;
-  const sansReponseEffectif =
-    typeEffectif === "note" && (nature === "sans_reponse" || sansRepPastille);
-
   function entreeProvisoire(): TimelineEntry | null {
     const texte = note.trim() || null;
     const resumeNet = resume.trim() || null;
     // Le serveur n'écrit au journal que dans ces cas-là : on n'annonce rien
     // qu'il n'écrira pas.
-    if (!texte && !resumeNet && !sansReponseEffectif) return null;
+    if (!texte && !resumeNet && !noAnswer) return null;
 
     return {
       key: `provisoire-${Date.now()}`,
@@ -297,14 +271,13 @@ export function QuickNote({
           ? "rendez_vous"
           : typeEffectif === "email"
             ? "email_sortant"
-            : sansReponseEffectif
+            : noAnswer
               ? "appel_sans_reponse"
-              : nature === "reperage"
+              : reperage
                 ? "note_interne"
                 : "note",
       at: new Date().toISOString(),
-      title:
-        resumeNet ?? (sansReponseEffectif && !texte ? "Appel sans réponse" : null),
+      title: resumeNet ?? (noAnswer && !texte ? "Appel sans réponse" : null),
       body: texte,
       by: null,
       pending: true,
@@ -331,11 +304,8 @@ export function QuickNote({
         dateLocale: dateEffective,
         rdvLieu: rdvComplet ? rdvLieu : null,
         rdvFin: rdvComplet && rdvFinHM ? `${rdvJour}T${rdvFinHM}` : null,
-        // Un email ou un rendez-vous sont des faits par construction ; une
-        // note ne l'est que si Bora l'atteste. Un appel sans réponse est un
-        // résultat, pas un échange — tracé même sans texte.
-        isExchange: typeEffectif === "note" ? nature === "echange" : true,
-        noAnswer: sansReponseEffectif,
+        isExchange,
+        noAnswer,
         proposalSent: proposalSent || propositionPastille,
       });
       if (res.error) {
@@ -360,34 +330,6 @@ export function QuickNote({
 
   return (
     <div className="card space-y-4 p-5">
-      {/* Type d'échange */}
-      <div>
-        <div className="flex flex-wrap gap-1.5">
-          {TYPES.map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => pickType(t)}
-              aria-pressed={type === t}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 transition duration-200 ${
-                type === t
-                  ? "bg-celya-gradient text-slate-950 ring-transparent shadow-glow"
-                  : "bg-white/[0.04] text-slate-400 ring-white/10 hover:bg-white/[0.08] hover:text-slate-200"
-              }`}
-            >
-              {ACTIVITY_LABEL[t]}
-            </button>
-          ))}
-        </div>
-        {type === "email" && (
-          <p className="mt-2 text-[11px] text-slate-500">
-            On consigne ici un email déjà échangé (parti de votre boîte Zoho,
-            par exemple). Pour en <strong className="font-medium text-slate-400">envoyer</strong>{" "}
-            un, passez par l&apos;onglet « ✉ Envoyer un email ».
-          </p>
-        )}
-      </div>
-
       {/* Note + raccourcis + assistant */}
       <div>
         <textarea
@@ -401,46 +343,70 @@ export function QuickNote({
         {/* ---- Les pastilles : ce qui SERA enregistré, lu à la frappe, sans
              réseau. La croix d'une pastille = « non ». Le texte de la note,
              lui, part au journal tel quel — jamais réécrit. ---- */}
-        {(pastillesActives || perduSuggestion) && (
+        {(pastillesActives || perduSuggestion || dateProposee || statut) && (
           <div className="mt-2 space-y-2">
             <div className="flex flex-wrap items-center gap-1.5">
               {rdvBrut && rdvComplet && (
                 <Pastille tone="bleu" onRetirer={() => masquer("rdv")}>
-                  📅 RDV {fmtJourCourt(rdvJour!)} {rdvHeure}
+                  <Icone nom="calendrier" className="h-3 w-3" />
+                  RDV {fmtJourCourt(rdvJour!)} {rdvHeure}
                   {rdvFinHM ? `–${rdvFinHM}` : ""}
                 </Pastille>
               )}
               {rdvBrut && !rdvComplet && !rdvJour && (
                 <Pastille tone="ambre" onRetirer={() => masquer("rdv")}>
-                  📅 RDV {rdvHeure ?? ""} — Quel jour ?
+                  <Icone nom="calendrier" className="h-3 w-3" />
+                  RDV {rdvHeure ?? ""} — Quel jour ?
                 </Pastille>
               )}
               {rdvBrut && !rdvComplet && rdvJour && (
                 <Pastille tone="ambre" onRetirer={() => masquer("rdv")}>
-                  📅 RDV {fmtJourCourt(rdvJour)} — Quelle heure ?
+                  <Icone nom="calendrier" className="h-3 w-3" />
+                  RDV {fmtJourCourt(rdvJour)} — Quelle heure ?
                 </Pastille>
               )}
               {rdvBrut && rdvLieu && (
-                <Pastille onRetirer={() => masquer("lieu")}>📍 {rdvLieu}</Pastille>
+                <Pastille onRetirer={() => masquer("lieu")}>
+                  <Icone nom="epingle" className="h-3 w-3" />
+                  {rdvLieu}
+                </Pastille>
               )}
               {relancePastille && (
                 <Pastille onRetirer={() => masquer("relance")}>
-                  📆 Relance {fmtJourCourt(relancePastille.date)}
+                  <Icone nom="calendrier" className="h-3 w-3" />
+                  Relance {fmtJourCourt(relancePastille.date)}
+                </Pastille>
+              )}
+              {/* La date que l'assistant a lue : même forme, même croix. */}
+              {dateProposee && !relancePastille && !rdvComplet && (
+                <Pastille onRetirer={() => setDateProposee(null)}>
+                  <Icone nom="calendrier" className="h-3 w-3" />
+                  Relance {fmtJourCourt(dateProposee)}
+                  {dateProposee.length >= 16 ? ` ${dateProposee.slice(11, 16)}` : ""}
                 </Pastille>
               )}
               {sansRepPastille && (
                 <Pastille onRetirer={() => masquer("sans_reponse")}>
-                  📞 Appelé, pas de réponse
+                  <Icone nom="telephone" className="h-3 w-3" />
+                  Appelé, pas de réponse
                 </Pastille>
               )}
               {propositionPastille && (
                 <Pastille onRetirer={() => masquer("proposition")}>
-                  ✉ Proposition envoyée
+                  <Icone nom="enveloppe" className="h-3 w-3" />
+                  Proposition envoyée
                 </Pastille>
               )}
               {contactPastille && (
                 <Pastille onRetirer={() => masquer("contact")}>
-                  👤 {contactPastille}
+                  <Icone nom="personne" className="h-3 w-3" />
+                  {contactPastille}
+                </Pastille>
+              )}
+              {/* L'étape posée à la main : la seule qui verrouille la fiche. */}
+              {statut && (
+                <Pastille tone="ambre" onRetirer={() => setStatut("")}>
+                  Étape → {STATUS_LABEL[statut]}
                 </Pastille>
               )}
               {perduSuggestion && statut !== "perdu" && (
@@ -451,12 +417,12 @@ export function QuickNote({
                     onClick={() => {
                       // « Perdu » ne s'applique JAMAIS tout seul : ce clic
                       // est la décision humaine.
-                      pickStatut("perdu");
+                      setStatut("perdu");
                       if (perduSuggestion.motif && !motif) {
                         setMotif(perduSuggestion.motif);
                       }
                     }}
-                    className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-semibold hover:bg-white/[0.15]"
+                    className="btn-ghost px-1.5 py-0.5 text-[10px]"
                   >
                     Confirmer
                   </button>
@@ -494,6 +460,20 @@ export function QuickNote({
                 ))}
               </div>
             )}
+
+            {statut && (
+              <p className="text-[11px] text-amber-300/80">
+                Vous fixez l&apos;étape à la main : elle sera verrouillée.
+              </p>
+            )}
+            {statut === "perdu" && (
+              <input
+                value={motif}
+                onChange={(e) => setMotif(e.target.value)}
+                className="input"
+                placeholder="Raison de la perte…"
+              />
+            )}
           </div>
         )}
 
@@ -509,9 +489,10 @@ export function QuickNote({
                 ? "Les raccourcis de la note sont déjà lus — les pastilles ci-dessus disent ce qui sera enregistré."
                 : "Structurer un texte libre avec l'assistant : date de relance, contact, résumé"
             }
-            className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
+            className="btn-link text-xs"
           >
-            {analyzing ? "Analyse…" : "✨ Analyser le texte"}
+            <Icone nom="etincelle" />
+            {analyzing ? "Analyse…" : "Analyser le texte"}
           </button>
           {aiNote && <span className="text-[11px] text-slate-500">{aiNote}</span>}
           {aiIndisponible && <LienPourquoiIA isAdmin={isAdmin} />}
@@ -533,18 +514,18 @@ export function QuickNote({
               {suggestion.reserve}
             </p>
           )}
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setStatut(suggestion.statut)}
-              className="rounded-lg bg-white/[0.07] px-2.5 py-1 text-[11px] font-medium text-slate-100 ring-1 ring-white/15 transition hover:bg-white/[0.12]"
+              className="btn-ghost px-2.5 py-1 text-[11px]"
             >
               Retenir cette étape
             </button>
             <button
               type="button"
               onClick={() => setSuggestion(undefined)}
-              className="rounded-lg px-2.5 py-1 text-[11px] text-slate-500 transition hover:text-slate-300"
+              className="btn-link text-[11px]"
             >
               Ignorer
             </button>
@@ -563,125 +544,65 @@ export function QuickNote({
             type="checkbox"
             checked={applyContact}
             onChange={(e) => setApplyContact(e.target.checked)}
-            className="h-3.5 w-3.5 accent-cyan-400"
+            className="h-3.5 w-3.5 accent-[#4F7BFF]"
           />
           Mettre à jour le contact : {contactProposal}
         </label>
       )}
 
-      {/* Les faits que le CRM ne devine jamais. */}
-      <div className="space-y-2 rounded-xl bg-white/[0.02] px-3.5 py-3 ring-1 ring-white/[0.06]">
-        {type === "note" && (
-          <fieldset className="space-y-1.5">
-            <legend className="mb-1 text-[11px] uppercase tracking-wider text-slate-500">
-              Ce que cette note atteste
-            </legend>
-            {NOTE_NATURES.map((n) => (
-              <label
-                key={n.value}
-                className="flex items-start gap-2 text-xs text-slate-300"
-              >
-                <input
-                  type="radio"
-                  name="note-nature"
-                  checked={nature === n.value}
-                  onChange={() => setNature(n.value)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
-                />
-                <span>
-                  {n.label}
-                  {nature === n.value && (
-                    <span className="block text-[11px] text-slate-500">
-                      {n.hint}
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
-          </fieldset>
-        )}
-        <label className="flex items-start gap-2 text-xs text-slate-300">
-          <input
-            type="checkbox"
-            checked={proposalSent}
-            onChange={(e) => setProposalSent(e.target.checked)}
-            className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
-          />
-          <span>
-            J&apos;ai envoyé une proposition / un devis
-            <span className="block text-[11px] text-slate-500">
-              Seul ce geste fait passer la fiche en « Proposition ».
-            </span>
-          </span>
-        </label>
-      </div>
-
-      {/* Étape + prochaine action */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className="label" htmlFor="exchange-statut">
-            Étape
-          </label>
-          <select
-            id="exchange-statut"
-            value={statut}
-            onChange={(e) => pickStatut(e.target.value as ProspectStatus | "")}
-            className="input"
-          >
-            <option value="">Ne pas changer (suit les faits)</option>
-            {STATUS_ORDER.map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABEL[s]}
-              </option>
-            ))}
-          </select>
-          {statut === "" ? (
-            <p className="mt-1.5 text-[11px] text-slate-500">
-              L&apos;étape se déduit de ce que vous enregistrez.
-            </p>
-          ) : (
-            <p className="mt-1.5 text-[11px] text-amber-300/80">
-              Vous fixez l&apos;étape à la main : elle sera verrouillée.
-            </p>
-          )}
-          {statut === "perdu" && (
+      {/* Les trois faits que ni le texte ni le parseur ne donnent — rares,
+          donc repliés : on les déclare, on ne les devine jamais. */}
+      <details className="group rounded-xl bg-white/[0.02] px-3.5 py-3 ring-1 ring-white/[0.06]">
+        <summary className="btn-link list-none text-xs cursor-pointer">
+          <Icone nom="chevron" className="transition-transform group-open:rotate-180" />
+          Plus d&apos;options
+        </summary>
+        <div className="mt-3 space-y-2">
+          <label className="flex items-start gap-2 text-xs text-slate-300">
             <input
-              value={motif}
-              onChange={(e) => setMotif(e.target.value)}
-              className="input mt-2"
-              placeholder="Raison de la perte…"
+              type="checkbox"
+              checked={emailDeja}
+              onChange={(e) => setEmailDeja(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
             />
-          )}
-        </div>
-
-        <div>
-          <label className="label">
-            {withTime ? "Date et heure du rendez-vous" : "Prochaine relance"}
+            <span>
+              Email déjà envoyé
+              <span className="block text-[11px] text-slate-500">
+                Consigner un mail parti de votre boîte, hors du CRM. Pour en
+                envoyer un, passez par l&apos;onglet Email.
+              </span>
+            </span>
           </label>
-          <DateField
-            name="exchange-date"
-            withTime={withTime}
-            value={dateLocale}
-            onChange={setDateLocale}
-            compact
-          />
-          {rdvSansDate ? (
-            <p className="mt-1.5 text-[11px] text-amber-300/90">
-              Choisissez la date et l&apos;heure du rendez-vous.
-            </p>
-          ) : withTime ? (
-            <p className="mt-1.5 text-[11px] text-slate-500">
-              Une date réelle fait passer {contactName ?? companyName} en
-              « Rendez-vous ».
-            </p>
-          ) : null}
-          {!dateLocale && !withTime && statut !== "perdu" && (
-            <p className="mt-1.5 text-[11px] text-slate-500">
-              Sans date, {companyName} ne remontera pas dans « À faire ».
-            </p>
-          )}
+          <label className="flex items-start gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={reperage}
+              onChange={(e) => setReperage(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
+            />
+            <span>
+              Note de repérage
+              <span className="block text-[11px] text-slate-500">
+                Aucun échange : rien ne bouge sur la fiche.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={proposalSent}
+              onChange={(e) => setProposalSent(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
+            />
+            <span>
+              J&apos;ai envoyé une proposition / un devis
+              <span className="block text-[11px] text-slate-500">
+                Seul ce geste fait passer la fiche en « Proposition ».
+              </span>
+            </span>
+          </label>
         </div>
-      </div>
+      </details>
 
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -692,16 +613,16 @@ export function QuickNote({
         >
           {pending ? "Enregistrement…" : "Enregistrer"}
         </button>
+        {rdvSansDate && (
+          <span className="text-xs text-amber-300/90">
+            Un rendez-vous demande jour et heure : écrivez-les dans la note
+            (ex. «&nbsp;rdv mardi 11h&nbsp;»).
+          </span>
+        )}
         {rdvIncomplet && (
           <span className="text-xs text-amber-300/90">
             Le rendez-vous détecté est incomplet : choisissez{" "}
             {rdvJour ? "l'heure" : "le jour"} ci-dessus, ou retirez la pastille.
-          </span>
-        )}
-        {rdvComplet && dateLocale && (
-          <span className="text-xs text-slate-500">
-            Le rendez-vous détecté dans la note prime sur le champ de date —
-            retirez la pastille pour utiliser le champ.
           </span>
         )}
         {feedback && !error && (

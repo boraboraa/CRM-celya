@@ -9,6 +9,7 @@ import {
 } from "@/app/mail-actions";
 import { INTENT_LABEL, fmtDate, relative } from "@/lib/constants";
 import { composerHref } from "@/lib/crm/composer";
+import { Icone } from "@/components/ui";
 import type { EmailIntent } from "@/lib/types";
 
 export type ReplyCardEmail = {
@@ -46,7 +47,7 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
           <Link
             href={`/prospects/${email.prospects.id}`}
               prefetch={false}
-            className="font-medium text-slate-100 hover:text-celya-cyan"
+            className="font-medium text-slate-100 hover:text-celya-blue"
           >
             {company}
           </Link>
@@ -73,7 +74,7 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
         <p className="mt-1.5 text-xs text-slate-400">
           {email.intent_summary ?? INTENT_LABEL[email.intent]}
           {email.proposed_due_at && (
-            <span className="text-cyan-300">
+            <span className="text-blue-300">
               {" "}
               → proposition : le {fmtDate(email.proposed_due_at)}
             </span>
@@ -113,7 +114,14 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
             disabled={pending}
             className="btn-primary px-3.5 py-1.5 text-xs"
           >
-            {pending ? "Analyse…" : "✨ Analyser"}
+            {pending ? (
+              "Analyse…"
+            ) : (
+              <>
+                <Icone nom="etincelle" className="h-3.5 w-3.5" />
+                Analyser
+              </>
+            )}
           </button>
         )}
         {/* Lire et classer une réponse, oui — mais il fallait aussi pouvoir y
@@ -125,7 +133,8 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
             prefetch={false}
             className="btn-ghost px-3.5 py-1.5 text-xs"
           >
-            ✉ Répondre
+            <Icone nom="enveloppe" className="h-3.5 w-3.5" />
+            Répondre
           </Link>
         )}
         <button

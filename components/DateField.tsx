@@ -1,18 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { RACCOURCIS_RELANCE } from "@/lib/constants";
 
 /**
  * Le champ de date du CRM : un vrai <input type="date"> (ou datetime-local
  * quand l'heure compte, ex. rendez-vous), toujours modifiable à la main.
  * Les raccourcis (« Demain », « +1 mois »…) remplissent le champ au lieu de
  * s'y substituer — Bora peut ensuite corriger la date au jour près.
+ *
+ * Les trois premiers viennent de `RACCOURCIS_RELANCE` : repousser une date se
+ * dit avec les mêmes mots ici, dans la carte PROCHAINE ACTION et dans « À
+ * faire ». Les deux horizons longs restent propres à ce champ.
  */
 
 const SHORTCUTS: { label: string; days?: number; months?: number }[] = [
-  { label: "Demain", days: 1 },
-  { label: "+3 jours", days: 3 },
-  { label: "+1 semaine", days: 7 },
+  ...RACCOURCIS_RELANCE.map((r) => ({ label: r.label, days: r.jours })),
   { label: "+1 mois", months: 1 },
   { label: "+3 mois", months: 3 },
 ];

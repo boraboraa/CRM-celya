@@ -4,11 +4,17 @@ import { useOptimistic, useState, useTransition } from "react";
 import {
   completeTaskAction,
   rescheduleTaskAction,
+  saveExchangeAction,
 } from "@/app/actions";
-import { relative } from "@/lib/constants";
+import { RACCOURCIS_RELANCE, relative } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
-import { deriveNextAction, type NextAction } from "@/lib/crm/nextAction";
-import { openComposer, openNote } from "@/lib/crm/composer";
+import {
+  deriveNextAction,
+  type NextAction,
+  type OpenTask,
+} from "@/lib/crm/nextAction";
+import { openComposer } from "@/lib/crm/composer";
+import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
 
 function pad(n: number): string {
@@ -23,39 +29,81 @@ function shiftedDate(days: number): string {
 }
 
 /**
- * PROCHAINE ACTION — la première chose que Bora voit en ouvrant une fiche :
- * ce qu'il y a à faire, et pour quand. Dérivé de la relance ouverte, sans
- * aucun appel à un modèle (lib/crm/nextAction.ts).
+ * PROCHAINE ACTION — c'est ici qu'on arrive en raccrochant.
  *
- * Actions rapides : consigner un échange, reporter, marquer fait.
+ * La carte dit ce qu'il y a à faire et pour quand (dérivé de la relance
+ * ouverte et du journal, sans aucun appel à un modèle : lib/crm/nextAction.ts),
+ * puis tient les trois gestes qui suivent un appel : le résultat, « Fait »,
+ * « Relancer » — et « Email » quand il y a une adresse.
+ *
+ * Un geste, un endroit : on ne consigne plus ici pour reporter trois écrans
+ * plus bas.
  */
 export function NextActionCard({
   action,
   prospectId,
+  companyName,
+  relanceOuverte,
   canEmail = false,
 }: {
   action: NextAction;
   prospectId: string;
+  /** Le nom de la société — le titre de la relance qu'on crée d'un clic. */
+  companyName: string;
+  /**
+   * La relance ouverte la plus proche — indépendamment de ce que la carte
+   * AFFICHE. `deriveNextAction` met `action.task` à null dès qu'un rendez-vous
+   * passe devant : l'existence d'une relance ne se déduit donc jamais de la
+   * prochaine action, elle se lit ici.
+   */
+  relanceOuverte: OpenTask | null;
   /** La fiche porte une adresse : proposer d'écrire tout de suite. */
   canEmail?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
+  /** « À rappeler » vient d'être tapé : la ligne Relancer réclame une date. */
+  const [pourQuand, setPourQuand] = useState(false);
 
   /**
-   * L'action telle qu'elle s'affiche MAINTENANT. Reporter ou marquer fait
-   * repeint le bloc immédiatement ; à la fin de la transition, `useOptimistic`
-   * rend la main aux données du serveur — donc en cas d'échec le bloc revient
-   * tout seul à son état d'origine.
+   * L'action telle qu'elle s'affiche MAINTENANT. Reporter, marquer fait ou
+   * poser une relance repeint le bloc immédiatement ; à la fin de la
+   * transition, `useOptimistic` rend la main aux données du serveur — donc en
+   * cas d'échec le bloc revient tout seul à son état d'origine.
    */
   const [vue, appliquer] = useOptimistic(
     action,
-    (etat: NextAction, patch: { due_at?: string; fait?: true }): NextAction => {
-      if (!etat.task) return etat;
+    (
+      etat: NextAction,
+      patch: { due_at?: string; fait?: true; relance?: string }
+    ): NextAction => {
       // On repasse par deriveNextAction — la même fonction que le serveur —
       // pour que la phrase affichée soit exactement celle qui arrivera. Le
-      // contexte, lui, vient du journal : aucun de ces deux gestes ne le
-      // change, on le garde tel quel.
+      // contexte, lui, vient du journal : aucun de ces gestes ne le change,
+      // on le garde tel quel.
+      if (patch.relance) {
+        // Aucune relance ouverte : on en synthétise une, exactement celle que
+        // `saveExchangeAction` va créer (« Relancer <société> », 09:00).
+        const tache: OpenTask = {
+          id: "provisoire",
+          title: `Relancer ${companyName}`,
+          due_at: patch.relance,
+          priority: 2,
+          prospect_id: prospectId,
+        };
+        // `etat.meeting` reste dans la balance : un rendez-vous plus proche
+        // que la relance qu'on vient de poser garde la vedette — c'est
+        // deriveNextAction qui tranche, pas cette carte.
+        return {
+          ...deriveNextAction([tache], null, null, etat.meeting),
+          context: etat.context,
+        };
+      }
+      // Rien à repeindre : soit il n'y a aucune relance, soit un rendez-vous
+      // lui est passé devant et garde la vedette (`etat.task` est null alors
+      // qu'une relance existe). Re-dater cette relance-là ne change donc rien
+      // au bloc ; la colonne « Relances » suivra au rafraîchissement.
+      if (!etat.task) return etat;
       const taches = patch.fait
         ? []
         : [{ ...etat.task, due_at: patch.due_at ?? etat.task.due_at }];
@@ -65,24 +113,58 @@ export function NextActionCard({
 
   const { task, meeting, context, when, overdue, isMeeting } = vue;
 
-  // Reporter en conservant l'heure (un RDV à 14:00 le reste).
-  const dueTime = task ? isoToLocalInput(task.due_at).slice(11, 16) || "09:00" : "09:00";
+  // Reporter en conservant l'heure (un RDV à 14:00 le reste) — celle de la
+  // relance ouverte, même quand la carte montre un rendez-vous à sa place.
+  const dueTime = relanceOuverte
+    ? isoToLocalInput(relanceOuverte.due_at).slice(11, 16) || "09:00"
+    : "09:00";
 
-  function champs(extra: Record<string, string>) {
+  function champs(id: string, extra: Record<string, string>) {
     const fd = new FormData();
-    fd.set("id", action.task!.id);
+    fd.set("id", id);
     fd.set("prospect_id", prospectId);
     for (const [k, v] of Object.entries(extra)) fd.set(k, v);
     return fd;
   }
 
-  function reschedule(date: string) {
-    if (!action.task || !date) return;
-    const local = `${date}T${dueTime}`;
+  /**
+   * Relancer le jour dit. Deux chemins, un seul bouton — et le chemin se
+   * choisit sur la relance RÉELLEMENT ouverte, jamais sur celle qu'affiche la
+   * carte : quand un rendez-vous passe devant, `action.task` est null alors
+   * qu'une relance existe. Passer alors par `saveExchangeAction` aurait
+   * renommé et re-daté cette relance-là… en annulant les autres.
+   *   · une relance est ouverte → on la re-date (l'heure est conservée) ;
+   *   · aucune → on en crée une, par le même chemin que `planifier_relance` :
+   *     une note sans texte, qui n'atteste d'aucun échange et ne laisse que
+   *     sa cadence.
+   */
+  function relancer(date: string) {
+    if (!date) return;
+    setPourQuand(false);
     setErreur(undefined);
+
+    if (relanceOuverte) {
+      const local = `${date}T${dueTime}`;
+      startTransition(async () => {
+        appliquer({ due_at: localInputToISO(local) ?? relanceOuverte.due_at });
+        const res = await rescheduleTaskAction(
+          champs(relanceOuverte.id, { due_local: local })
+        );
+        if (res?.error) setErreur(res.error);
+      });
+      return;
+    }
+
+    const due = localInputToISO(`${date}T09:00`);
+    if (!due) return;
     startTransition(async () => {
-      appliquer({ due_at: localInputToISO(local) ?? action.task!.due_at });
-      const res = await rescheduleTaskAction(champs({ due_local: local }));
+      appliquer({ relance: due });
+      const res = await saveExchangeAction({
+        prospectId,
+        type: "note",
+        dateLocale: date,
+        isExchange: false,
+      });
       if (res?.error) setErreur(res.error);
     });
   }
@@ -92,16 +174,18 @@ export function NextActionCard({
     setErreur(undefined);
     startTransition(async () => {
       appliquer({ fait: true });
-      const res = await completeTaskAction(champs({ done: "1" }));
+      const res = await completeTaskAction(
+        champs(action.task!.id, { done: "1" })
+      );
       if (res?.error) setErreur(res.error);
     });
   }
 
   const accent = overdue
-    ? "ring-rose-400/35 bg-rose-500/[0.07]"
+    ? "ring-amber-400/35 bg-amber-500/[0.06]"
     : isMeeting
       ? "ring-blue-400/35 bg-celya-blue/[0.07]"
-      : "ring-celya-cyan/30 bg-celya-cyan/[0.05]";
+      : "ring-white/[0.08]";
 
   return (
     <section
@@ -113,12 +197,12 @@ export function NextActionCard({
       <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
         <span
           className={`h-1.5 w-1.5 rounded-full ${
-            overdue ? "bg-rose-400" : isMeeting ? "bg-blue-400" : "bg-celya-cyan"
+            overdue ? "bg-amber-400" : isMeeting ? "bg-blue-400" : "bg-slate-500"
           }`}
         />
         Prochaine action
         {overdue && (
-          <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-rose-300">
+          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-amber-300">
             en retard
           </span>
         )}
@@ -139,8 +223,8 @@ export function NextActionCard({
             </p>
           )}
           {meeting.location && (
-            <p className="mt-1 text-sm text-slate-300">
-              <span aria-hidden>📍</span> {meeting.location}
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-300">
+              <Icone nom="epingle" /> {meeting.location}
             </p>
           )}
           <p className="mt-1 text-sm leading-relaxed text-slate-400">{context}</p>
@@ -153,7 +237,7 @@ export function NextActionCard({
           {when && (
             <p
               className={`mt-1.5 text-sm font-medium ${
-                overdue ? "text-rose-300" : "text-slate-200"
+                overdue ? "text-amber-300" : "text-slate-200"
               }`}
             >
               {/* Majuscule initiale : « relance prévue le … » ouvre la phrase. */}
@@ -185,73 +269,69 @@ export function NextActionCard({
         </p>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {/* Les deux gestes qui font avancer une fiche, côte à côte : ils
-            déplient le bloc « Agir » sur le bon onglet et y font défiler. */}
-        <button
-          type="button"
-          onClick={() => openNote()}
-          className="btn-primary px-3.5 py-2 text-xs"
-        >
-          Consigner un échange
-        </button>
+      {/* Le résultat de l'appel, SOUS LE POUCE — c'est ici qu'on arrive après
+          avoir raccroché, pas dans un formulaire trois écrans plus bas. */}
+      <div className="mt-4 border-t border-white/[0.06] pt-3">
+        <ResultatAppel
+          prospectId={prospectId}
+          onRappeler={() => setPourQuand(true)}
+        />
+      </div>
+
+      {/* Les gestes qui suivent le résultat : c'est fait, ou c'est à relancer,
+          ou on écrit. Rien d'autre. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {vue.task && (
+          <button
+            type="button"
+            onClick={complete}
+            disabled={pending}
+            className="btn-ghost min-h-[44px] px-3.5 text-xs"
+          >
+            <Icone nom="coche" />
+            Fait
+          </button>
+        )}
+
+        <span className="flex flex-wrap items-center gap-1 rounded-xl bg-white/[0.03] px-1.5 py-1 ring-1 ring-white/[0.08]">
+          <span className="pl-1 pr-0.5 text-[11px] text-slate-500">Relancer</span>
+          {pourQuand && (
+            <span className="pr-0.5 text-[11px] text-amber-300">Pour quand&nbsp;?</span>
+          )}
+          {RACCOURCIS_RELANCE.map((r) => (
+            <button
+              key={r.label}
+              type="button"
+              disabled={pending}
+              onClick={() => relancer(shiftedDate(r.jours))}
+              className="min-h-[44px] rounded-lg px-2.5 text-[11px] text-slate-400 transition hover:bg-celya-blue/15 hover:text-blue-200"
+            >
+              {r.label}
+            </button>
+          ))}
+          {/* Toujours modifiable à la main : « le 14 octobre » reste possible.
+              Champ CONTRÔLÉ : il suit le report optimiste au lieu de rester
+              sur la date d'origine. */}
+          <input
+            type="date"
+            disabled={pending}
+            value={task ? isoToLocalInput(task.due_at).slice(0, 10) : ""}
+            onChange={(e) => relancer(e.target.value)}
+            aria-label="Relancer à une date précise"
+            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60"
+          />
+        </span>
 
         {canEmail && (
           <button
             type="button"
             onClick={() => openComposer()}
-            className="btn-ghost px-3.5 py-2 text-xs"
+            className="btn-link text-xs"
           >
-            ✉ Email
+            <Icone nom="enveloppe" />
+            Email
           </button>
         )}
-
-        {task && (
-          <>
-            <button
-              type="button"
-              onClick={complete}
-              disabled={pending}
-              className="btn-ghost px-3.5 py-2 text-xs"
-            >
-              ✓ Marquer fait
-            </button>
-
-            <span className="flex items-center gap-1 rounded-xl bg-white/[0.03] px-1.5 py-1 ring-1 ring-white/[0.08]">
-              <span className="pl-1 pr-0.5 text-[11px] text-slate-500">Reporter</span>
-              {[
-                [1, "+1j"],
-                [3, "+3j"],
-                [7, "+1sem"],
-              ].map(([days, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  disabled={pending}
-                  onClick={() => reschedule(shiftedDate(days as number))}
-                  className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:bg-white/[0.08] hover:text-slate-100"
-                >
-                  {label}
-                </button>
-              ))}
-              {/* Toujours modifiable à la main : « le 14 octobre » reste possible. */}
-              <input
-                type="date"
-                disabled={pending}
-                defaultValue={isoToLocalInput(task.due_at).slice(0, 10)}
-                onChange={(e) => reschedule(e.target.value)}
-                aria-label="Reporter à une date précise"
-                className="rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60"
-              />
-            </span>
-          </>
-        )}
-      </div>
-
-      {/* Le résultat de l'appel, SOUS LE POUCE — c'est ici qu'on arrive après
-          avoir raccroché, pas dans un formulaire trois écrans plus bas. */}
-      <div className="mt-3 border-t border-white/[0.06] pt-3">
-        <ResultatAppel prospectId={prospectId} compact />
       </div>
     </section>
   );

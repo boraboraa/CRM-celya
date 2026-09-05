@@ -12,6 +12,8 @@
  * serveur comme par les composants client (liste, pipeline, dashboard).
  */
 
+import type { IconeNom } from "@/components/ui";
+
 /** Ce que la vue sait dire du dernier événement d'une fiche. */
 export type LastActionKind =
   | "email_sortant"
@@ -45,13 +47,13 @@ export const LAST_ACTION_SELECT =
   "prospect_id, last_kind, last_at, last_email_sent_at, last_reply_at, last_outcome, last_text, last_no_answer_streak";
 
 /** Le pictogramme ne porte jamais seul : le libellé l'accompagne toujours. */
-export const LAST_ACTION_ICON: Record<LastActionKind, string> = {
-  email_sortant: "📧",
-  email_entrant: "📬",
-  appel_sans_reponse: "📞",
-  echange: "📞",
-  rendez_vous: "🤝",
-  note_interne: "📝",
+export const LAST_ACTION_ICON: Record<LastActionKind, IconeNom> = {
+  email_sortant: "enveloppe",
+  email_entrant: "reponse",
+  appel_sans_reponse: "telephone",
+  echange: "telephone",
+  rendez_vous: "calendrier",
+  note_interne: "note",
 };
 
 export const LAST_ACTION_LABEL: Record<LastActionKind, string> = {

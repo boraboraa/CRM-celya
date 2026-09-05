@@ -6,6 +6,7 @@ import {
   adminResetPasswordAction,
   type ActionState,
 } from "@/app/actions";
+import { Icone } from "@/components/ui";
 
 const EMPTY: ActionState = {};
 
@@ -96,8 +97,9 @@ export function CreateUserForm() {
               onClick={() => setPassword(generatePassword())}
               className="btn-ghost shrink-0 px-3"
               title="Générer un mot de passe"
+              aria-label="Générer un mot de passe"
             >
-              ⟳
+              <Icone nom="report" className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -157,8 +159,10 @@ export function ResetPasswordForm({
           type="button"
           onClick={() => setPassword(generatePassword())}
           className="btn-ghost shrink-0 px-3 py-2 text-xs"
+          title="Générer un mot de passe"
+          aria-label="Générer un mot de passe"
         >
-          ⟳
+          <Icone nom="report" className="h-4 w-4" />
         </button>
         <button type="submit" disabled={pending} className="btn-primary px-3 py-2 text-xs">
           OK

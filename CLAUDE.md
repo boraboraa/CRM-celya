@@ -73,8 +73,10 @@ optionnel) · `mcp-handler` + `@modelcontextprotocol/sdk` + `zod` (connecteur MC
 voir plus bas) · déployé sur Vercel.
 
 Pas de librairie de composants : les styles vivent dans `app/globals.css`
-(`.card`, `.btn-primary`, `.input`, `.chip`…). Thème sombre Celya —
-fond `#0A0E1A`, dégradé `#22D3EE → #4F7BFF → #A855F7`.
+(`.card`, `.btn-primary`, `.btn-ghost`, `.btn-link`, `.input`, `.chip`…).
+Thème **épuré sombre, accent bleu `#4F7BFF`** (`celya-blue`) sur un fond plat
+`#0A0E1A` — depuis le 5 septembre, le dégradé `#22D3EE → #4F7BFF → #A855F7`
+ne reste **que sur le logo**. Voir « Direction visuelle ».
 
 ---
 
@@ -334,15 +336,18 @@ intéressé. **Un tap enregistre**, le reste est facultatif :
   manque le jour ou l'heure n'est **PAS** posé — et le dit ;
 - « Pas intéressé » **exige** une raison, versée aussi dans
   `prospects.lost_reason`, **sans jamais appliquer l'étape « Perdu »** ;
-- « À rappeler » : trois dates d'un tap (demain · +3 j · la semaine prochaine) ;
+- « À rappeler » ne date plus rien ici : **la date se choisit dans la ligne
+  « Relancer » de la carte** (ou de la ligne « À faire »), pas dans le
+  composant — un tap y suffit, et le composant se contente de prévenir
+  (`onRappeler`) qu'il manque un jour ;
 - une **seconde pastille CORRIGE la première** (`preciserResultatAction`) au
   lieu de s'empiler : un doigt qui vise mal ne doit pas créer deux entrées de
   journal.
 
-Où : la carte PROCHAINE ACTION, **chaque ligne de « À faire »** (bouton
-« Résultat », déplié en place — sans ouvrir la fiche), et en tête de l'onglet
-« Consigner ». `QuickNote` n'est pas supprimé : il reste le formulaire complet
-des cas riches.
+Où : **la carte PROCHAINE ACTION de la fiche** (le seul de la fiche, depuis le
+5 septembre : l'onglet « Note » n'en porte plus) et **chaque ligne de « À
+faire »** (bouton « Résultat », déplié en place — sans ouvrir la fiche).
+`QuickNote` n'est pas supprimé : il reste le formulaire complet des cas riches.
 
 Tout passe par `saveExchangeCore` (`outcome` étendu, `noAnswer` conservé et
 équivalent à `outcome: 'sans_reponse'`) — même journal, même règle d'échange,
@@ -357,12 +362,15 @@ prospect passé en Perdu n'a plus de relance ouverte. `normalizeStatus`
 (`lib/constants.ts`) tolère en lecture les anciennes valeurs de statut —
 garde-fou permanent, à ne pas retirer.
 
-**Les dates sont de vrais champs** (`components/DateField.tsx`) : un
-`<input type="date">` (avec l'heure pour un rendez-vous), et des raccourcis
-« Demain / +3 jours / +1 semaine / +1 mois / +3 mois » qui **remplissent le
-champ** au lieu de s'y substituer. Toujours modifiable à la main — c'était le
-défaut le plus gênant de la V1 (préréglages seuls, impossible de saisir « le
-14 octobre »).
+**Les dates sont de vrais champs** : un `<input type="date">` (avec l'heure
+pour un rendez-vous), et des raccourcis **« Demain / +3 j / +1 sem »**
+(`+1 mois` / `+3 mois` en plus dans `components/DateField.tsx`) qui
+**remplissent le champ** au lieu de s'y substituer. Toujours modifiable à la
+main — c'était le défaut le plus gênant de la V1 (préréglages seuls,
+impossible de saisir « le 14 octobre »). Ces trois mots-là vivent à **un seul
+endroit**, `RACCOURCIS_RELANCE` (`lib/constants.ts`) : la ligne « Relancer »
+de la carte, la ligne de « À faire » et `DateField` y puisent, personne ne les
+réécrit.
 
 ### L'agenda — le rendez-vous est un OBJET, plus une tâche (31 août)
 
@@ -534,30 +542,49 @@ l'IA ne marche pas, ancre `#assistant-ia`) · `/acces-refuse`. `/taches` redirig
 **La fiche se lit d'abord — elle ne s'ouvre pas sur des formulaires** (refonte
 du 4 août). De haut en bas :
 
-1. **qui c'est**, et l'étape (les six pastilles cliquables, l'état du verrou,
-   la suggestion éventuelle) ;
-2. **PROCHAINE ACTION**, bien visible : l'action concrète en attente et sa date
+1. **qui c'est**, et l'étape — **une seule pastille**, celle de l'étape
+   actuelle ; les cinq autres se déplient d'un clic, EN PLACE (un clic sur une
+   étape VERROUILLE la fiche : six cibles offertes en permanence à côté d'un
+   pouce, c'était un verrou posé par accident). La confiance est un **badge +
+   sa raison**, et la correction manuelle vit derrière le même clic ;
+2. **PROCHAINE ACTION**, bien visible : le titre, le quand et le contexte
    (« RDV avec … · Rendez-vous le 20 août, 14:00 (dans 16 jours) · En attente
-   de réponse de Sébastien — email envoyé le 4 août »), avec ses gestes
-   rapides — consigner un échange, marquer fait, reporter (+1j / +3j / +1sem,
-   et champ de date pour « le 14 octobre ». Le bloc vire au rouge s'il est en
-   retard, au bleu pour un rendez-vous. **Dérivé de façon déterministe** de la
-   relance ouverte et du dernier événement du journal (`lib/crm/nextAction.ts`)
-   — aucune clé IA nécessaire ;
-3. **AGIR** — un seul bloc à **deux onglets** (refonte du 12 août) :
-   « ✎ Consigner » (note + type + la nature de la note + la case proposition +
-   étape + prochaine action datée, bouton ✨ qui propose) et « ✉ Envoyer un
-   email » (le composeur). Ils avaient chacun leur case « proposition » et se
-   disputaient le même geste ; les onglets n'en montrent qu'un à la fois.
-   Sans adresse sur la fiche, l'onglet email dit pourquoi et propose
-   « Ajouter une adresse » (déplie « Modifier la fiche », curseur dans le
-   champ) plutôt que de disparaître sans un mot ;
+   de réponse de Sébastien — email envoyé le 4 août »), puis **le résultat
+   d'appel** (les cinq pastilles, sous le pouce), puis les gestes :
+   **Fait · Relancer · Email**. « Relancer » porte Demain / +3 j / +1 sem et
+   un champ de date : il **crée** la relance quand il n'y en a pas, **re-date**
+   la relance ouverte sinon — y compris quand un rendez-vous lui passe devant
+   dans l'affichage. Le bloc vire à l'**AMBRE** s'il est en retard, au bleu
+   pour un rendez-vous. **Dérivé de façon déterministe** de la relance ouverte
+   et du dernier événement du journal (`lib/crm/nextAction.ts`) — aucune clé
+   IA nécessaire ;
+3. **AGIR** — un seul bloc à **deux onglets** (refonte du 12 août), « Note » et
+   « Email ». La note, c'est le texte + les **pastilles du parseur** +
+   « Analyser » + un repli « **Plus d'options** » (email déjà envoyé, note de
+   repérage, proposition envoyée). Plus de sélecteur d'étape ni de champ de
+   date : l'étape ne s'y pose que par « Perdu ? Confirmer » (pastille du
+   parseur) ou « Retenir cette étape » (suggestion IA), et s'affiche alors en
+   **pastille ambre retirable**. Sans adresse sur la fiche, l'onglet email dit
+   pourquoi et propose « Ajouter une adresse » (déplie « Modifier la fiche »,
+   curseur dans le champ) plutôt que de disparaître sans un mot ;
 4. **CHRONOLOGIE** : fil vertical, du plus récent au plus ancien, chaque
    événement typé et daté (échange noté, note interne, email envoyé, réponse
    reçue, rendez-vous) — pastille de couleur et puce de type, la nature de
    l'échange se lit avant le texte. **Dix entrées d'abord**, le reste d'un
    clic ;
-5. **puis seulement** : planifier une relance, modifier la fiche.
+5. **puis seulement**, en colonne latérale : la **première relance en lecture**
+   (elle se pilote dans la carte) ; une **deuxième**, rare, garde ses commandes
+   là où elle s'affiche, parce qu'« À faire » ne la montrera qu'à sa date ;
+   « Planifier une relance » est replié. Le « Modifier » de l'adresse a rejoint
+   « Modifier la fiche » — seul « ＋ Ajouter une adresse » reste en tête de
+   fiche, là où il manquait.
+
+**Ce que ça donne, compté à l'écran** (5 septembre 2026, Playwright, sur des
+fiches de test) : contrôles interactifs **visibles avant scroll**, à
+1280 × 900 puis 390 × 844 — fiche vierge **32 → 21** (mobile 20 → 15) ; fiche
+avec relance ouverte, email et adresse **42 → 24** (mobile 27 → 14) ; fiche
+avec rendez-vous à venir **36 → 23** (mobile 22 → 13). Aucune fonctionnalité
+n'a disparu : elles ont cessé d'être offertes toutes en même temps.
 
 **Le bloc « Agir » passe DEVANT la chronologie** — c'est le seul point où la
 règle « la fiche se lit d'abord » a cédé, et pour une raison mesurée : le
@@ -571,8 +598,11 @@ ACTION, « ✉ » en fin de ligne dans la liste des prospects et dans « À fair
 (composeur pré-rempli, destinataire et objet « Re: … »). Ces liens pointent
 `/prospects/<id>#ecrire-un-email` (+ `?repondre=<id d'email>`) ; sur la fiche
 même, les composants clients se parlent par l'événement de fenêtre de
-`lib/crm/composer.ts` (`openComposer` / `openNote`) — un composant serveur les
-sépare, il n'y a pas d'état à faire remonter.
+`lib/crm/composer.ts` — **`openComposer` seul** : `openNote` n'existe plus,
+le résultat d'appel, l'étape et la date de relance ayant chacun leur surface
+propre sur la fiche, plus rien n'a besoin d'ouvrir l'onglet « Note » à
+distance. Un composant serveur sépare ces composants, il n'y a pas d'état à
+faire remonter.
 
 En colonne latérale : les chiffres de l'affaire (valeur estimée seule — la
 probabilité n'est plus affichée), les relances, et l'espace **Brouillons** —
@@ -602,19 +632,46 @@ serveur, via server action (aucun SQL côté client). Confirmation en deux temps
 inline : la question dit ce qui disparaît, et le ton s'endurcit pour un email
 réellement envoyé ou reçu, qui est une trace et non un brouillon.
 
-## Direction visuelle (4 août)
+## Direction visuelle (4 août, refondue le 5 septembre 2026)
 
 Outil ouvert toute la journée : lisible d'un coup d'œil, sans saturation.
 
+- **La règle des trois couleurs** (5 septembre) : **bleu** `celya-blue`
+  (#4F7BFF) = l'état normal et **tout ce qui se clique** ; **ambre** =
+  attention (relance en retard, rendez-vous incomplet, raison manquante,
+  avertissement) ; **rouge / rose** = le définitif ou le cassé seulement
+  (« Supprimer ce prospect », étape « Perdu », erreur serveur). Une couleur de
+  plus dans un écran, c'est une hiérarchie de moins.
 - **Une couleur franche par étape**, la même partout où l'étape apparaît
   (badge, bandeau de colonne du pipeline, pastille du compteur, liseré gauche
-  des cartes, halo de la colonne cible pendant le drag) : ardoise → cyan →
-  bleu → **ambre** (Proposition, « ça chauffe ») → émeraude / rose. Les
+  des cartes, anneau de la colonne cible pendant le drag) : ardoise → cyan →
+  bleu → **ambre** (Proposition, « ça chauffe ») → émeraude / rose. Ces
+  couleurs-là **restent** : elles colorent un **état**, jamais le chrome. Les
   Records de classes complètes vivent dans `lib/constants.ts` (`STATUS_CHIP`,
-  `STATUS_DOT`, `STATUS_ICON`, `STATUS_EDGE`) et dans `PipelineBoard`
-  (bandeaux, compteurs, cibles de drag) — jamais d'interpolation (règle JIT).
+  `STATUS_ICON`, `STATUS_EDGE`) et dans `PipelineBoard` (bandeaux, compteurs,
+  cibles de drag) — jamais d'interpolation (règle JIT).
+- **Cyan et violet sont bornés** : le cyan ne sert plus que pour l'étape
+  « Contacté », le résultat « À rappeler » et les rendez-vous des autres dans
+  l'agenda ; le violet, uniquement pour les rendez-vous personnels de
+  l'agenda. Aucun lien, aucun bouton, aucun badge ne les porte plus.
+- **Plus de halo ni de dégradé dans l'application** : `shadow-glow` a disparu,
+  le `body` est un fond plat, et le dégradé Celya ne subsiste que sur le
+  **logo**.
 - **La couleur ne porte jamais seule** : libellé + pictogramme (`STATUS_ICON`)
   l'accompagnent (daltonisme).
+- **Icônes SVG inline, pas d'emojis, pas de librairie** : un composant
+  `Icone` et son type `IconeNom` dans `components/ui.tsx` (tracés à la main,
+  `viewBox="0 0 16 16"`, `stroke="currentColor"`, `aria-hidden`). Les Records
+  qui les nomment sont **typés** `IconeNom` — `STATUS_ICON`, `OUTCOME_ICON`,
+  `CONFIDENCE_ICON` (`lib/constants.ts`), `LAST_ACTION_ICON`
+  (`lib/crm/lastAction.ts`), `NAV_ITEMS` (`lib/nav.ts`), `STYLE` de
+  `Timeline` : un nom d'icône inconnu ne compile pas. (Les ✅ ⚠ des réponses
+  du serveur MCP sont du **texte pour Claude**, pas de l'interface : ils
+  restent.)
+- **Trois niveaux de bouton**, et pas un de plus (`app/globals.css`) :
+  `.btn-primary` (bleu plein — le geste principal de l'écran), `.btn-ghost`
+  (contour — les gestes secondaires), `.btn-link` (texte souligné au survol —
+  les gestes rares : Analyser, Planifier, Modifier, Annuler, Rendre la main).
 - **Confiance = badge « chaleur »** (`ConfidenceBadge` dans `ui.tsx`,
   `CONFIDENCE_*` dans `constants.ts`) : Chaud orange, Tiède ambre, Froid
   bleu-ardoise, « À évaluer » neutre — toujours avec libellé + pictogramme
@@ -622,8 +679,8 @@ Outil ouvert toute la journée : lisible d'un coup d'œil, sans saturation.
   avec la raison courte.
 - **Contraste hiérarchisé** : titres quasi blancs (`slate-50`), texte
   secondaire jamais plus délavé que `slate-400` (#94A3B8) quand il doit se
-  lire. Le dégradé Celya reste réservé aux **actions principales** ; ce sont
-  les couleurs d'étape qui différencient.
+  lire. Le bleu plein est réservé aux **actions principales** ; ce sont les
+  couleurs d'étape qui différencient.
 - **Motion sobre** (150–250 ms, `globals.css`) : `card-lift` (survol qui
   soulève), `animate-rise` (apparition des listes et colonnes), `animate-pop`
   (étape qui vient d'être choisie), colonne cible illuminée dans sa propre
@@ -672,8 +729,9 @@ c'est précisément l'avantage.
   plus ce champ.
 - **Le point d'entrée est EN TÊTE DE FICHE**, pas dans le formulaire
   (`components/AdresseInline.tsx`) : « ＋ Ajouter une adresse » déplie le champ
-  EN PLACE, à côté du téléphone, et « Modifier » le rouvre quand une adresse
-  existe. Le champ vivait uniquement dans `ProspectForm`, à l'intérieur du
+  EN PLACE, à côté du téléphone. Depuis le 5 septembre, « Modifier » n'y est
+  plus — corriger une adresse déjà saisie est rare, et le champ existe déjà
+  dans « Modifier la fiche ». Le champ vivait uniquement dans `ProspectForm`, à l'intérieur du
   `<details>` replié sous la chronologie — sur 33 fiches sans adresse, **aucun
   point d'entrée n'était visible**, donc personne ne collait rien. Il écrit par
   `setProspectAddressAction`, qui ne touche QUE `address` : `updateProspectAction`
@@ -1269,6 +1327,14 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 - Classes Tailwind conditionnelles : les écrire en entier dans un `Record`
   (voir `STATUS_CHIP`), jamais par interpolation — le JIT ne les verrait pas.
 
+**Vérifications avant de livrer** : `npx tsc --noEmit`, puis
+`npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia` (purs, sans
+réseau). **`npm run lint` n'est PAS configuré** : le script existe, mais le
+dépôt n'a aucune configuration ESLint et `next lint` ouvre alors un assistant
+interactif qui installe des dépendances — il bloque une session non
+interactive. Ne pas en ajouter une au passage : ce serait une décision d'outil,
+pas une correction.
+
 ---
 
 ## Déploiement
@@ -1370,6 +1436,25 @@ Edge functions : déployées via le MCP Supabase —
 ---
 
 ## Pièges déjà rencontrés — ne pas les redécouvrir
+
+**Compter à l'écran, pas dans le code (5 septembre 2026).** Le bouton
+« Résultat » de `TaskRow` était censé donner au résultat d'appel **trois**
+points d'entrée : la carte, l'onglet « Consigner », et chaque ligne de relance.
+Sur la fiche, il n'a **jamais** été rendu une seule fois : il est gardé par
+`task.prospects`, et la fiche ne joint pas `prospects` sur ses propres tâches
+(elle sait déjà de quel prospect il s'agit). Une fonctionnalité « à trois
+endroits » sur le papier n'en avait que deux à l'écran. **Avant de décrire ou
+de déplacer un contrôle, le compter là où il s'affiche** — un rendu
+conditionnel se lit dans les données, pas dans l'intention.
+
+**La prochaine action AFFICHÉE ne dit pas s'il existe une relance
+(5 septembre 2026).** `deriveNextAction` met `task` à **null** dès qu'un
+rendez-vous précède la relance : c'est le rendez-vous qui a la vedette. Un
+bouton qui en déduisait « aucune relance ouverte » partait alors sur
+`saveExchangeAction`, qui **re-date la première relance ouverte, la renomme et
+annule les autres** — exactement l'inverse du geste demandé. L'existence d'une
+relance se lit sur la liste des tâches ouvertes (prop dédiée), jamais sur ce
+que la carte montre. Corrigé dans `NextActionCard` (prop `relanceOuverte`).
 
 **Insertion groupée PostgREST.** Tous les objets d'un même `insert` doivent
 avoir exactement les mêmes clés, sinon `PGRST102: All object keys must match`.

@@ -9,7 +9,7 @@ import {
   type ExtractedProspect,
   type DuplicateHit,
 } from "@/app/ai-actions";
-import { LienPourquoiIA } from "@/components/ui";
+import { LienPourquoiIA, Icone } from "@/components/ui";
 import { STATUS_LABEL, normalizeStatus } from "@/lib/constants";
 import type { Profile, Prospect } from "@/lib/types";
 
@@ -148,7 +148,14 @@ export function NewProspectAssist({
             disabled={pending || (!text.trim() && !image)}
             className="btn-primary px-4 py-2 text-sm"
           >
-            {pending ? "Analyse en cours…" : "✨ Pré-remplir la fiche"}
+            {pending ? (
+              "Analyse en cours…"
+            ) : (
+              <>
+                <Icone nom="etincelle" className="h-3.5 w-3.5" />
+                Pré-remplir la fiche
+              </>
+            )}
           </button>
 
           {image && (
@@ -163,17 +170,18 @@ export function NewProspectAssist({
               <button
                 type="button"
                 onClick={() => setImage(undefined)}
-                className="text-slate-500 hover:text-rose-400"
+                className="inline-flex text-slate-500 hover:text-rose-400"
                 title="Retirer la capture"
+                aria-label="Retirer la capture"
               >
-                ✕
+                <Icone nom="croix" className="h-3 w-3" />
               </button>
             </span>
           )}
         </div>
 
         {notice && (
-          <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-cyan-300/90">
+          <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-blue-300/90">
             {notice}
             {indisponible && <LienPourquoiIA isAdmin={isAdmin} />}
           </p>
@@ -192,7 +200,7 @@ export function NewProspectAssist({
                 <Link
                   href={`/prospects/${d.id}`}
                   prefetch={false}
-                  className="font-medium text-celya-cyan hover:underline"
+                  className="font-medium text-celya-blue hover:underline"
                 >
                   {d.company_name}
                 </Link>{" "}

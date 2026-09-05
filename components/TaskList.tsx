@@ -105,6 +105,12 @@ export function MessageErreur({ message }: { message?: string }) {
  * Les lignes de relance, branchées sur l'état optimiste. `provisoires` liste
  * les identifiants encore inconnus du serveur : ces lignes s'affichent, mais
  * sans commandes — on ne coche pas une relance qui n'existe pas encore.
+ *
+ * `lecture` traverse jusqu'à `TaskRow`, qui n'affiche alors plus aucune
+ * commande. Elle se décide ligne par ligne (`(index) => boolean`) : sur la
+ * fiche, seule la PREMIÈRE relance se lit — c'est celle que pilote la carte
+ * PROCHAINE ACTION. Les rappels restent branchés : c'est la ligne qui les
+ * ignore, et l'état optimiste reste le même des deux côtés.
  */
 type Geste = ReturnType<typeof useOptimisticTasks>["geste"];
 
@@ -113,24 +119,33 @@ export function TaskRows({
   enCours,
   geste,
   compact,
+  lecture,
   provisoires,
 }: {
   vue: TaskWithProspect[];
   enCours: string | null;
   geste: Geste;
   compact?: boolean;
+  /**
+   * Lecture seule : la ligne se lit, les gestes vivent ailleurs. En fonction,
+   * elle se décide ligne par ligne à partir du rang dans la liste.
+   */
+  lecture?: boolean | ((index: number) => boolean);
   /** Identifiants pas encore connus du serveur (lignes provisoires). */
   provisoires?: Set<string>;
 }) {
   return (
     <>
-      {vue.map((t) => {
+      {vue.map((t, i) => {
         const provisoire = provisoires?.has(t.id) ?? false;
+        const enLecture =
+          typeof lecture === "function" ? lecture(i) : Boolean(lecture);
         return (
           <TaskRow
             key={t.id}
             task={t}
             compact={compact}
+            lecture={enLecture}
             pending={enCours === t.id || provisoire}
             onComplete={
               provisoire
@@ -172,7 +187,10 @@ export function TaskRows({
   );
 }
 
-/** La liste seule — dashboard, et relances passées de la fiche. */
+/**
+ * La liste seule — dashboard, et relances passées de la fiche. Ses lignes
+ * gardent toujours leurs commandes : une relance passée se rouvre d'un clic.
+ */
 export function TaskList({
   tasks,
   compact = false,

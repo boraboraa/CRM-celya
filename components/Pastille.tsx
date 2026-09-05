@@ -1,5 +1,7 @@
 "use client";
 
+import { Icone } from "@/components/ui";
+
 /**
  * Une pastille de raccourci : ce qui SERA enregistré, retirable d'un clic.
  * La croix, c'est « non » — jamais une correction du texte, qui part au
@@ -34,9 +36,9 @@ export function Pastille({
           onClick={onRetirer}
           aria-label="Retirer cette pastille"
           title="Ne pas enregistrer cet élément"
-          className="opacity-60 transition hover:opacity-100"
+          className="inline-flex opacity-60 transition hover:opacity-100"
         >
-          ✕
+          <Icone nom="croix" className="h-3 w-3" />
         </button>
       )}
     </span>

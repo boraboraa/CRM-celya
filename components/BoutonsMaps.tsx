@@ -1,12 +1,13 @@
 import { lienMaps, lienItineraire } from "@/lib/crm/maps";
+import { Icone } from "@/components/ui";
 
 /**
  * Les deux boutons Maps — l'unique façon d'AFFICHER une adresse dans le CRM,
  * qu'elle vienne de la fiche (`prospects.address`) ou d'un rendez-vous
  * (`meetings.location`).
  *
- *   📍 Ouvrir dans Maps → lienMaps(...)   — sur téléphone, ouvre l'application
- *   ➜  Y aller          → lienItineraire(...), MASQUÉ quand il vaut null
+ *   Ouvrir dans Maps → lienMaps(...)   — sur téléphone, ouvre l'application
+ *   Y aller          → lienItineraire(...), MASQUÉ quand il vaut null
  *                         (un lien court ne nomme pas de destination)
  *
  * Rien n'est réécrit : ce sont les helpers purs de lib/crm/maps.ts qui
@@ -14,7 +15,7 @@ import { lienMaps, lienItineraire } from "@/lib/crm/maps";
  * (`javascript:`, `data:`…), elle s'affiche comme du TEXTE — jamais un href.
  *
  * Composant neutre (ni serveur ni client) : utilisable dans une page comme
- * dans un composant « use client » (AgendaGrid).
+ * dans un composant « use client » (AgendaGrid). `Icone` l'est aussi.
  */
 export function BoutonsMaps({
   valeur,
@@ -39,8 +40,8 @@ export function BoutonsMaps({
   // Aucune URL exploitable : on montre ce qui a été saisi, sans lien.
   if (!ouvrir) {
     return (
-      <span className={`text-xs text-slate-400 ${className}`}>
-        <span aria-hidden>📍</span> {texte}
+      <span className={`inline-flex items-center gap-1 text-xs text-slate-400 ${className}`}>
+        <Icone nom="epingle" className="h-3 w-3" /> {texte}
       </span>
     );
   }
@@ -59,7 +60,7 @@ export function BoutonsMaps({
         title={texte}
         className={base}
       >
-        <span aria-hidden>📍</span>
+        <Icone nom="epingle" className="h-3 w-3" />
         {compact ? "Maps" : "Ouvrir dans Maps"}
       </a>
       {itineraire && (
@@ -70,7 +71,7 @@ export function BoutonsMaps({
           title={`Itinéraire vers ${texte}`}
           className={base}
         >
-          <span aria-hidden>➜</span>
+          <Icone nom="itineraire" className="h-3 w-3" />
           Y aller
         </a>
       )}

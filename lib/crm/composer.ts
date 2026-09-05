@@ -7,7 +7,11 @@
  * remonter un état à travers la page (server component au milieu), ces
  * composants clients se parlent par un événement de fenêtre : celui qui veut
  * écrire appelle `openComposer()`, le journal l'entend, bascule sur l'onglet
- * email, pré-remplit et fait défiler jusque-là.
+ * Email, pré-remplit et fait défiler jusque-là.
+ *
+ * Un seul geste passe par ici : écrire. L'onglet « Note » ne s'ouvre plus à
+ * distance — le résultat d'appel, l'étape et la date de relance ont chacun
+ * leur surface propre sur la fiche, et plus rien n'a besoin d'y renvoyer.
  *
  * Module NEUTRE (pas de « use client ») : il ne touche à `window` que dans le
  * corps des fonctions, et ne doit jamais être importé par un composant serveur
@@ -20,7 +24,11 @@ export type ComposerPrefill = {
   body?: string | null;
 };
 
-/** Les deux onglets du bloc « Agir » de la fiche. */
+/**
+ * Les deux onglets du bloc « Agir » de la fiche : « Note » et « Email ».
+ * Les valeurs restent celles d'origine — les liens venus d'autres écrans et
+ * la prop `initialTab` de la page en dépendent ; seuls les libellés ont changé.
+ */
 export type JournalTab = "consigner" | "email";
 
 export type JournalOpen = ComposerPrefill & { onglet: JournalTab };
@@ -48,9 +56,4 @@ function dispatch(detail: JournalOpen): void {
  */
 export function openComposer(prefill: ComposerPrefill = {}): void {
   dispatch({ ...prefill, onglet: "email" });
-}
-
-/** Déplie « Consigner » — l'autre moitié du même bloc. */
-export function openNote(): void {
-  dispatch({ onglet: "consigner" });
 }

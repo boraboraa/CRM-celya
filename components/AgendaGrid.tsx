@@ -9,6 +9,7 @@ import {
 import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { fmtDateTime } from "@/lib/constants";
+import { Icone } from "@/components/ui";
 
 export type AgendaProspect = {
   id: string;
@@ -249,8 +250,9 @@ export function AgendaGrid({
         </p>
       )}
       {info && (
-        <p className="mb-3 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300 ring-1 ring-amber-400/20">
-          ⚠ {info}
+        <p className="mb-3 flex items-start gap-2 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300 ring-1 ring-amber-400/20">
+          <Icone nom="alerte" className="mt-0.5 h-3.5 w-3.5" />
+          {info}
         </p>
       )}
 
@@ -264,9 +266,10 @@ export function AgendaGrid({
             <button
               type="button"
               onClick={fermerPanneau}
-              className="text-xs text-slate-500 transition hover:text-slate-300"
+              className="btn-link text-xs"
             >
-              ✕ Annuler
+              <Icone nom="croix" className="h-3 w-3" />
+              Annuler
             </button>
           </div>
 
@@ -278,7 +281,10 @@ export function AgendaGrid({
                 onClick={() => setMode("prospect")}
                 className="rounded-xl bg-celya-blue/10 px-4 py-5 text-sm font-medium text-slate-100 ring-1 ring-celya-blue/35 transition hover:bg-celya-blue/20"
               >
-                ◆ Avec un prospect
+                <span className="inline-flex items-center gap-1.5">
+                  <Icone nom="calendrier" className="h-3.5 w-3.5" />
+                  Avec un prospect
+                </span>
                 <span className="mt-1 block text-[11px] font-normal text-slate-400">
                   La fiche passera en « Rendez-vous », le débrief suivra.
                 </span>
@@ -288,7 +294,10 @@ export function AgendaGrid({
                 onClick={() => setMode("perso")}
                 className="rounded-xl bg-celya-violet/10 px-4 py-5 text-sm font-medium text-slate-100 ring-1 ring-celya-violet/35 transition hover:bg-celya-violet/20"
               >
-                ● Personnel
+                <span className="inline-flex items-center gap-1.5">
+                  <Icone nom="personne" className="h-3.5 w-3.5" />
+                  Personnel
+                </span>
                 <span className="mt-1 block text-[11px] font-normal text-slate-400">
                   Les autres ne verront que « Occupé ».
                 </span>
@@ -300,7 +309,8 @@ export function AgendaGrid({
                 choisi ? (
                   <p className="flex items-center gap-2 text-sm text-slate-200">
                     <span className="chip bg-celya-blue/15 text-blue-300 ring-blue-400/25">
-                      ◆ {choisi.company_name}
+                      <Icone nom="calendrier" className="h-3 w-3" />
+                      {choisi.company_name}
                     </span>
                     <button
                       type="button"
@@ -540,7 +550,13 @@ export function AgendaGrid({
                               {m.ownerInitial}
                             </span>
                           )}
-                          {local.slice(11, 16)} {m.status === "honore" ? "✓ " : ""}
+                          {local.slice(11, 16)}{" "}
+                          {m.status === "honore" && (
+                            <Icone
+                              nom="coche"
+                              className="mr-0.5 inline-block h-3 w-3 align-[-1px]"
+                            />
+                          )}
                           {m.prospect ? (
                             <Link
                               href={`/prospects/${m.prospect.id}`}

@@ -14,7 +14,7 @@ import { Icone } from "@/components/ui";
  * trouvait où coller son lien Maps. Ici, le geste tient sur la même ligne que
  * le téléphone :
  *
- *   · pas d'adresse → « ＋ Ajouter une adresse », qui déplie le champ EN PLACE
+ *   · pas d'adresse → « Ajouter une adresse », qui déplie le champ EN PLACE
  *     (aucune navigation, aucune modale) ;
  *   · une adresse → les boutons Maps, et rien d'autre.
  *

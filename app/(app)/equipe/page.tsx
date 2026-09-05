@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { PageHeader, Avatar } from "@/components/ui";
+import { PageHeader, Avatar, Icone, type IconeNom } from "@/components/ui";
 import { CreateUserForm, ResetPasswordForm } from "@/components/TeamForms";
 import { adminUpdateUserAction } from "@/app/actions";
 import { fmtDate, fmtDateTime, ACTIVITY_LABEL } from "@/lib/constants";
@@ -139,7 +139,8 @@ export default async function TeamPage({
         </div>
         {incomplets > 0 && (
           <p className="chip bg-amber-500/15 text-amber-300 ring-amber-400/25">
-            ⚠ {incomplets} compte{incomplets > 1 ? "s" : ""} pas encore
+            <Icone nom="alerte" className="h-3 w-3" />
+            {incomplets} compte{incomplets > 1 ? "s" : ""} pas encore
             opérationnel{incomplets > 1 ? "s" : ""}
           </p>
         )}
@@ -179,11 +180,13 @@ export default async function TeamPage({
                 <div className="flex flex-wrap items-center gap-2">
                   {u.is_active ? (
                     <span className="chip bg-emerald-500/15 text-emerald-300 ring-emerald-400/25">
-                      ● Actif
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                      Actif
                     </span>
                   ) : (
                     <span className="chip bg-slate-500/15 text-slate-300 ring-slate-400/25">
-                      ○ Inactif
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
+                      Inactif
                     </span>
                   )}
                   <span className="chip bg-white/[0.06] text-slate-300 ring-white/10">
@@ -196,19 +199,20 @@ export default async function TeamPage({
               <div className="mt-4 flex flex-wrap gap-2">
                 <ConfigChip
                   ok={Boolean(u.mailbox && u.mailbox_has_credentials)}
-                  icon="✉"
+                  icon="enveloppe"
                   okLabel={`Boîte : ${u.mailbox}`}
                   koLabel="Aucune boîte email connectée"
                 />
                 <ConfigChip
                   ok={u.mcp_connected}
-                  icon="⚡"
+                  icon="etincelle"
                   okLabel="Connecteur MCP branché"
                   koLabel="Connecteur MCP non branché"
                 />
                 {u.must_change_password && (
                   <span className="chip bg-amber-500/15 text-amber-300 ring-amber-400/25">
-                    ⚠ Mot de passe provisoire
+                    <Icone nom="alerte" className="h-3 w-3" />
+                    Mot de passe provisoire
                   </span>
                 )}
               </div>
@@ -264,7 +268,10 @@ export default async function TeamPage({
               {recent.length > 0 && (
                 <details className="group mt-3">
                   <summary className="cursor-pointer list-none text-xs text-slate-400 transition hover:text-slate-200">
-                    <span className="inline-block transition group-open:rotate-90">▸</span>{" "}
+                    <Icone
+                      nom="chevron"
+                      className="inline-block h-3 w-3 transition group-open:rotate-180"
+                    />{" "}
                     Dernières actions ({recent.length})
                   </summary>
                   <ul className="mt-2 space-y-1.5 border-l border-white/[0.08] pl-3">
@@ -386,17 +393,19 @@ function ConfigChip({
   koLabel,
 }: {
   ok: boolean;
-  icon: string;
+  icon: IconeNom;
   okLabel: string;
   koLabel: string;
 }) {
   return ok ? (
     <span className="chip bg-emerald-500/15 text-emerald-300 ring-emerald-400/25">
-      {icon} {okLabel}
+      <Icone nom={icon} className="h-3 w-3" />
+      {okLabel}
     </span>
   ) : (
     <span className="chip bg-amber-500/15 text-amber-300 ring-amber-400/25">
-      {icon} {koLabel}
+      <Icone nom={icon} className="h-3 w-3" />
+      {koLabel}
     </span>
   );
 }
@@ -415,17 +424,17 @@ function Stat({
   alert?: boolean;
 }) {
   return (
-    <div className={alert ? "bg-rose-500/10 px-3 py-2.5" : "bg-[#0A0E1A] px-3 py-2.5"}>
+    <div className={alert ? "bg-amber-500/10 px-3 py-2.5" : "bg-[#0A0E1A] px-3 py-2.5"}>
       <p
         className={
           alert
-            ? "font-display text-lg font-semibold text-rose-300"
+            ? "font-display text-lg font-semibold text-amber-300"
             : "font-display text-lg font-semibold text-slate-100"
         }
       >
         {text ?? value ?? 0}
       </p>
-      <p className={alert ? "text-[11px] text-rose-300/80" : "text-[11px] text-slate-500"}>
+      <p className={alert ? "text-[11px] text-amber-300/80" : "text-[11px] text-slate-500"}>
         {label}
       </p>
       {hint && <p className="text-[10px] text-slate-600">{hint}</p>}

@@ -82,6 +82,11 @@ export function ConfidenceControl({
   return (
     <div className={`space-y-1.5 ${pending ? "opacity-60" : ""} transition-opacity`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {/* Sans étiquette, un badge « Tiède » ne dit pas de quoi il parle : la
+            fiche se lit d'abord, le mot vient avant le signal. */}
+        <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+          Confiance
+        </span>
         {/* Le badge se lit ; il ouvre la correction si on le touche. */}
         <button
           type="button"

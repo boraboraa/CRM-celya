@@ -60,6 +60,7 @@ export type IconeNom =
   | "chevron"
   | "personne"
   | "report"
+  | "corbeille"
   | "taches"
   | "agenda"
   | "dossier"
@@ -182,6 +183,14 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
       <path d="M2.8 13.8c.6-2.6 2.6-3.9 5.2-3.9s4.6 1.3 5.2 3.9" />
     </>
   ),
+  corbeille: (
+    <>
+      <path d="M2.6 4.2h10.8" />
+      <path d="M6.2 4.2V2.8h3.6v1.4" />
+      <path d="m4 4.2.7 9a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-9" />
+      <path d="M6.6 7v4M9.4 7v4" />
+    </>
+  ),
   report: (
     <>
       <path d="M14 8a6 6 0 1 1-2.3-4.7" />
@@ -298,9 +307,9 @@ const TEXTE_MAX = 70;
 /**
  * La DERNIÈRE ACTION d'une fiche : résultat + ce qui s'est dit + date relative
  *
- *   ✕ Pas intéressé — « bosse déjà avec un concurrent »   ·  il y a 2 j
- *   📵 Pas de réponse (3e fois)                           ·  hier
- *   👍 Intéressé — « rappeler après les congés »          ·  il y a 5 j
+ *   (icône)  Pas intéressé — « bosse déjà avec un concurrent »  ·  il y a 2 j
+ *   (icône)  Pas de réponse (3e fois)                          ·  hier
+ *   (icône)  Intéressé — « rappeler après les congés »         ·  il y a 5 j
  *
  * Même ligne sur la liste, les cartes du pipeline et le tableau de bord,
  * dérivée du dernier événement réel du journal (vue prospect_action_state).
@@ -383,7 +392,7 @@ export function LienPourquoiIA({ isAdmin = false }: { isAdmin?: boolean }) {
     <Link
       href="/compte#assistant-ia"
       prefetch={false}
-      className="text-[11px] font-medium text-celya-cyan underline-offset-2 hover:underline"
+      className="text-[11px] font-medium text-celya-blue underline-offset-2 hover:underline"
     >
       Pourquoi&nbsp;?
     </Link>

@@ -129,7 +129,7 @@ export function EmailComposer({
     {}
   );
 
-  // Ouverture explicite (bouton « ✉ Email », brouillon repris) : le curseur
+  // Ouverture explicite (bouton « Email », brouillon repris) : le curseur
   // se pose dans le premier champ qui reste à remplir.
   useEffect(() => {
     if (!autoFocus) return;

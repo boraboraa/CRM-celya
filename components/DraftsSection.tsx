@@ -17,7 +17,7 @@ export type DraftEntry = {
  *
  * Un texte jamais envoyé n'est pas un échange : il ne compte pour aucun fait,
  * ne touche pas au dernier contact, et se supprime d'un clic. Ce qui change
- * ici, c'est qu'il peut maintenant PARTIR d'un clic : « ✉ Envoyer » l'envoie
+ * ici, c'est qu'il peut maintenant PARTIR d'un clic : « Envoyer » l'envoie
  * à l'adresse de la fiche, « Modifier » le verse dans le composeur.
  *
  * Optimiste, comme tout geste visible du CRM : le brouillon quitte la liste à
@@ -75,7 +75,7 @@ export function DraftsSection({
             </p>
             {d.body && (
               <details className="mt-1.5">
-                <summary className="cursor-pointer text-[11px] text-slate-500 transition hover:text-slate-300">
+                <summary className="btn-link cursor-pointer list-none text-[11px]">
                   Voir le texte
                 </summary>
                 <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-500">

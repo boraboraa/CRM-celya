@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
-import { Avatar } from "@/components/ui";
+import { Avatar, Icone } from "@/components/ui";
 import { AdresseInline } from "@/components/AdresseInline";
 import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
@@ -234,11 +234,9 @@ export default async function ProspectDetailPage({
     <>
       {/* ---------- En-tête : qui, et où on en est ---------- */}
       <div className="mb-6">
-        <Link
-          href="/prospects"
-          className="text-xs text-slate-500 transition hover:text-slate-300"
-        >
-          ← Tous les prospects
+        <Link href="/prospects" className="btn-link text-xs">
+          <Icone nom="chevron" className="h-3 w-3 rotate-90" />
+          Tous les prospects
         </Link>
 
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
@@ -251,7 +249,7 @@ export default async function ProspectDetailPage({
               {prospect.phone && (
                 <a
                   href={`tel:${prospect.phone.replace(/\s/g, "")}`}
-                  className="text-celya-cyan hover:underline"
+                  className="text-celya-blue hover:underline"
                 >
                   {prospect.phone}
                 </a>
@@ -259,7 +257,7 @@ export default async function ProspectDetailPage({
               {prospect.email && (
                 <a
                   href={`mailto:${prospect.email}`}
-                  className="text-celya-cyan hover:underline"
+                  className="text-celya-blue hover:underline"
                 >
                   {prospect.email}
                 </a>
@@ -269,7 +267,7 @@ export default async function ProspectDetailPage({
 
             {/* L'adresse — à côté du téléphone, les deux gestes du terrain :
                 ouvrir la fiche Maps, ou lancer l'itinéraire. Sans adresse, le
-                point d'entrée est ICI (« ＋ Ajouter une adresse ») : le champ
+                point d'entrée est ICI (« Ajouter une adresse ») : le champ
                 du formulaire complet est replié tout en bas, personne ne l'y
                 trouvait. Le lieu d'un rendez-vous, quand il y en a un à
                 proposer, garde la priorité — jamais les deux à la fois. */}
@@ -345,7 +343,8 @@ export default async function ProspectDetailPage({
 
           <section>
             <details id="modifier-la-fiche" className="card scroll-mt-6 p-6">
-              <summary className="cursor-pointer font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              <summary className="btn-link cursor-pointer list-none text-xs">
+                <Icone nom="chevron" className="h-3 w-3" />
                 Modifier la fiche
               </summary>
               <div className="mt-5">

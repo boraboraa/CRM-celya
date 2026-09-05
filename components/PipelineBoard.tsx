@@ -262,7 +262,7 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                           <span
                             aria-label="Enregistrement en cours"
                             title="Enregistrement…"
-                            className="float-right ml-2 mt-0.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-celya-cyan/70 border-t-transparent"
+                            className="float-right ml-2 mt-0.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-celya-blue/70 border-t-transparent"
                           />
                         )}
                         {/* prefetch désactivé : une colonne peut porter des
@@ -305,7 +305,7 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                               locked={c.confidence_locked}
                             />
                             <span
-                              className={`shrink-0 text-[11px] ${overdue ? "text-rose-400" : "text-slate-400"}`}
+                              className={`shrink-0 text-[11px] ${overdue ? "text-amber-300" : "text-slate-400"}`}
                             >
                               {c.next_action_at ? relative(c.next_action_at) : "—"}
                             </span>

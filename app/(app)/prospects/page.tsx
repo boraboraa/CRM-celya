@@ -8,6 +8,7 @@ import {
   Avatar,
   ConfidenceBadge,
   LastActionLine,
+  Icone,
 } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
@@ -236,19 +237,20 @@ export default async function ProspectsPage({
         <div className="flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
           {(
             [
-              ["liste", "☰ Liste"],
-              ["colonnes", "▤ Colonnes"],
+              ["liste", "taches", "Liste"],
+              ["colonnes", "agenda", "Colonnes"],
             ] as const
-          ).map(([v, label]) => (
+          ).map(([v, icone, label]) => (
             <Link
               key={v}
               href={viewHref(v)}
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
                 view === v
                   ? "bg-white/[0.09] text-slate-100 ring-1 ring-white/15"
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
+              <Icone nom={icone} className="h-3.5 w-3.5" />
               {label}
             </Link>
           ))}
@@ -260,13 +262,14 @@ export default async function ProspectsPage({
           href={makeHref({ filtreEmails: !filtreEmails })}
           aria-pressed={filtreEmails}
           title="Ne montrer que les prospects à qui un mail a été envoyé"
-          className={`rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
+          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
             filtreEmails
-              ? "bg-violet-500/15 text-violet-200 ring-violet-400/30"
+              ? "bg-celya-blue/15 text-blue-200 ring-celya-blue/40"
               : "bg-white/[0.03] text-slate-400 ring-white/10 hover:text-slate-200"
           }`}
         >
-          📧 Emails envoyés
+          <Icone nom="enveloppe" className="h-3.5 w-3.5" />
+          Emails envoyés
         </Link>
 
         <form className="flex flex-1 flex-wrap items-end gap-3">
@@ -403,7 +406,7 @@ export default async function ProspectsPage({
                         locked={Boolean(p.confidence_locked)}
                       />
                     </td>
-                    <td className={`td whitespace-nowrap ${overdue ? "text-rose-400" : ""}`}>
+                    <td className={`td whitespace-nowrap ${overdue ? "text-amber-300" : ""}`}>
                       {p.next_action_at ? relative(p.next_action_at) : "—"}
                     </td>
                     <td className="td whitespace-nowrap">
@@ -436,9 +439,9 @@ export default async function ProspectsPage({
                           prefetch={false}
                           title={`Écrire à ${p.email}`}
                           aria-label={`Écrire à ${p.company_name}`}
-                          className="rounded-lg px-2 py-1 text-slate-500 transition hover:bg-white/[0.06] hover:text-violet-300"
+                          className="inline-flex rounded-lg px-2 py-1 text-slate-500 transition hover:bg-white/[0.06] hover:text-celya-blue"
                         >
-                          ✉
+                          <Icone nom="enveloppe" className="h-4 w-4" />
                         </Link>
                       )}
                     </td>

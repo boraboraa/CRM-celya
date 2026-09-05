@@ -31,7 +31,7 @@ export function ProspectForm({
     uncertainFields?.includes(name)
       ? "input ring-2 ring-amber-400/70"
       : aiFields?.includes(name)
-        ? "input ring-2 ring-celya-cyan/50"
+        ? "input ring-2 ring-celya-blue/50"
         : "input";
   const status = normalizeStatus(prospect?.status);
   // Une source héritée absente de la liste actuelle reste sélectionnable —

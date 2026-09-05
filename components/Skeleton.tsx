@@ -96,23 +96,32 @@ export function SqueletteFiche() {
         <div className="min-w-0">
           <Bloc className="h-8 w-72 max-w-full" />
           <Bloc className="mt-2.5 h-3.5 w-96 max-w-full" />
-          <Bloc className="mt-3 h-6 w-40 rounded-full" />
+          {/* L'adresse, puis la confiance : l'étiquette, le badge, sa raison. */}
+          <Bloc className="mt-2 h-6 w-52 rounded-lg" />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Bloc className="h-3 w-16" />
+            <Bloc className="h-6 w-24 rounded-full" />
+            <Bloc className="h-3 w-44 max-w-full" />
+          </div>
         </div>
-        <div className="flex w-full max-w-md flex-wrap gap-1.5">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Bloc key={i} className="h-6 w-24 rounded-full" />
-          ))}
-        </div>
+        {/* Une seule pastille d'étape — les cinq autres sont derrière un clic. */}
+        <Bloc className="h-6 w-32 rounded-full" />
       </div>
 
-      {/* Prochaine action */}
+      {/* Prochaine action : le titre, le résultat d'appel, les gestes. */}
       <div className="card mb-6 mt-6 p-5">
         <Bloc className="h-3 w-32" />
         <Bloc className="mt-3 h-6 w-64 max-w-full" />
         <Bloc className="mt-2.5 h-4 w-80 max-w-full" />
         <div className="mt-4 flex flex-wrap gap-2">
-          <Bloc className="h-8 w-44 rounded-xl" />
-          <Bloc className="h-8 w-32 rounded-xl" />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Bloc key={i} className="h-11 w-32 rounded-xl" />
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Bloc className="h-8 w-24 rounded-xl" />
+          <Bloc className="h-8 w-48 rounded-xl" />
+          <Bloc className="h-8 w-24 rounded-xl" />
         </div>
       </div>
 

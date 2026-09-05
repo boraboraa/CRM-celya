@@ -15,6 +15,7 @@ import {
   CONFIDENCE_PENDING_CHIP,
   CONFIDENCE_PENDING_ICON,
 } from "@/lib/constants";
+import { Icone } from "@/components/ui";
 import type { ConfidenceLevel } from "@/lib/types";
 
 /**
@@ -104,9 +105,7 @@ export function ConfidenceControl({
                   : "bg-white/[0.03] text-slate-400 ring-white/[0.08] hover:bg-white/[0.07] hover:text-slate-200 hover:ring-white/20"
               } disabled:cursor-default`}
             >
-              <span aria-hidden className="text-[10px] leading-none">
-                {CONFIDENCE_ICON[l]}
-              </span>
+              <Icone nom={CONFIDENCE_ICON[l]} className="h-3 w-3" />
               {CONFIDENCE_LABEL[l]}
             </button>
           );
@@ -114,9 +113,7 @@ export function ConfidenceControl({
 
         {vue.level === null && (
           <span className={`chip ${CONFIDENCE_PENDING_CHIP}`}>
-            <span aria-hidden className="text-[10px] leading-none">
-              {CONFIDENCE_PENDING_ICON}
-            </span>
+            <Icone nom={CONFIDENCE_PENDING_ICON} className="h-3 w-3" />
             {CONFIDENCE_PENDING_LABEL}
           </span>
         )}

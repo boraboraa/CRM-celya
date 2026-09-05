@@ -371,7 +371,7 @@ export function QuickNote({
               aria-pressed={type === t}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium ring-1 transition duration-200 ${
                 type === t
-                  ? "bg-celya-gradient text-slate-950 ring-transparent shadow-glow"
+                  ? "bg-celya-blue/15 text-blue-200 ring-celya-blue/40"
                   : "bg-white/[0.04] text-slate-400 ring-white/10 hover:bg-white/[0.08] hover:text-slate-200"
               }`}
             >
@@ -563,7 +563,7 @@ export function QuickNote({
             type="checkbox"
             checked={applyContact}
             onChange={(e) => setApplyContact(e.target.checked)}
-            className="h-3.5 w-3.5 accent-cyan-400"
+            className="h-3.5 w-3.5 accent-[#4F7BFF]"
           />
           Mettre à jour le contact : {contactProposal}
         </label>
@@ -586,7 +586,7 @@ export function QuickNote({
                   name="note-nature"
                   checked={nature === n.value}
                   onChange={() => setNature(n.value)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
+                  className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
                 />
                 <span>
                   {n.label}
@@ -605,7 +605,7 @@ export function QuickNote({
             type="checkbox"
             checked={proposalSent}
             onChange={(e) => setProposalSent(e.target.checked)}
-            className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
+            className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
           />
           <span>
             J&apos;ai envoyé une proposition / un devis

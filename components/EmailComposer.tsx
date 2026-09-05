@@ -240,7 +240,7 @@ export function EmailComposer({
           value="1"
           checked={proposition}
           onChange={(e) => setProposition(e.target.checked)}
-          className="mt-0.5 h-3.5 w-3.5 accent-cyan-400"
+          className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
         />
         <span>
           Ce message est une proposition / un devis

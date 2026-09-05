@@ -1,3 +1,4 @@
+import type { IconeNom } from "@/components/ui";
 import type {
   ActivityType,
   CallOutcome,
@@ -49,13 +50,13 @@ export const STATUS_DOT: Record<ProspectStatus, string> = {
 };
 
 /** Pictogramme d'étape — la couleur ne porte jamais seule (daltonisme). */
-export const STATUS_ICON: Record<ProspectStatus, string> = {
-  a_appeler: "☎",
-  contacte: "✎",
-  rendez_vous: "◆",
-  proposition: "✉",
-  gagne: "✓",
-  perdu: "✕",
+export const STATUS_ICON: Record<ProspectStatus, IconeNom> = {
+  a_appeler: "telephone",
+  contacte: "note",
+  rendez_vous: "calendrier",
+  proposition: "enveloppe",
+  gagne: "coche",
+  perdu: "croix",
 };
 
 /** Liseré gauche des cartes du pipeline, dans la couleur de l'étape. */
@@ -114,12 +115,12 @@ export const OUTCOME_LABEL: Record<CallOutcome, string> = {
 };
 
 /** Le pictogramme accompagne toujours le libellé — la couleur ne porte jamais seule. */
-export const OUTCOME_ICON: Record<CallOutcome, string> = {
-  sans_reponse: "📵",
-  barrage: "🚧",
-  rappeler: "↩︎",
-  interesse: "👍",
-  refus: "✕",
+export const OUTCOME_ICON: Record<CallOutcome, IconeNom> = {
+  sans_reponse: "telephone-barre",
+  barrage: "barriere",
+  rappeler: "retour",
+  interesse: "pouce",
+  refus: "croix",
 };
 
 /**
@@ -189,6 +190,18 @@ export const SOURCES = [
   "Autre",
 ];
 
+/**
+ * Les trois raccourcis de relance, dans le même ordre et avec les mêmes mots
+ * partout où l'on repousse une date (carte PROCHAINE ACTION, ligne du tableau
+ * « À faire », champ de date). Un seul endroit : « +3 j » ici et « +3 jours »
+ * ailleurs, c'était déjà deux vocabulaires pour un seul geste.
+ */
+export const RACCOURCIS_RELANCE: { label: string; jours: number }[] = [
+  { label: "Demain", jours: 1 },
+  { label: "+3 j", jours: 3 },
+  { label: "+1 sem", jours: 7 },
+];
+
 const TZ = "Europe/Brussels";
 
 export function fmtDate(value?: string | null): string {
@@ -244,17 +257,17 @@ export const CONFIDENCE_CHIP: Record<ConfidenceLevel, string> = {
   froid: "bg-sky-500/15 text-sky-300 ring-sky-400/25",
 };
 
-export const CONFIDENCE_ICON: Record<ConfidenceLevel, string> = {
-  chaud: "♨",
-  tiede: "◐",
-  froid: "❄",
+export const CONFIDENCE_ICON: Record<ConfidenceLevel, IconeNom> = {
+  chaud: "flamme",
+  tiede: "demi",
+  froid: "flocon",
 };
 
 /** L'état honnête quand rien n'a (encore) pu être estimé. */
 export const CONFIDENCE_PENDING_LABEL = "À évaluer";
 export const CONFIDENCE_PENDING_CHIP =
   "bg-white/[0.04] text-slate-400 ring-white/10";
-export const CONFIDENCE_PENDING_ICON = "…";
+export const CONFIDENCE_PENDING_ICON: IconeNom = "attente";
 
 /** « il y a 3 jours » / « dans 2 h » */
 export function relative(value?: string | null): string {

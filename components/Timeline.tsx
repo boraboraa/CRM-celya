@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { fmtDateTime, relative } from "@/lib/constants";
+import { Icone, type IconeNom } from "@/components/ui";
 import type { TimelineKind } from "@/lib/crm/nextAction";
 
 /** Un événement de la chronologie, déjà normalisé par la page. */
@@ -25,46 +26,53 @@ export type TimelineEntry = {
   pending?: boolean;
 };
 
-/** Libellé, couleur et pictogramme — classes complètes, jamais interpolées. */
+/**
+ * Libellé, couleur et pictogramme — classes complètes, jamais interpolées.
+ *
+ * Le fil est neutre : ce qui compte, c'est la date et le texte. Deux
+ * événements seulement se colorent, parce qu'ils appellent une suite — le
+ * rendez-vous (bleu) et la réponse reçue (émeraude). Un email parti n'est pas
+ * un événement remarquable : il est neutre comme les notes.
+ */
 const STYLE: Record<
   TimelineKind,
-  { label: string; dot: string; chip: string; icon: string }
+  { label: string; dot: string; chip: string; icon: IconeNom }
 > = {
   note: {
     label: "Échange noté",
     dot: "bg-slate-400",
     chip: "bg-white/[0.05] text-slate-300 ring-white/10",
-    icon: "✎",
+    icon: "note",
   },
   note_interne: {
     label: "Note interne",
     dot: "bg-slate-600",
     chip: "bg-white/[0.03] text-slate-500 ring-white/[0.08]",
-    icon: "•",
+    icon: "note",
   },
   appel_sans_reponse: {
     label: "Appelé — pas de réponse",
     dot: "bg-slate-500",
     chip: "bg-white/[0.04] text-slate-400 ring-white/10",
-    icon: "☎",
+    icon: "telephone",
   },
   email_sortant: {
     label: "Email envoyé",
-    dot: "bg-violet-400",
-    chip: "bg-violet-500/15 text-violet-300 ring-violet-400/25",
-    icon: "↗",
+    dot: "bg-slate-400",
+    chip: "bg-white/[0.05] text-slate-300 ring-white/10",
+    icon: "enveloppe",
   },
   email_entrant: {
     label: "Réponse reçue",
     dot: "bg-emerald-400",
     chip: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/25",
-    icon: "↘",
+    icon: "reponse",
   },
   rendez_vous: {
     label: "Rendez-vous",
     dot: "bg-blue-400",
     chip: "bg-celya-blue/15 text-blue-300 ring-blue-400/25",
-    icon: "◆",
+    icon: "calendrier",
   },
 };
 
@@ -111,7 +119,7 @@ export function Timeline({
         {/* Le fil. */}
         <span
           aria-hidden
-          className="absolute bottom-2 left-[7px] top-2 w-px bg-gradient-to-b from-celya-cyan/30 via-white/[0.08] to-transparent"
+          className="absolute bottom-2 left-[7px] top-2 w-px bg-gradient-to-b from-celya-blue/30 via-white/[0.08] to-transparent"
         />
 
         {visibles.map((entry) => {
@@ -131,7 +139,7 @@ export function Timeline({
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`chip ${style.chip}`}>
-                    <span aria-hidden>{style.icon}</span>
+                    <Icone nom={style.icon} className="h-3 w-3" />
                     {style.label}
                   </span>
                   <span className="text-xs text-slate-400">
@@ -145,7 +153,7 @@ export function Timeline({
                       <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
                         <span
                           aria-hidden
-                          className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-celya-cyan/70 border-t-transparent"
+                          className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-celya-blue/70 border-t-transparent"
                         />
                         Enregistrement…
                       </span>

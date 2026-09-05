@@ -12,6 +12,7 @@ import {
   OUTCOME_ORDER,
   STATUS_LABEL,
 } from "@/lib/constants";
+import { Icone } from "@/components/ui";
 import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { CallOutcome } from "@/lib/types";
@@ -264,9 +265,9 @@ export function ResultatAppel({
                   : "bg-white/[0.04] text-slate-300 ring-white/10 hover:bg-white/[0.08] hover:text-slate-100"
               }`}
             >
-              <span aria-hidden>{OUTCOME_ICON[o]}</span>
+              <Icone nom={OUTCOME_ICON[o]} />
               {OUTCOME_LABEL[o]}
-              {actif && enregistre && <span aria-hidden>✓</span>}
+              {actif && enregistre && <Icone nom="coche" className="h-3 w-3" />}
             </button>
           );
         })}

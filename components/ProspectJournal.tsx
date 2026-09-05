@@ -129,7 +129,7 @@ export function ProspectJournal({
               aria-pressed={onglet === o.value}
               className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wider ring-1 transition duration-200 ${
                 onglet === o.value
-                  ? "bg-celya-gradient text-slate-950 ring-transparent shadow-glow"
+                  ? "bg-celya-blue/15 text-blue-200 ring-celya-blue/40"
                   : "bg-white/[0.04] text-slate-400 ring-white/10 hover:bg-white/[0.08] hover:text-slate-200"
               }`}
             >

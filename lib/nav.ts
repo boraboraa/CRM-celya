@@ -2,13 +2,15 @@
 // client Nav. Module volontairement sans directive "use client" : importer une
 // constante depuis un module client dans un composant serveur la remplace par
 // une référence client inutilisable (NAV_ITEMS is not iterable).
-export type NavItem = { href: string; label: string; icon: string };
+import type { IconeNom } from "@/components/ui";
+
+export type NavItem = { href: string; label: string; icon: IconeNom };
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "À faire", icon: "◉" },
-  { href: "/agenda", label: "Agenda", icon: "▦" },
-  { href: "/prospects", label: "Prospects", icon: "◇" },
+  { href: "/dashboard", label: "À faire", icon: "taches" },
+  { href: "/agenda", label: "Agenda", icon: "agenda" },
+  { href: "/prospects", label: "Prospects", icon: "dossier" },
 ];
 
-export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "◍" };
-export const ACCOUNT_ITEM: NavItem = { href: "/compte", label: "Mon compte", icon: "⚙" };
+export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "equipe" };
+export const ACCOUNT_ITEM: NavItem = { href: "/compte", label: "Mon compte", icon: "reglages" };

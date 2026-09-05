@@ -582,8 +582,8 @@ du 4 août). De haut en bas :
 **Ce que ça donne, compté à l'écran** (5 septembre 2026, Playwright, sur des
 fiches de test) : contrôles interactifs **visibles avant scroll**, à
 1280 × 900 puis 390 × 844 — fiche vierge **32 → 21** (mobile 20 → 15) ; fiche
-avec relance ouverte, email et adresse **42 → 25** (mobile 27 → 14) ; fiche
-avec rendez-vous à venir **36 → 24** (mobile 22 → 13). Aucune fonctionnalité
+avec relance ouverte, email et adresse **42 → 24** (mobile 27 → 14) ; fiche
+avec rendez-vous à venir **36 → 23** (mobile 22 → 13). Aucune fonctionnalité
 n'a disparu : elles ont cessé d'être offertes toutes en même temps.
 
 **Le bloc « Agir » passe DEVANT la chronologie** — c'est le seul point où la

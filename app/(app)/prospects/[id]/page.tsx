@@ -319,6 +319,7 @@ export default async function ProspectDetailPage({
         <NextActionCard
           action={nextAction}
           prospectId={prospect.id}
+          companyName={prospect.company_name}
           canEmail={Boolean(prospect.email)}
         />
       </div>

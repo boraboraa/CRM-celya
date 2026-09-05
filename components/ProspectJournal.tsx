@@ -145,11 +145,7 @@ export function ProspectJournal({
             {/* Le résultat d'appel, EN TÊTE de l'onglet : deux taps, sans
                 descendre dans le formulaire complet. QuickNote reste dessous
                 pour les cas riches. */}
-            <ResultatAppel
-              prospectId={prospectId}
-              companyName={companyName}
-              className="mb-3"
-            />
+            <ResultatAppel prospectId={prospectId} className="mb-3" />
             <QuickNote
               prospectId={prospectId}
               companyName={companyName}

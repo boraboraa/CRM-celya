@@ -200,8 +200,6 @@ export function TaskRow({
             {resultatOuvert ? (
               <ResultatAppel
                 prospectId={task.prospects.id}
-                companyName={task.prospects.company_name}
-                compact
                 className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]"
               />
             ) : (

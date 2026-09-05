@@ -400,7 +400,7 @@ export default async function ProspectDetailPage({
                   className={`mt-0.5 text-sm font-medium ${
                     prospect.next_action_at &&
                     new Date(prospect.next_action_at).getTime() < Date.now()
-                      ? "text-rose-400"
+                      ? "text-amber-300"
                       : "text-slate-100"
                   }`}
                 >
@@ -432,7 +432,7 @@ export default async function ProspectDetailPage({
 
             {doneTasks.length > 0 && (
               <details className="mt-3">
-                <summary className="cursor-pointer px-1 text-xs text-slate-500 transition hover:text-slate-300">
+                <summary className="btn-link cursor-pointer list-none text-xs">
                   {doneTasks.length} relance{doneTasks.length > 1 ? "s" : ""} passée
                   {doneTasks.length > 1 ? "s" : ""}
                 </summary>

@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { fmtDateTime, relative } from "@/lib/constants";
+import { fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
 import { ResultatAppel } from "@/components/ResultatAppel";
-import { LastActionLine } from "@/components/ui";
+import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 
 export type TaskWithProspect = {
@@ -26,8 +26,9 @@ export type TaskWithProspect = {
   } | null;
   /**
    * La dernière action de la fiche (vue prospect_action_state), quand
-   * l'appelant l'a chargée. C'est elle qui dit « 📵 Pas de réponse (3e fois) »
+   * l'appelant l'a chargée. C'est elle qui dit « Pas de réponse (3e fois) »
    * AVANT de rappeler — l'information qui manquait le plus dans « À faire ».
+   * Seul « À faire » la charge : la fiche ne passe jamais `derniere_action`.
    */
   derniere_action?: {
     kind: LastActionKind | null;
@@ -49,10 +50,16 @@ function pad(n: number): string {
  * optimiste de la liste et déclenche les server actions. Sans quoi chaque
  * ligne aurait attendu son propre aller-retour avant de bouger, et cocher une
  * relance figeait l'écran une seconde et demie.
+ *
+ * Deux modes. Sur « À faire », la ligne se travaille : case à cocher, date,
+ * raccourcis, suppression, « Résultat ». Sur la fiche (`lecture`), elle se LIT
+ * seulement — les gestes de la prochaine relance vivent dans la carte
+ * PROCHAINE ACTION, un geste à un seul endroit.
  */
 export function TaskRow({
   task,
   compact = false,
+  lecture = false,
   pending = false,
   onComplete,
   onReschedule,
@@ -61,6 +68,8 @@ export function TaskRow({
   task: TaskWithProspect;
   /** Colonne étroite (fiche prospect) : les commandes passent sous le titre. */
   compact?: boolean;
+  /** Lecture seule : le titre, la date et le détail, rien à taper. */
+  lecture?: boolean;
   /** Un geste est en cours sur CETTE ligne — le spinner est ici, pas ailleurs. */
   pending?: boolean;
   onComplete?: () => void;
@@ -97,57 +106,61 @@ export function TaskRow({
       className={`gap-3 px-4 py-3.5 transition-opacity duration-150 ${
         pending ? "opacity-60" : ""
       } ${
-        compact
-          ? "grid grid-cols-[auto_1fr] items-start"
-          : "flex flex-wrap items-start sm:flex-nowrap"
+        lecture
+          ? "block"
+          : compact
+            ? "grid grid-cols-[auto_1fr] items-start"
+            : "flex flex-wrap items-start sm:flex-nowrap"
       }`}
     >
-      <div className="pt-0.5">
-        <button
-          type="button"
-          onClick={onComplete}
-          disabled={!onComplete}
-          aria-label={done ? "Rouvrir la relance" : "Marquer comme faite"}
-          className={`grid h-5 w-5 place-items-center rounded-md ring-1 transition ${
-            done
-              ? "bg-emerald-500/25 text-emerald-300 ring-emerald-400/30"
-              : "bg-white/[0.04] text-transparent ring-white/15 hover:ring-celya-blue/60"
-          }`}
-        >
-          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor">
-            <path d="M8 13.2 4.8 10l-1.2 1.2L8 15.6l8.4-8.4-1.2-1.2z" />
-          </svg>
-        </button>
-      </div>
+      {!lecture && (
+        <div className="pt-0.5">
+          <button
+            type="button"
+            onClick={onComplete}
+            disabled={!onComplete}
+            aria-label={done ? "Rouvrir la relance" : "Marquer comme faite"}
+            className={`grid h-5 w-5 place-items-center rounded-md ring-1 transition ${
+              done
+                ? "bg-emerald-500/25 text-emerald-300 ring-emerald-400/30"
+                : "bg-white/[0.04] text-transparent ring-white/15 hover:ring-celya-blue/60"
+            }`}
+          >
+            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor">
+              <path d="M8 13.2 4.8 10l-1.2 1.2L8 15.6l8.4-8.4-1.2-1.2z" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <div className="min-w-0 flex-1">
         <p
-          className={`text-sm font-medium ${
+          className={`flex items-center gap-1.5 text-sm font-medium ${
             done ? "text-slate-500 line-through" : "text-slate-100"
           }`}
         >
           {task.priority === 1 && !done && (
-            <span className="mr-1.5 text-amber-400" title="Priorité haute">
-              ▲
+            <span className="inline-flex text-amber-400" title="Priorité haute">
+              <Icone nom="alerte" className="h-3 w-3" />
             </span>
           )}
           {task.title}
         </p>
 
         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
-          {task.prospects && (
+          {!lecture && task.prospects && (
             <>
               <Link
                 href={`/prospects/${task.prospects.id}`}
                 prefetch={false}
-                className="text-slate-400 underline-offset-2 hover:text-celya-cyan hover:underline"
+                className="text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
               >
                 {task.prospects.company_name}
               </Link>
               {task.prospects.phone && (
                 <a
                   href={`tel:${task.prospects.phone.replace(/\s/g, "")}`}
-                  className="text-celya-cyan hover:underline"
+                  className="text-celya-blue hover:underline"
                 >
                   {task.prospects.phone}
                 </a>
@@ -160,15 +173,15 @@ export function TaskRow({
                   prefetch={false}
                   title={`Écrire à ${task.prospects.email}`}
                   aria-label={`Écrire à ${task.prospects.company_name}`}
-                  className="text-slate-500 transition hover:text-violet-300"
+                  className="text-slate-500 transition hover:text-celya-blue"
                 >
-                  ✉
+                  <Icone nom="enveloppe" className="h-3.5 w-3.5" />
                 </Link>
               )}
               <span aria-hidden>·</span>
             </>
           )}
-          <span className={overdue ? "text-rose-400" : ""}>
+          <span className={overdue ? "text-amber-300" : ""}>
             {overdue ? "En retard — " : ""}
             {fmtDateTime(task.due_at)}
           </span>
@@ -180,7 +193,8 @@ export function TaskRow({
           <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{task.details}</p>
         )}
 
-        {/* Ce qu'a donné le dernier appel — avant d'en passer un autre. */}
+        {/* Ce qu'a donné le dernier appel — avant d'en passer un autre. Seul
+            « À faire » charge `derniere_action` ; la fiche ne la passe pas. */}
         {task.derniere_action?.kind && (
           <p className="mt-1 truncate">
             <LastActionLine
@@ -194,8 +208,10 @@ export function TaskRow({
         )}
 
         {/* « Résultat » : deux taps depuis « À faire », sans ouvrir la fiche.
-            C'est le geste qui manquait — après un appel, on ne navigue pas. */}
-        {!done && task.prospects && (
+            C'est le geste qui manquait — après un appel, on ne navigue pas.
+            Absent en lecture : sur la fiche, le résultat d'appel vit dans la
+            carte PROCHAINE ACTION, et ici c'est le SEUL endroit où il tient. */}
+        {!lecture && !done && task.prospects && (
           <div className="mt-2">
             {resultatOuvert ? (
               <ResultatAppel
@@ -206,7 +222,7 @@ export function TaskRow({
               <button
                 type="button"
                 onClick={() => setResultatOuvert(true)}
-                className="rounded-lg px-2 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
+                className="btn-link text-[11px]"
               >
                 Résultat
               </button>
@@ -215,14 +231,16 @@ export function TaskRow({
         )}
       </div>
 
-      {!done && (
+      {!lecture && !done && (
         <div
           className={`flex flex-wrap items-center gap-1 ${
             compact ? "col-start-2 mt-2" : "shrink-0"
           }`}
         >
           {/* Champ de date réel : reprogrammer au jour près. Les raccourcis
-              remplissent la même date (et l'appliquent aussitôt). */}
+              remplissent la même date (et l'appliquent aussitôt) — mêmes mots
+              que la ligne « Relancer » de la carte, ils viennent du même
+              endroit (RACCOURCIS_RELANCE). */}
           <input
             type="date"
             value={dueDate}
@@ -231,26 +249,28 @@ export function TaskRow({
             aria-label="Reprogrammer la relance"
             className="rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
           />
-          {[1, 3, 7].map((d) => (
+          {RACCOURCIS_RELANCE.map(({ label, jours }) => (
             <button
-              key={d}
+              key={label}
               type="button"
               disabled={!onReschedule}
-              onClick={() => reschedule(shiftedDate(d))}
-              title={`Reprogrammer à dans ${d} jour${d > 1 ? "s" : ""}`}
+              onClick={() => reschedule(shiftedDate(jours))}
+              title={`Reprogrammer à dans ${jours} jour${jours > 1 ? "s" : ""}`}
               className="rounded-lg px-2 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
             >
-              +{d}j
+              {label}
             </button>
           ))}
+          {/* Supprimer est définitif : c'est le seul rose de la ligne. */}
           <button
             type="button"
             onClick={onDelete}
             disabled={!onDelete}
             title="Supprimer la relance"
+            aria-label="Supprimer la relance"
             className="rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400"
           >
-            ✕
+            <Icone nom="croix" className="h-3 w-3" />
           </button>
         </div>
       )}

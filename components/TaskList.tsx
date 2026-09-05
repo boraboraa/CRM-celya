@@ -105,6 +105,10 @@ export function MessageErreur({ message }: { message?: string }) {
  * Les lignes de relance, branchées sur l'état optimiste. `provisoires` liste
  * les identifiants encore inconnus du serveur : ces lignes s'affichent, mais
  * sans commandes — on ne coche pas une relance qui n'existe pas encore.
+ *
+ * `lecture` traverse jusqu'à `TaskRow`, qui n'affiche alors plus aucune
+ * commande. Les rappels restent branchés : c'est la ligne qui les ignore, et
+ * l'état optimiste reste le même des deux côtés.
  */
 type Geste = ReturnType<typeof useOptimisticTasks>["geste"];
 
@@ -113,12 +117,15 @@ export function TaskRows({
   enCours,
   geste,
   compact,
+  lecture,
   provisoires,
 }: {
   vue: TaskWithProspect[];
   enCours: string | null;
   geste: Geste;
   compact?: boolean;
+  /** Lecture seule : la ligne se lit, les gestes vivent ailleurs. */
+  lecture?: boolean;
   /** Identifiants pas encore connus du serveur (lignes provisoires). */
   provisoires?: Set<string>;
 }) {
@@ -131,6 +138,7 @@ export function TaskRows({
             key={t.id}
             task={t}
             compact={compact}
+            lecture={lecture}
             pending={enCours === t.id || provisoire}
             onComplete={
               provisoire
@@ -172,14 +180,19 @@ export function TaskRows({
   );
 }
 
-/** La liste seule — dashboard, et relances passées de la fiche. */
+/**
+ * La liste seule — dashboard, et relances passées de la fiche. `lecture` passe
+ * jusqu'aux lignes : une liste qui se lit n'affiche plus de commandes.
+ */
 export function TaskList({
   tasks,
   compact = false,
+  lecture = false,
   className = "card divide-y divide-white/[0.05]",
 }: {
   tasks: TaskWithProspect[];
   compact?: boolean;
+  lecture?: boolean;
   className?: string;
 }) {
   const { vue, erreur, enCours, geste } = useOptimisticTasks(tasks);
@@ -190,7 +203,13 @@ export function TaskList({
     <>
       <MessageErreur message={erreur} />
       <ul className={className}>
-        <TaskRows vue={vue} enCours={enCours} geste={geste} compact={compact} />
+        <TaskRows
+          vue={vue}
+          enCours={enCours}
+          geste={geste}
+          compact={compact}
+          lecture={lecture}
+        />
       </ul>
     </>
   );

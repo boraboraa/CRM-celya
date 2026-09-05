@@ -6,21 +6,24 @@ import {
   unlockProspectStatusAction,
   acceptStatusSuggestionAction,
 } from "@/app/actions";
-import { STATUS_LABEL, STATUS_ORDER, STATUS_CHIP, STATUS_DOT } from "@/lib/constants";
+import { STATUS_LABEL, STATUS_ORDER, STATUS_CHIP, STATUS_ICON } from "@/lib/constants";
+import { Icone } from "@/components/ui";
 import type { ProspectStatus } from "@/lib/types";
 
 /**
  * L'étape, et qui la décide.
  *
- * Deux voies de correction, aussi fluides l'une que l'autre : glisser la
- * fiche dans le pipeline, ou cliquer une étape ici. Dans les deux cas le
- * choix est VERROUILLÉ — l'auto-classification ne réécrira plus rien
- * par-dessus, sans quoi le système se battrait contre Bora : il corrige,
- * l'IA remet l'erreur au tour suivant.
+ * Une seule pastille est visible : l'étape actuelle. Les cinq autres se
+ * déplient d'un clic, EN PLACE — parce qu'un clic sur une étape VERROUILLE la
+ * fiche (l'auto-classification ne réécrira plus rien par-dessus, sans quoi le
+ * système se battrait contre Bora : il corrige, l'IA remet l'erreur au tour
+ * suivant). Six cibles offertes en permanence à côté d'un pouce, c'était un
+ * verrou posé par accident ; il en faut désormais deux gestes, et l'en-tête se
+ * lit d'abord au lieu de proposer.
  *
  * Une fiche verrouillée peut encore recevoir une suggestion discrète
  * (« un RDV a été posé — passer en Rendez-vous ? »), à accepter ou ignorer.
- * Et « rendre la main à l'IA » reste possible, en petit.
+ * Et « rendre la main à l'assistant » reste possible, derrière le même clic.
  */
 export function StatusControl({
   prospectId,
@@ -37,9 +40,12 @@ export function StatusControl({
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
+  /** Les cinq autres étapes sont-elles montrées ? Rien de flottant : la ligne
+   * pousse le reste de l'en-tête vers le bas, et se replie après un choix. */
+  const [deplie, setDeplie] = useState(false);
 
   /**
-   * L'étape telle qu'elle s'affiche MAINTENANT. Cliquer une pastille la
+   * L'étape telle qu'elle s'affiche MAINTENANT. Cliquer une étape la
    * sélectionne à l'instant, avec son verrou : Bora n'attend plus l'aller-
    * retour pour voir sa décision prise. Si le serveur refuse, `useOptimistic`
    * rend la main à la valeur serveur à la fin de la transition — la pastille
@@ -69,61 +75,81 @@ export function StatusControl({
     });
   }
 
+  const autres = STATUS_ORDER.filter((s) => s !== vue.status);
+
   return (
     <div className={`space-y-2.5 ${pending ? "opacity-60" : ""} transition-opacity`}>
-      {/* Les six étapes, cliquables. Un clic = une décision humaine. */}
-      <div className="flex flex-wrap gap-1.5">
-        {STATUS_ORDER.map((s) => {
-          const active = s === vue.status;
-          return (
+      {/* L'étape actuelle. Elle se lit ; elle ouvre les autres si on la touche.
+          La clé la remonte à chaque changement d'étape, pour que `animate-pop`
+          rejoue sur la nouvelle valeur au lieu de rester figé. */}
+      <button
+        key={vue.status}
+        type="button"
+        onClick={() => setDeplie((d) => !d)}
+        aria-expanded={deplie}
+        title={`Étape actuelle : ${STATUS_LABEL[vue.status]} — cliquer pour en changer`}
+        className={`chip min-h-[36px] animate-pop transition duration-200 ${STATUS_CHIP[vue.status]}`}
+      >
+        <Icone nom={STATUS_ICON[vue.status]} className="h-3 w-3" />
+        {STATUS_LABEL[vue.status]}
+        <Icone
+          nom="chevron"
+          className={`h-3 w-3 transition-transform duration-200 ${deplie ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {/* Les cinq autres étapes, une fois demandées. Un clic = une décision
+          humaine, donc un verrou — et la ligne se referme aussitôt. */}
+      {deplie && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {autres.map((s) => (
             <button
               key={s}
               type="button"
-              disabled={pending || active}
-              onClick={() =>
-                submit(setProspectStatusAction, { status: s }, {
-                  status: s,
-                  locked: true,
-                })
-              }
-              aria-pressed={active}
-              title={active ? `Étape actuelle : ${STATUS_LABEL[s]}` : `Passer en « ${STATUS_LABEL[s]} »`}
-              className={`chip transition duration-200 ${
-                active
-                  ? `${STATUS_CHIP[s]} scale-[1.03] animate-pop`
-                  : "bg-white/[0.03] text-slate-400 ring-white/[0.08] hover:bg-white/[0.07] hover:text-slate-200 hover:ring-white/20"
-              } disabled:cursor-default`}
+              disabled={pending}
+              onClick={() => {
+                setDeplie(false);
+                submit(setProspectStatusAction, { status: s }, { status: s, locked: true });
+              }}
+              title={`Passer en « ${STATUS_LABEL[s]} »`}
+              className="chip min-h-[36px] bg-white/[0.03] text-slate-400 ring-white/[0.08] transition duration-200 hover:bg-white/[0.07] hover:text-slate-200 hover:ring-white/20 disabled:opacity-50"
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${active ? STATUS_DOT[s] : "bg-slate-600"}`} />
+              <Icone nom={STATUS_ICON[s]} className="h-3 w-3" />
               {STATUS_LABEL[s]}
             </button>
-          );
-        })}
-      </div>
+          ))}
+
+          {/* Déverrouiller est rare, et vit au même endroit que le choix. */}
+          {vue.locked && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setDeplie(false);
+                submit(unlockProspectStatusAction, {}, { locked: false });
+              }}
+              className="btn-link text-[11px]"
+            >
+              Rendre la main à l&apos;assistant
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Pourquoi l'étape a bougé toute seule — la transparence exigée. */}
       {!vue.locked && autoReason && (
         <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-500">
-          <span aria-hidden className="text-celya-cyan">
-            ✦
-          </span>
+          <Icone nom="etincelle" className="mt-0.5 h-3 w-3 text-celya-blue" />
           <span>Étape déduite automatiquement : {autoReason}.</span>
         </p>
       )}
 
-      {/* Fiche verrouillée : l'IA ne peut plus que proposer. */}
+      {/* Fiche verrouillée : l'IA ne peut plus que proposer. Ligne de lecture —
+          le geste de déverrouillage est dans la ligne dépliée. */}
       {vue.locked && (
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
-          <span aria-hidden>🔒</span>
+        <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-500">
+          <Icone nom="cadenas" className="mt-0.5 h-3 w-3" />
           <span>Étape fixée par vous — l&apos;assistant n&apos;y touchera plus.</span>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => submit(unlockProspectStatusAction, {}, { locked: false })}
-            className="underline decoration-dotted underline-offset-2 transition hover:text-slate-300"
-          >
-            Rendre la main à l&apos;assistant
-          </button>
         </p>
       )}
 
@@ -147,7 +173,7 @@ export function StatusControl({
                   { status: suggestion.status, locked: true }
                 )
               }
-              className="rounded-lg bg-white/[0.07] px-2.5 py-1 text-[11px] font-medium text-slate-100 ring-1 ring-white/15 transition hover:bg-white/[0.12]"
+              className="btn-ghost px-2.5 py-1 text-[11px]"
             >
               Oui, passer en {STATUS_LABEL[suggestion.status]}
             </button>

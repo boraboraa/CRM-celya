@@ -1294,13 +1294,39 @@ function register(server: McpServer) {
           .eq("id", args.id)
           .maybeSingle();
         if (!data) return fail(`Aucune activité avec l'identifiant ${args.id}.`);
-        // Une entrée du journal appartient à son prospect : elle n'est
-        // supprimable que par qui peut voir la fiche. Même message que
-        // « introuvable » — ne pas révéler l'existence de l'entrée.
+        // Une entrée du journal appartient à son prospect.
+        //
+        // ⚠ CETTE BRANCHE NE PASSE PAS PAR `resolveProspect` : elle part d'un
+        // identifiant d'activité, pas de prospect. Le garde-fou de propriété
+        // doit donc être posé ICI, à la main — c'est le seul endroit du
+        // connecteur où il ne vient pas avec `resolveProspect`, et c'est
+        // exactement celui qu'on oublie. Tester la seule VISIBILITÉ suffisait
+        // tant que voir == posséder ; depuis l'interrupteur d'équipe
+        // (migration 020) un porteur voit le journal de son binôme, et
+        // supprimer définitivement une trace de SON journal n'est pas une
+        // lecture.
+        //
+        // Deux refus distincts, et c'est voulu : une fiche invisible se
+        // comporte comme inexistante (ne pas révéler qu'elle existe) ; une
+        // fiche visible mais qui n'est pas la nôtre est nommée, puisqu'on la
+        // voit de toute façon.
         const proprio =
           (data.prospects as { owner_id?: string | null } | null)?.owner_id ?? null;
         if (!canSeeProspect(viewer, proprio)) {
           return fail(`Aucune activité avec l'identifiant ${args.id}.`);
+        }
+        if (!canEditProspect(viewer, proprio)) {
+          const { data: p } = await admin
+            .from("crm_users")
+            .select("full_name, email")
+            .eq("id", proprio ?? "")
+            .maybeSingle();
+          return fail(
+            NOT_EDITABLE(
+              ((p?.full_name as string | null) ?? null) ||
+                ((p?.email as string | null) ?? null)
+            )
+          );
         }
 
         const apercu = {

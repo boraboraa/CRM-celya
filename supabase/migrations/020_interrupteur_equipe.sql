@@ -25,28 +25,66 @@
 -- donc `role = 'commercial'` DES DEUX CÔTÉS : même si la case de l'admin était
 -- cochée par erreur ou par SQL direct, ses fiches resteraient invisibles.
 --
--- LECTURE PARTAGÉE, ÉCRITURE PERSO — et c'est là qu'est le piège de cette
--- migration. Quatre tables héritent de la cloison par un EXISTS sur
--- `prospects` (activities, tasks, emails) ou par `owner_id` (meetings) :
--- élargir `can_see_prospect` élargit donc AUSSI l'écriture, sans que rien ne
--- le dise. Mesuré en base avant d'écrire ceci, en Rémi, transactions annulées :
+-- ============================================================
+-- CE QUI PROTÈGE L'ÉCRITURE AUJOURD'HUI — ET QUE CETTE MIGRATION RETIRE
+-- ============================================================
+-- C'est le point le moins évident de tout le lot, et la raison pour laquelle
+-- les policies d'écriture ci-dessous sont si bavardes. À lire AVANT de les
+-- « simplifier ».
 --
---   · `activities_insert` (WITH CHECK ... EXISTS(prospects)) est aujourd'hui
---     REFUSÉ (42501) sur une fiche invisible — il ne l'est que parce que la
---     LECTURE est fermée. Sans le rebasage ci-dessous, Collins écrirait des
---     notes et des résultats d'appel sur les fiches de Nathan dès la première
---     seconde ;
---   · `tasks_insert` (WITH CHECK `is_member()` seul) est déjà ACCEPTÉ — Rémi
---     peut poser une relance sur une fiche de Bora qu'il ne voit pas, et le
---     trigger `sync_next_action` déplace le « À faire » de Bora. Trou
---     préexistant, que ce lot rend atteignable depuis l'interface : bouché ici.
+-- POSTGRES APPLIQUE LA POLICY DE **SELECT** À LA **NOUVELLE** LIGNE D'UN
+-- UPDATE. On ne peut pas écrire une ligne qu'on ne pourrait plus voir. Donc,
+-- aujourd'hui, `emails_update` et `activities_update` refusent qu'un
+-- commercial déplace une de SES lignes vers la fiche d'un collègue — non pas
+-- grâce à leur `with check` (qui vaut `is_member()`, et passe), mais parce que
+-- la nouvelle ligne deviendrait invisible pour lui.
 --
--- Les cinq expressions d'écriture rebasées plus bas sont ISO-COMPORTEMENT le
--- jour de leur application : `can_see_prospect` vaut déjà « propriétaire » pour
--- un commercial, et les EXISTS explicites reproduisent le filtre que la RLS
--- appliquait implicitement. Elles ne retirent rien à personne — elles refusent
--- seulement de s'élargir avec la lecture.
+-- Mesuré en transactions annulées contre la base de production, le 19/09 :
+--   · en Rémi, `update emails set prospect_id = <fiche de Bora>` → REFUSÉ
+--     42501 « new row violates row-level security policy » ;
+--   · `update emails set prospect_id = <sa propre fiche>` (même valeur) →
+--     ACCEPTÉ, 1 ligne. Le `with check` n'est donc pas en cause ;
+--   · en donnant une boîte à Rémi (`owns_mailbox` vrai), les DEUX passent —
+--     la nouvelle ligne redevient visible par la branche « ma boîte » ;
+--   · TEST DÉCISIF : en desserrant le `using` d'`emails_update` à
+--     `is_member()` SEUL, et en laissant `emails_select` intact → TOUJOURS
+--     REFUSÉ. C'est donc bien `emails_select`, la policy de LECTURE, qui
+--     garde la nouvelle ligne.
 --
+-- ET C'EST EXACTEMENT CETTE PROTECTION QUE LA SECTION 3 RETIRE. En élargissant
+-- `can_see_prospect`, elle rend visibles les fiches du binôme : la nouvelle
+-- ligne devient légitime, et le `with check` à `is_member()` — qui n'a jamais
+-- rien filtré — reste seul en face. Vérifié, toujours en transaction annulée,
+-- avec la section 3 appliquée et Collins/Nathan cochés : SIX écritures de
+-- Collins sur une fiche de Nathan passaient, dont quatre déplacements de
+-- lignes (`tasks`, `activities`, `meetings`, `emails`) et deux insertions
+-- (`emails`, `meetings`).
+--
+-- LA LEÇON, écrite une fois pour toutes : **un `with check` doit décrire OÙ LA
+-- LIGNE ATTERRIT, jamais QUI JE SUIS.** Recopier le `using` dans le
+-- `with check` ne ferme rien — après le déplacement, `assignee_id`,
+-- `author_id`, `owner_id` ou `owns_mailbox(mailbox)` valent toujours « moi ».
+-- Chaque `with check` ci-dessous teste donc la FICHE DE DESTINATION, avec la
+-- même expression que l'`insert` de sa table. Et cette expression est écrite en
+-- clair, sans s'appuyer sur la policy de lecture, précisément parce que la
+-- lecture a le droit de s'élargir un jour de plus.
+--
+-- ============================================================
+-- DÉCISION PRODUIT DU 19 SEPTEMBRE — la visibilité des emails
+-- ============================================================
+-- Élargir `can_see_prospect` rend lisible, entre porteurs, le CORPS des emails
+-- échangés avec les prospects du binôme (`emails_select` hérite de la cloison
+-- par un EXISTS sur `prospects`). Ce n'est pas un effet de bord : la question a
+-- été posée, et **Bora a choisi de GARDER l'élargissement**. C'est réciproque,
+-- et c'est le but du lot — savoir où l'autre en est, pas seulement qu'il est
+-- passé.
+--
+-- Pour le refermer un jour sans toucher au reste : rebaser `emails_select` sur
+-- `public.owns_mailbox(mailbox)` + ses propres fiches. La chronologie de la
+-- fiche continuerait de montrer QU'UN mail est parti (l'activité `type='email'`
+-- vit dans `activities`, pas dans `emails`) ; seul le contenu disparaîtrait.
+--
+-- ============================================================
 -- ADDITIVE ET COMPATIBLE AVEC LE CODE EN PRODUCTION (règle du projet) : la
 -- colonne naît à `false`, donc `partage_equipe` est faux pour tout le monde et
 -- rien ne change tant que Bora n'a coché personne. Le code du même lot lit la
@@ -54,8 +92,14 @@
 -- 42703 vaut « personne ne partage »), il peut donc partir avant cette
 -- migration comme après.
 --
+-- ISO-COMPORTEMENT le jour de l'application. Mesuré avant d'écrire : 0 tâche
+-- assignée à un autre que le propriétaire de la fiche, 0 tâche sans assigné,
+-- 0 tâche libre, 0 tâche créée par un autre, 0 email rattaché à une fiche
+-- non-Bora, 0 activité écrite par un autre que le propriétaire. Aucune des
+-- expressions ci-dessous ne retire un droit exercé aujourd'hui.
+--
 -- RÉVERSIBLE : décocher les cases suffit. Retirer `or partage_equipe(...)` des
--- deux policies restaure 016 à l'identique.
+-- deux policies de lecture restaure 016 à l'identique.
 --
 -- Répercuté dans le code dans le même geste — `lib/crm/access.ts` EST la
 -- cloison pour le connecteur MCP (service_role, RLS contournée). Une policy
@@ -65,8 +109,15 @@
 --   · lib/crm/perimetre.ts           — un porteur a droit au sélecteur
 --   · components/PerimetreSwitcher   — rendu aussi pour un porteur
 --   · app/[transport]/route.ts       — les six outils d'écriture vérifient la
---                                      PROPRIÉTÉ, plus seulement la visibilité
+--                                      PROPRIÉTÉ ; et `supprimer_activite`,
+--                                      qui part d'un id d'ACTIVITÉ et non de
+--                                      prospect, la vérifie à la main
 --   · app/(app)/prospects/[id]       — la fiche d'un collègue est en lecture seule
+--   · app/(app)/agenda, /emails      — les deux listes de prospects qui
+--                                      alimentent une écriture sont bornées au
+--                                      propriétaire : la RLS ne peut plus s'en
+--                                      charger, puisqu'elle laisse LIRE plus
+--                                      large que ce qu'on peut ÉCRIRE
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -123,10 +174,8 @@ grant execute on function public.partage_equipe(uuid) to authenticated, service_
 -- Rémi, 16 activités sur 132 et 3 relances sur 54) ainsi que la vue
 -- `prospect_action_state` (`security_invoker`).
 --
--- Conséquence assumée : le CORPS des emails des prospects d'un collègue
--- devient lisible. C'est réciproque, et c'est le but (savoir où l'autre en
--- est). Pour le refermer sans toucher au reste : rebaser `emails_select` sur
--- `owns_mailbox(mailbox)` + ses propres fiches.
+-- Voir « DÉCISION PRODUIT » en tête pour les emails, et « CE QUI PROTÈGE
+-- L'ÉCRITURE AUJOURD'HUI » pour ce que cet élargissement retire au passage.
 create or replace function public.can_see_prospect(p_owner uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select public.is_member()
@@ -140,9 +189,10 @@ $$;
 -- n'est pas propriétaire, pour tout le monde, admin compris. C'est la
 -- protection due à un agent commercial indépendant — lire les RDV privés de
 -- Rémi serait un élément de requalification.
-drop policy if exists meetings_select on public.meetings;
+--
 -- `to` omis volontairement : la policy d'origine portait déjà {public},
 -- comme les trois autres de `meetings`. `anon` n'a aucun grant sur la table.
+drop policy if exists meetings_select on public.meetings;
 create policy meetings_select on public.meetings
   for select using (
     public.is_member()
@@ -152,17 +202,24 @@ create policy meetings_select on public.meetings
   );
 
 -- ------------------------------------------------------------
--- 4. L'ÉCRITURE ne bouge pas — cinq policies rebasées sur le PROPRIÉTAIRE.
+-- 4. L'ÉCRITURE ne bouge pas — NEUF policies rebasées sur le PROPRIÉTAIRE.
 -- ------------------------------------------------------------
--- Sans ces cinq expressions, « lecture partagée, écriture perso » serait faux
--- dès l'application de la section 3, et de façon silencieuse : rien ne lève,
--- l'écriture passe simplement.
+-- Deux familles, et il faut les deux :
+--
+--   · le `using` dit ce que j'ai le droit de TOUCHER (mes lignes) ;
+--   · le `with check` dit OÙ la ligne a le droit d'ATTERRIR (mes fiches).
+--
+-- Sans la seconde, on ne peut pas modifier les lignes du collègue mais on peut
+-- lui POUSSER les siennes — et c'est aussi une écriture sur sa fiche : la
+-- relance déplace son « À faire », l'activité entre dans sa chronologie, le
+-- rendez-vous apparaît sur sa fiche, l'email entre dans son fil.
 
 -- La fiche elle-même. Le WITH CHECK valait `is_member()` seul : n'importe quel
 -- membre pouvait donc réassigner une fiche à n'importe qui — et une fois la
--- lecture élargie, PRENDRE celle d'un collègue. Resserré ici : on ne sort pas
--- une fiche de son propriétaire sans être admin. (Le champ « Responsable » du
--- formulaire est masqué aux non-admins dans le même lot.)
+-- lecture élargie, PRENDRE celle d'un collègue. (Le champ « Responsable » du
+-- formulaire est masqué aux non-admins dans le même lot. Reste ouvert et
+-- assumé, comme avant ce lot : à la CRÉATION, un commercial peut encore
+-- attribuer une fiche neuve à un collègue — donner n'est pas prendre.)
 drop policy if exists prospects_update on public.prospects;
 create policy prospects_update on public.prospects
   for update to authenticated using (
@@ -171,9 +228,11 @@ create policy prospects_update on public.prospects
     public.is_member() and (public.is_admin() or owner_id = auth.uid())
   );
 
--- Les relances. Les trois branches d'origine sont conservées telles quelles ;
--- seule la quatrième (l'EXISTS) gagne le filtre de propriété qui l'empêche de
--- s'élargir avec la lecture.
+-- Les relances. Les quatre branches du `using` sont conservées telles quelles ;
+-- c'est le `with check` qui change de nature — il ne répète plus « je suis
+-- membre », il exige que la fiche visée soit la mienne. Mesuré ouvert
+-- AUJOURD'HUI, avant même l'interrupteur : `tasks_select` laisse passer la
+-- nouvelle ligne parce qu'`assignee_id` vaut toujours moi.
 drop policy if exists tasks_update on public.tasks;
 create policy tasks_update on public.tasks
   for update to authenticated using (
@@ -183,33 +242,12 @@ create policy tasks_update on public.tasks
          or created_by = auth.uid()
          or exists (select 1 from public.prospects c
                      where c.id = tasks.prospect_id and c.owner_id = auth.uid()))
-  ) with check (public.is_member());
-
--- Le rattachement d'un email. `owns_mailbox` passe devant : ce sont MES
--- messages, arrivés dans MA boîte (migration 015), et c'est ce qui fait vivre
--- l'écran « Non rattachés » d'un commercial.
-drop policy if exists emails_update on public.emails;
-create policy emails_update on public.emails
-  for update to authenticated using (
+  ) with check (
     public.is_member()
     and (public.is_admin()
-         or public.owns_mailbox(mailbox)
+         or prospect_id is null
          or exists (select 1 from public.prospects c
-                     where c.id = emails.prospect_id and c.owner_id = auth.uid()))
-  ) with check (public.is_member());
-
--- Le journal. C'est LA policy que l'élargissement de la lecture aurait ouverte
--- sans bruit : consigner une note, un résultat d'appel ou un rendez-vous sur
--- la fiche d'un collègue. Mesuré refusé (42501) avant cette migration ; il
--- doit le rester après.
-drop policy if exists activities_insert on public.activities;
-create policy activities_insert on public.activities
-  for insert to authenticated with check (
-    public.is_member()
-    and (public.is_admin()
-         or exists (select 1 from public.prospects c
-                     where c.id = activities.prospect_id
-                       and c.owner_id = auth.uid()))
+                     where c.id = tasks.prospect_id and c.owner_id = auth.uid()))
   );
 
 -- La relance, à l'insertion. Trou PRÉEXISTANT (WITH CHECK `is_member()` seul,
@@ -224,6 +262,111 @@ create policy tasks_insert on public.tasks
          or prospect_id is null
          or exists (select 1 from public.prospects c
                      where c.id = tasks.prospect_id and c.owner_id = auth.uid()))
+  );
+
+-- Le rattachement d'un email. `owns_mailbox` reste dans le `using` : ce sont
+-- MES messages, arrivés dans MA boîte (migration 015), et c'est ce qui fait
+-- vivre l'écran « Non rattachés ». Il n'est PAS dans le `with check` : « ce
+-- message est à moi » ne dit rien de « cette fiche est à moi », et l'y mettre
+-- rouvrirait le rattachement au journal d'un collègue. Le cas `prospect_id is
+-- null` garde le détachement possible — et `emails_select` fait que la ligne
+-- détachée ne reste visible que pour le propriétaire de la boîte, ou l'admin.
+drop policy if exists emails_update on public.emails;
+create policy emails_update on public.emails
+  for update to authenticated using (
+    public.is_member()
+    and (public.is_admin()
+         or public.owns_mailbox(mailbox)
+         or exists (select 1 from public.prospects c
+                     where c.id = emails.prospect_id and c.owner_id = auth.uid()))
+  ) with check (
+    public.is_member()
+    and (public.is_admin()
+         or prospect_id is null
+         or exists (select 1 from public.prospects c
+                     where c.id = emails.prospect_id and c.owner_id = auth.uid()))
+  );
+
+-- L'email, à l'insertion. `is_member()` seul aujourd'hui — et c'est du code
+-- MORT, vérifié : aucun chemin applicatif n'insère dans `emails`. La relève
+-- IMAP et l'envoi vivent dans l'edge function `crm-mail`, qui agit en
+-- `service_role` (`createClient(SUPABASE_URL, SERVICE_KEY)`), donc RLS
+-- contournée — resserrer ici ne peut pas casser la boîte de réception. Du code
+-- mort, mais chargé : il suffirait d'un futur chemin sous JWT utilisateur pour
+-- qu'il serve à écrire dans le fil d'un collègue.
+drop policy if exists emails_insert on public.emails;
+create policy emails_insert on public.emails
+  for insert to authenticated with check (
+    public.is_member()
+    and (public.is_admin()
+         or prospect_id is null
+         or exists (select 1 from public.prospects c
+                     where c.id = emails.prospect_id and c.owner_id = auth.uid()))
+  );
+
+-- Le journal, à l'insertion. C'est LA policy que l'élargissement de la lecture
+-- aurait ouverte sans bruit : consigner une note, un résultat d'appel ou un
+-- rendez-vous sur la fiche d'un collègue. Mesuré refusé (42501) avant cette
+-- migration ; il doit le rester après.
+drop policy if exists activities_insert on public.activities;
+create policy activities_insert on public.activities
+  for insert to authenticated with check (
+    public.is_member()
+    and (public.is_admin()
+         or exists (select 1 from public.prospects c
+                     where c.id = activities.prospect_id
+                       and c.owner_id = auth.uid()))
+  );
+
+-- Le journal, à la modification. Le `using` (`author_id = auth.uid()`) reste :
+-- on corrige ses propres entrées. Le `with check` empêche de les DÉPLACER chez
+-- un collègue. `activities.prospect_id` est `NOT NULL` : pas de cas libre ici,
+-- une entrée de journal appartient toujours à une fiche.
+drop policy if exists activities_update on public.activities;
+create policy activities_update on public.activities
+  for update to authenticated using (
+    public.is_admin() or author_id = auth.uid()
+  ) with check (
+    public.is_member()
+    and (public.is_admin()
+         or exists (select 1 from public.prospects c
+                     where c.id = activities.prospect_id
+                       and c.owner_id = auth.uid()))
+  );
+
+-- L'agenda, à l'insertion. Mesuré ouvert, et ATTEIGNABLE DEPUIS L'INTERFACE :
+-- `/agenda` proposait toutes les fiches que la RLS laisse voir, donc celles du
+-- binôme dès la case cochée. La liste est bornée dans le même lot, mais un
+-- garde-fou se pose là où l'on ÉCRIT, pas seulement là où l'on propose.
+-- `prospect_id is null` = le rendez-vous PERSONNEL, qui n'a pas de fiche.
+drop policy if exists meetings_insert on public.meetings;
+create policy meetings_insert on public.meetings
+  for insert with check (
+    public.is_member()
+    and (public.is_admin()
+         or (owner_id = auth.uid()
+             and (prospect_id is null
+                  or exists (select 1 from public.prospects c
+                              where c.id = meetings.prospect_id
+                                and c.owner_id = auth.uid()))))
+  );
+
+-- L'agenda, à la modification. Mesuré ouvert aujourd'hui : `meetings_select`
+-- laisse passer la nouvelle ligne parce qu'`owner_id` vaut toujours moi. Le
+-- report et le débrief (`deplacerRendezVous`, `cloturerRendezVous`) ne touchent
+-- ni `owner_id` ni `prospect_id` : ils passent.
+drop policy if exists meetings_update on public.meetings;
+create policy meetings_update on public.meetings
+  for update using (
+    public.is_admin() or owner_id = auth.uid()
+  ) with check (
+    public.is_member()
+    and (public.is_admin()
+         or (owner_id = auth.uid()
+             and (prospect_id is null
+                  or exists (select 1 from public.prospects c
+                              where c.id = meetings.prospect_id
+                                and c.owner_id = auth.uid()))))
   );
 
 -- ------------------------------------------------------------

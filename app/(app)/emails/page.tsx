@@ -7,11 +7,23 @@ import { fmtDateTime } from "@/lib/constants";
 
 /**
  * Messages entrants sans correspondance : plutôt que de deviner (et polluer
- * silencieusement l'historique), Bora associe ici en un clic.
- * La RLS ne montre les emails non rattachés qu'à l'admin.
+ * silencieusement l'historique), on les associe ici en un clic.
+ *
+ * Qui les voit : l'admin, et depuis la migration 015 le PROPRIÉTAIRE DE LA
+ * BOÎTE dans laquelle ils sont arrivés (`owns_mailbox`). Le commentaire
+ * d'origine disait « l'admin seulement » — c'était vrai avant 015, plus après.
+ * Aujourd'hui une seule boîte est configurée, donc en pratique l'écran ne sert
+ * qu'à Bora ; il servira à chaque commercial dès qu'il connectera la sienne.
+ *
+ * La liste des fiches proposées est BORNÉE AU PROPRIÉTAIRE : rattacher un
+ * message est une écriture sur la fiche (il entre dans son journal et dans sa
+ * chronologie), et `emails_update` la refuse hors de son portefeuille depuis la
+ * migration 020. Même raison qu'à `/agenda` : une liste qui alimente une
+ * écriture ne peut pas se contenter de ce que la RLS laisse LIRE.
  */
 export default async function UnmatchedEmailsPage() {
-  await requireMember();
+  const session = await requireMember();
+  const estAdmin = session.me.role === "admin";
   const supabase = await createClient();
 
   const [emailsRes, prospectsRes] = await Promise.all([
@@ -22,9 +34,13 @@ export default async function UnmatchedEmailsPage() {
       .is("prospect_id", null)
       .order("received_at", { ascending: false })
       .limit(100),
-    supabase
-      .from("prospects")
-      .select("id, company_name")
+    (estAdmin
+      ? supabase.from("prospects").select("id, company_name")
+      : supabase
+          .from("prospects")
+          .select("id, company_name")
+          .eq("owner_id", session.userId)
+    )
       .order("company_name")
       .limit(1000),
   ]);

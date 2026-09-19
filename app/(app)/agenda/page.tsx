@@ -93,11 +93,30 @@ export default async function AgendaPage({
     )
       .order("starts_at", { ascending: true })
       .limit(300),
-    // Les fiches proposées à la création (autocomplétion) — RLS appliquée.
-    supabase
-      .from("prospects")
-      .select("id, company_name, contact_name, phone, city")
-      .not("status", "in", "(gagne,perdu)")
+    // Les fiches proposées à la création (autocomplétion).
+    //
+    // ⚠ BORNÉE AU PROPRIÉTAIRE, et pas seulement par la RLS. Cette liste
+    // alimente une ÉCRITURE : poser un rendez-vous sur la fiche qu'on y
+    // choisit. Avant l'interrupteur d'équipe, « ce que la RLS me montre » et
+    // « ce sur quoi j'ai le droit d'écrire » étaient la même chose, et
+    // s'appuyer sur la RLS suffisait. Depuis la migration 020 ce n'est plus
+    // vrai : un porteur VOIT les fiches de son binôme, et `meetings_insert`
+    // les lui refuse. Proposer un nom dans une autocomplétion pour refuser le
+    // geste après le clic n'est pas une interface.
+    //
+    // L'admin n'est pas filtré — il peut poser un rendez-vous partout, comme
+    // en base.
+    (viewer.isAdmin
+      ? supabase
+          .from("prospects")
+          .select("id, company_name, contact_name, phone, city")
+          .not("status", "in", "(gagne,perdu)")
+      : supabase
+          .from("prospects")
+          .select("id, company_name, contact_name, phone, city")
+          .not("status", "in", "(gagne,perdu)")
+          .eq("owner_id", viewer.userId)
+    )
       .order("company_name")
       .limit(500),
     supabase

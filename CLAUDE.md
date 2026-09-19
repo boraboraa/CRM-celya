@@ -226,10 +226,32 @@ nom**. Décocher suffit à tout défaire ; retirer `or partage_equipe(...)` rest
 **LECTURE PARTAGÉE, ÉCRITURE PERSO — et c'est là qu'était le piège.** Quatre
 tables héritent de la cloison par un `EXISTS` sur `prospects` : élargir la
 lecture élargissait l'**écriture** dans le même geste, sans que rien ne le dise.
-Cinq policies ont donc été **rebasées sur le propriétaire** (`prospects_update`,
-`tasks_update`, `emails_update`, `activities_insert`, `tasks_insert`) — voir les
-deux pièges correspondants. Elles sont iso-comportement le jour de leur
-application : elles ne retirent rien, elles refusent de s'élargir.
+**NEUF** policies ont donc été rebasées sur le propriétaire — `prospects_update`,
+`tasks_update`, `tasks_insert`, `emails_update`, `emails_insert`,
+`activities_insert`, `activities_update`, `meetings_insert`, `meetings_update`.
+Elles sont iso-comportement le jour de leur application : elles ne retirent rien,
+elles refusent de s'élargir.
+
+Deux familles, et il faut les deux — c'est la leçon du lot :
+
+- le **`using`** dit ce qu'on a le droit de TOUCHER (ses lignes) ;
+- le **`with check`** dit OÙ la ligne a le droit d'ATTERRIR (ses fiches).
+
+Sans la seconde, on ne peut pas modifier les lignes du collègue mais on peut lui
+**POUSSER les siennes** — et c'est aussi une écriture sur sa fiche : la relance
+déplace son « À faire », l'activité entre dans sa chronologie, le rendez-vous
+apparaît sur sa fiche, l'email entre dans son fil. Recopier le `using` dans le
+`with check` ne ferme RIEN : après le déplacement, `assignee_id`, `author_id`,
+`owner_id` et `owns_mailbox(mailbox)` valent toujours « moi ». Voir le piège
+« un `with check` décrit où la ligne atterrit ».
+
+**Deux listes de prospects sont bornées au propriétaire EN CODE**, et pas par la
+RLS : l'autocomplétion de création de rendez-vous (`/agenda`) et le menu de
+rattachement d'un email (`/emails`). Les deux alimentent une ÉCRITURE ; la RLS,
+elle, laisse désormais LIRE plus large qu'on ne peut écrire. Une liste qui
+alimente une écriture ne peut plus s'appuyer sur ce que la RLS montre. Toutes les
+autres requêtes `from("prospects")` alimentent une lecture — audit fait, il n'y
+en a que ces deux-là.
 
 Côté TypeScript, `lib/crm/access.ts` porte désormais **deux** prédicats, et la
 distinction est vitale pour le connecteur MCP (service_role, RLS contournée) :
@@ -247,6 +269,13 @@ toujours. Les **six outils MCP qui écrivent** appellent `refusSiPasProprietaire
 **en plus** de `resolveProspect` : s'en tenir à la visibilité rendrait
 l'assistant plus puissant que l'écran. Testé par **`npm run test:equipe`**
 (`lib/crm/access.test.ts`, 38 cas, sans réseau).
+
+⚠ **`supprimer_activite` est l'exception, et c'est celle qu'on oublie** : sa
+branche « une entrée précise » part d'un identifiant d'ACTIVITÉ, pas de prospect,
+donc elle ne passe PAS par `resolveProspect` et ne reçoit pas le garde-fou avec
+lui. Elle testait `canSeeProspect` seule — suffisant tant que voir == posséder,
+faux dès l'interrupteur. Le contrôle de propriété y est posé à la main. Tout
+nouvel outil qui part d'un id autre que celui d'un prospect a le même piège.
 
 **Sur la fiche d'un collègue, tout ce qui écrit est MASQUÉ, pas désactivé** :
 étape, confiance, résultat d'appel, « Fait »/« Relancer »/« Email », bloc
@@ -1489,17 +1518,31 @@ TOLÉRANTE (`lirePorteurs` : un `42703` vaut « personne ne partage »), il tour
 donc contre la base d'avant comme d'après — c'est ce qui permet de respecter
 « le code part en premier » sans fenêtre de casse.
 
-**Recette jouée en transaction ANNULÉE contre la base de production** (migration
-+ données de test + assertions, l'exception finale garantissant le rollback ;
-production revérifiée intacte après coup : 77/132/54/1, colonne et fonction
-absentes, anciennes policies en place). 17 assertions sur 17 conformes : Collins
-voit 1 fiche / 1 activité / 1 relance / 2 RDV de Nathan et « Occupé » sans lieu
-ni notes sur son RDV perso ; il ne peut ni la modifier, ni s'l'attribuer, ni y
-écrire une note (`42501`), ni y poser une relance (`42501`), ni cocher la sienne,
-ni déplacer son RDV ; la relance LIBRE sans prospect marche toujours ; il ne peut
-pas toucher à son propre `voit_equipe` ; **Rémi est inchangé** (25/16/3/0/0/25) et
-ne voit pas la fiche de Nathan ; Nathan modifie et écrit sur la sienne ; Bora voit
-tout.
+**Recette jouée en transaction ANNULÉE contre la base de production** (baseline
++ migration + données de test + assertions, l'exception finale garantissant le
+rollback ; production revérifiée intacte après coup : colonne et fonction
+absentes, anciennes policies en place, zéro ligne de sonde).
+**44 assertions, 0 en échec**, et la recette se compte elle-même (elle tally ses
+`OK` / `FAUTE` et refuse de passer inaperçue).
+
+Elle est **DIFFÉRENTIELLE**, et ce n'est pas un détail : les compteurs bougent
+pendant qu'on travaille (Bora a créé deux rendez-vous et une activité au milieu
+de la session du 19/09). La baseline est mesurée dans la même transaction, juste
+avant la migration, et les assertions « Rémi est inchangé » / « Bora voit tout »
+comparent à elle — jamais à un nombre écrit à la main, qui serait rouge le
+lendemain sans qu'il y ait de régression.
+
+Ce qu'elle établit : Collins voit la fiche de Nathan, ses activités, ses relances
+et ses 3 RDV, avec « Occupé » sans lieu ni notes sur le RDV perso ; il ne peut ni
+la modifier, ni se l'attribuer, ni y écrire une note, ni y poser une relance, ni
+cocher la sienne, ni déplacer son RDV ; **il ne peut POUSSER chez Nathan ni sa
+relance, ni son activité, ni son RDV, ni son email, et n'y insère ni email ni
+RDV** (les six trous) ; en revanche il redate SA relance, corrige SA note,
+confirme SON RDV, pose un RDV perso et un RDV sur SA fiche, détache et rattache
+SON email, le trie ; il ne touche pas à son propre `voit_equipe`. **Rémi est
+inchangé** et ne voit pas la fiche de Nathan. Nathan modifie et écrit sur la
+sienne. Bora voit tout, rattache un email à la fiche d'un autre et déplace une
+relance entre fiches — les chemins admin de `/emails` restent ouverts.
 
 L'edge function `crm-mail` est en ligne en **v11** (25 août) : `save_account`
 ouvert à tout membre actif (avec le garde-fou 409 sur une adresse déjà prise et
@@ -1565,6 +1608,50 @@ voyait pas, faute d'un écran qui y mène. Corrigé en `020`, en gardant la rela
 LIBRE (`prospect_id is null`, le pense-bête du tableau de bord). **Un `USING`
 serré avec un `WITH CHECK` large ne protège que la modification, jamais
 l'insertion** — et les deux se relisent séparément.
+
+**POSTGRES APPLIQUE LA POLICY DE `SELECT` À LA NOUVELLE LIGNE D'UN `UPDATE` — et
+c'est peut-être le piège le moins évident de tout le projet (19 septembre 2026).**
+On ne peut pas écrire une ligne qu'on ne pourrait plus voir. Conséquence : une
+partie de la protection en écriture ne vient PAS des policies d'écriture, elle
+vient de la cloison de LECTURE — donc elle disparaît le jour où on élargit la
+lecture, en silence, sans qu'aucune policy d'écriture n'ait bougé.
+
+Mesuré, en transactions annulées. En Rémi, `update emails set prospect_id = <une
+fiche de Bora>` → refusé `42501` « new row violates row-level security policy »,
+alors que le `with check` d'`emails_update` vaut `is_member()` et passe. Réécrire
+`prospect_id` à sa propre valeur → accepté. En donnant une boîte à Rémi
+(`owns_mailbox` vrai), les deux passent. **Test décisif** : desserrer le `using`
+d'`emails_update` à `is_member()` SEUL en laissant `emails_select` intact →
+toujours refusé. C'est donc bien la policy de LECTURE qui gardait la porte.
+
+C'est exactement ce que la migration `020` retire : en rendant visibles les fiches
+du binôme, elle rend la nouvelle ligne légitime et laisse le `with check` — qui
+n'avait jamais rien filtré — seul en face. Vérifié avec la seule section
+« lecture » de la 020 appliquée : **six** écritures de Collins sur une fiche de
+Nathan passaient (déplacements de `tasks`, `activities`, `meetings`, `emails` ;
+insertions d'`emails` et de `meetings`). Deux de ces six étaient même déjà
+ouvertes AVANT la 020 — `tasks` et `meetings`, dont la policy de lecture matche
+`assignee_id = moi` / `owner_id = moi` et laisse donc passer la ligne déplacée.
+
+**Règle générale, à appliquer avant tout élargissement de lecture : un `with
+check` doit décrire OÙ LA LIGNE ATTERRIT, jamais QUI JE SUIS.** Recopier le
+`using` dans le `with check` ne ferme rien. Et un `with check` ne doit pas
+s'appuyer sur la policy de lecture pour être suffisant : la lecture a le droit de
+s'élargir un jour de plus, l'écriture non. C'est pourquoi les neuf expressions de
+la `020` sont si bavardes — ne pas les « simplifier » en les faisant reposer sur
+`can_see_prospect`.
+
+**Une liste qui alimente une ÉCRITURE ne peut pas s'appuyer sur la RLS.** Tant
+que « ce que je vois » et « ce sur quoi j'ai le droit d'écrire » coïncidaient,
+une autocomplétion de prospects se bornait toute seule. Depuis la `020` ce n'est
+plus vrai : un porteur VOIT les fiches de son binôme et l'écriture les lui
+refuse. Deux listes étaient concernées — l'autocomplétion de création de
+rendez-vous de `/agenda` (atteignable : elle proposait toutes les fiches
+visibles) et le menu de rattachement de `/emails` — et elles sont désormais
+bornées en code. **Audit fait sur toutes les requêtes `from("prospects")` : il n'y
+en avait que ces deux-là**, tout le reste alimente une lecture (la liste, la
+fiche, les cartes d'agenda), et voir la fiche d'un collègue est précisément le
+but du lot. À refaire au prochain élargissement.
 
 **Une nouvelle colonne de PRIVILÈGE s'ajoute au garde-fou, sinon elle
 s'auto-sert.** `crm_users_update_self` autorise un membre à écrire sa propre

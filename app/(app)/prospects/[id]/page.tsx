@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { Avatar, Icone } from "@/components/ui";
 import { AdresseInline } from "@/components/AdresseInline";
 import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
+import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
 import { ProspectForm } from "@/components/ProspectForm";
 import { ProspectJournal } from "@/components/ProspectJournal";
@@ -109,6 +110,20 @@ export default async function ProspectDetailPage({
   const owner = members.find((m) => m.id === prospect.owner_id);
   // Effacer une trace du journal est réservé à l'admin (revérifié côté serveur).
   const isAdmin = session?.me?.role === "admin" && session.me.is_active;
+
+  // ---------------------------------------------------------------------
+  // LECTURE PARTAGÉE, ÉCRITURE PERSO (interrupteur d'équipe, migration 020).
+  //
+  // Depuis que deux commerciaux qui « travaillent en équipe » voient leurs
+  // fiches respectives, cette page s'ouvre sur des fiches qu'on ne possède
+  // pas. Les policies rebasées sur `owner_id` refusent l'écriture — mais un
+  // refus après le clic n'est pas une interface : Bora aurait vingt boutons
+  // qui échouent. Tout ce qui écrit est donc MASQUÉ, pas désactivé.
+  //
+  // Le test est le même que `canEditProspect` (lib/crm/access.ts) : moi, ou
+  // l'admin. L'équipe n'y entre pas.
+  const modifiable = Boolean(isAdmin) || prospect.owner_id === session?.userId;
+  const lectureSeule = !modifiable;
 
   // ---------------------------------------------------------------------
   // Chronologie — les vrais échanges seulement. Les brouillons sont écartés
@@ -244,6 +259,22 @@ export default async function ProspectDetailPage({
           Tous les prospects
         </Link>
 
+        {/* Fiche d'un collègue : on le dit AVANT de la lire, pas au moment
+            où un bouton manque. Ambre — c'est un avertissement, pas une
+            erreur : la fiche est bien à sa place, elle n'est simplement pas
+            la nôtre. */}
+        {lectureSeule && (
+          <p className="mt-3 flex items-start gap-2 rounded-xl bg-amber-500/[0.08] px-3.5 py-2.5 text-xs leading-relaxed text-amber-200 ring-1 ring-amber-400/25">
+            <Icone nom="cadenas" className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              Fiche de {owner?.full_name ?? owner?.email ?? "un autre commercial"} —
+              lecture seule. Vous la voyez pour ne pas appeler deux fois la même
+              société ; c&apos;est {owner?.full_name?.split(" ")[0] ?? "son responsable"} qui
+              la fait avancer.
+            </span>
+          </p>
+        )}
+
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-50">
@@ -277,7 +308,13 @@ export default async function ProspectDetailPage({
                 trouvait. Le lieu d'un rendez-vous, quand il y en a un à
                 proposer, garde la priorité — jamais les deux à la fois. */}
             <div className="mt-2">
-              {!prospect.address && lieuDepuisRdv ? (
+              {lectureSeule ? (
+                // Ni « ＋ Ajouter une adresse » ni « Enregistrer cette
+                // adresse ? » : les deux écrivent sur la fiche. Les boutons
+                // Maps, eux, ne sont que des liens — et c'est précisément ce
+                // dont un commercial a besoin sur la fiche d'un collègue.
+                <BoutonsMaps valeur={prospect.address} ville={prospect.city} />
+              ) : !prospect.address && lieuDepuisRdv ? (
                 <div className="max-w-md">
                   <AdresseDepuisRdv
                     prospectId={prospect.id}
@@ -301,6 +338,7 @@ export default async function ProspectDetailPage({
                 level={prospect.confidence_level ?? null}
                 reason={prospect.confidence_reason ?? null}
                 locked={Boolean(prospect.confidence_locked)}
+                lectureSeule={lectureSeule}
               />
             </div>
           </div>
@@ -312,6 +350,7 @@ export default async function ProspectDetailPage({
               locked={Boolean(prospect.status_locked)}
               autoReason={prospect.status_auto_reason}
               suggestion={suggestion}
+              lectureSeule={lectureSeule}
             />
           </div>
         </div>
@@ -325,6 +364,7 @@ export default async function ProspectDetailPage({
           companyName={prospect.company_name}
           relanceOuverte={relanceOuverte}
           canEmail={Boolean(prospect.email)}
+          lectureSeule={lectureSeule}
         />
       </div>
 
@@ -345,8 +385,13 @@ export default async function ProspectDetailPage({
             isAdmin={Boolean(isAdmin)}
             initialTab={composerPrefill ? "email" : "consigner"}
             initialPrefill={composerPrefill}
+            lectureSeule={lectureSeule}
           />
 
+          {/* Modifier la fiche, et la supprimer — les deux écrivent. Rien
+              n'est « désactivé » ici : le bloc entier n'existe pas sur la
+              fiche d'un collègue. */}
+          {modifiable && (
           <section>
             <details id="modifier-la-fiche" className="group card scroll-mt-6 p-6">
               <summary className="btn-link cursor-pointer list-none text-xs">
@@ -362,6 +407,7 @@ export default async function ProspectDetailPage({
                   members={members}
                   action={updateProspectAction}
                   currentUserId={session?.userId}
+                  peutReassigner={Boolean(isAdmin)}
                 />
               </div>
 
@@ -374,6 +420,7 @@ export default async function ProspectDetailPage({
               </form>
             </details>
           </section>
+          )}
         </div>
 
         {/* ---------- Colonne latérale ---------- */}
@@ -436,7 +483,11 @@ export default async function ProspectDetailPage({
               Relances
             </h2>
 
-            <RelancesSection prospectId={prospect.id} openTasks={openTasks} />
+            <RelancesSection
+              prospectId={prospect.id}
+              openTasks={openTasks}
+              lectureSeule={lectureSeule}
+            />
 
             {doneTasks.length > 0 && (
               <details className="group mt-3">
@@ -461,6 +512,9 @@ export default async function ProspectDetailPage({
               jamais envoyé n'est pas un échange : il ne compte pour aucun
               fait, ne touche pas au dernier contact, se supprime d'un clic —
               et depuis le 12 août, s'ENVOIE d'un clic. */}
+          {/* Les brouillons d'un collègue sont SON travail en cours : ni à
+              lire par-dessus son épaule, ni à envoyer en son nom. */}
+          {modifiable && (
           <DraftsSection
             drafts={drafts.map((d) => ({
               id: d.id,
@@ -472,6 +526,7 @@ export default async function ProspectDetailPage({
             prospectEmail={prospect.email}
             isAdmin={Boolean(isAdmin)}
           />
+          )}
 
           {prospect.notes && (
             <section>

@@ -891,9 +891,31 @@ export async function adminUpdateUserAction(fd: FormData) {
     await callAdmin({ action: "set_role", user_id: userId, role: str(fd, "role") });
   } else if (action === "delete_user") {
     await callAdmin({ action: "delete_user", user_id: userId });
+  } else if (action === "set_voit_equipe") {
+    // L'interrupteur « travaille en équipe » (migration 020).
+    //
+    // Écrit EN DIRECT, pas via l'edge function `crm-admin` : la policy
+    // `crm_users_update_admin` autorise déjà un admin à écrire cette colonne
+    // (vérifié en base), et le trigger `guard_profile_privileges` refuse la
+    // même écriture à un non-admin — y compris sur SA PROPRE ligne, sans quoi
+    // un commercial se cocherait lui-même et entrerait dans le partage. Rien à
+    // redéployer côté Deno, donc rien à faire dériver du dépôt.
+    //
+    // Le rôle est quand même revérifié ICI : masquer un bouton n'a jamais
+    // interdit d'appeler la route. Deux verrous, comme partout ailleurs.
+    const session = await getSession();
+    if (session?.me?.role !== "admin" || !session.me.is_active) return;
+    const supabase = await createClient();
+    await supabase
+      .from("crm_users")
+      .update({ voit_equipe: str(fd, "voit_equipe") === "1" })
+      .eq("id", userId);
   }
 
   revalidatePath("/equipe");
+  revalidatePath("/dashboard");
+  revalidatePath("/prospects");
+  revalidatePath("/agenda");
 }
 
 export async function adminResetPasswordAction(

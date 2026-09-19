@@ -51,6 +51,7 @@ export function ProspectJournal({
   isAdmin,
   initialTab = "consigner",
   initialPrefill,
+  lectureSeule = false,
 }: {
   entries: TimelineEntry[];
   prospectId: string;
@@ -63,6 +64,14 @@ export function ProspectJournal({
   initialTab?: JournalTab;
   /** Texte versé au composeur au chargement (réponse à écrire). */
   initialPrefill?: ComposerPrefill;
+  /**
+   * Fiche d'un collègue (interrupteur d'équipe) : la CHRONOLOGIE reste — c'est
+   * elle qu'on est venu lire, savoir qui a appelé et ce que ça a donné. Le bloc
+   * AGIR disparaît : consigner une note sur la fiche d'un autre l'écrirait dans
+   * son journal (`activities_insert` le refuse), et l'email partirait de SA
+   * boîte (`pickAccount` n'emprunte jamais celle du voisin).
+   */
+  lectureSeule?: boolean;
 }) {
   const [vue, ajouter] = useOptimistic(
     entries,
@@ -121,6 +130,7 @@ export function ProspectJournal({
   return (
     <>
       {/* ---------- AGIR : consigner un échange, ou en envoyer un ---------- */}
+      {!lectureSeule && (
       <section id="noter-un-echange" ref={blocRef} className="scroll-mt-6">
         <span id={COMPOSER_ANCHOR} aria-hidden className="block scroll-mt-6" />
 
@@ -164,6 +174,7 @@ export function ProspectJournal({
           <SansAdresse companyName={companyName} />
         )}
       </section>
+      )}
 
       {/* ---------- CHRONOLOGIE ---------- */}
       <section>
@@ -173,7 +184,7 @@ export function ProspectJournal({
         <Timeline
           entries={vue}
           renderAction={
-            isAdmin
+            isAdmin && !lectureSeule
               ? (entry) => (
                   <DeleteEntryButton
                     id={entry.id}

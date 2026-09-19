@@ -15,6 +15,7 @@ export function ProspectForm({
   currentUserId,
   aiFields,
   uncertainFields,
+  peutReassigner = true,
 }: {
   prospect?: Partial<Prospect>;
   members: Pick<Profile, "id" | "full_name" | "email">[];
@@ -25,6 +26,12 @@ export function ProspectForm({
   aiFields?: string[];
   /** Champs déduits à faible confiance — surlignés plus fort, à vérifier. */
   uncertainFields?: string[];
+  /**
+   * Le menu « Responsable » est-il offert ? Admin seulement sur une fiche
+   * existante — voir le commentaire du champ. Le défaut reste `true` pour la
+   * création, où le seul choix possible est soi-même.
+   */
+  peutReassigner?: boolean;
 }) {
   // Classes complètes, jamais interpolées (le JIT doit les voir).
   const cls = (name: string) =>
@@ -212,20 +219,45 @@ export function ProspectForm({
           {/* Plus d'option « Non assigné » : le vivier est fermé (migration
               016). Une fiche appartient toujours à quelqu'un — sans quoi elle
               était publiée à toute l'équipe, et le formulaire ne le disait
-              pas. Assigner à un collègue reste possible, c'est explicite. */}
-          <select
-            id="owner_id"
-            name="owner_id"
-            required
-            defaultValue={prospect?.owner_id ?? currentUserId ?? ""}
-            className="input"
-          >
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.full_name ?? m.email}
-              </option>
-            ))}
-          </select>
+              pas.
+
+              Le CHOIX, lui, est réservé à l'admin depuis l'interrupteur
+              d'équipe (migration 020) : offert à un commercial, il devient le
+              moyen de DONNER sa fiche à un collègue — ou, une fois les fiches
+              de l'équipe visibles, de se l'attribuer. `prospects_update` a son
+              WITH CHECK resserré sur `owner_id`, donc la base refuserait ;
+              proposer un menu déroulant qui échoue serait pire que de ne pas
+              le proposer. Un champ caché conserve la valeur : un commercial qui
+              enregistre sa fiche ne la déplace pas, et ne la perd pas non
+              plus. */}
+          {peutReassigner ? (
+            <select
+              id="owner_id"
+              name="owner_id"
+              required
+              defaultValue={prospect?.owner_id ?? currentUserId ?? ""}
+              className="input"
+            >
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.full_name ?? m.email}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <input
+                type="hidden"
+                name="owner_id"
+                value={prospect?.owner_id ?? currentUserId ?? ""}
+              />
+              <p id="owner_id" className="input text-slate-400">
+                {members.find(
+                  (m) => m.id === (prospect?.owner_id ?? currentUserId)
+                )?.full_name ?? "Vous"}
+              </p>
+            </>
+          )}
         </div>
 
         <div className="sm:col-span-2">

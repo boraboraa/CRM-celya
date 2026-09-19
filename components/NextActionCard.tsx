@@ -45,6 +45,7 @@ export function NextActionCard({
   companyName,
   relanceOuverte,
   canEmail = false,
+  lectureSeule = false,
 }: {
   action: NextAction;
   prospectId: string;
@@ -59,6 +60,13 @@ export function NextActionCard({
   relanceOuverte: OpenTask | null;
   /** La fiche porte une adresse : proposer d'écrire tout de suite. */
   canEmail?: boolean;
+  /**
+   * Fiche d'un collègue (interrupteur d'équipe) : la carte DIT où il en est,
+   * et n'offre aucun geste. Ni résultat d'appel, ni « Fait », ni « Relancer »,
+   * ni « Email » — consigner un appel sur la fiche d'un autre serait écrire
+   * dans son journal, et envoyer un mail partirait de SA boîte à lui.
+   */
+  lectureSeule?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
@@ -271,16 +279,22 @@ export function NextActionCard({
 
       {/* Le résultat de l'appel, SOUS LE POUCE — c'est ici qu'on arrive après
           avoir raccroché, pas dans un formulaire trois écrans plus bas. */}
-      <div className="mt-4 border-t border-white/[0.06] pt-3">
-        <ResultatAppel
-          prospectId={prospectId}
-          onRappeler={() => setPourQuand(true)}
-        />
-      </div>
+      {!lectureSeule && (
+        <div className="mt-4 border-t border-white/[0.06] pt-3">
+          <ResultatAppel
+            prospectId={prospectId}
+            onRappeler={() => setPourQuand(true)}
+          />
+        </div>
+      )}
 
       {/* Les gestes qui suivent le résultat : c'est fait, ou c'est à relancer,
           ou on écrit. Rien d'autre. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div
+        className={`mt-3 flex flex-wrap items-center gap-2 ${
+          lectureSeule ? "hidden" : ""
+        }`}
+      >
         {vue.task && (
           <button
             type="button"

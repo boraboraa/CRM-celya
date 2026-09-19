@@ -130,7 +130,7 @@ export function TaskRows({
    * Lecture seule : la ligne se lit, les gestes vivent ailleurs. En fonction,
    * elle se décide ligne par ligne à partir du rang dans la liste.
    */
-  lecture?: boolean | ((index: number) => boolean);
+  lecture?: boolean | ((index: number, task: TaskWithProspect) => boolean);
   /** Identifiants pas encore connus du serveur (lignes provisoires). */
   provisoires?: Set<string>;
 }) {
@@ -139,7 +139,7 @@ export function TaskRows({
       {vue.map((t, i) => {
         const provisoire = provisoires?.has(t.id) ?? false;
         const enLecture =
-          typeof lecture === "function" ? lecture(i) : Boolean(lecture);
+          typeof lecture === "function" ? lecture(i, t) : Boolean(lecture);
         return (
           <TaskRow
             key={t.id}
@@ -195,10 +195,18 @@ export function TaskList({
   tasks,
   compact = false,
   className = "card divide-y divide-white/[0.05]",
+  lecture,
 }: {
   tasks: TaskWithProspect[];
   compact?: boolean;
   className?: string;
+  /**
+   * Lecture seule, ligne par ligne. « À faire » s'en sert en périmètre
+   * d'équipe : la relance d'un collègue se LIT (savoir qu'il l'a en main),
+   * elle ne se coche pas — `tasks_update` la refuserait, et cocher la relance
+   * d'un autre déplacerait SON « À faire ».
+   */
+  lecture?: boolean | ((index: number, task: TaskWithProspect) => boolean);
 }) {
   const { vue, erreur, enCours, geste } = useOptimisticTasks(tasks);
 
@@ -208,7 +216,13 @@ export function TaskList({
     <>
       <MessageErreur message={erreur} />
       <ul className={className}>
-        <TaskRows vue={vue} enCours={enCours} geste={geste} compact={compact} />
+        <TaskRows
+          vue={vue}
+          enCours={enCours}
+          geste={geste}
+          compact={compact}
+          lecture={lecture}
+        />
       </ul>
     </>
   );

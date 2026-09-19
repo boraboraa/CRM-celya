@@ -20,6 +20,13 @@
  *   · tout outil qui ÉCRIT rattache au porteur du jeton (author_id /
  *     created_by / owner_id = sujet du jeton), jamais à une identité fournie
  *     par le client — aucun outil n'expose de paramètre « utilisateur ».
+ *
+ * Depuis l'interrupteur « travaille en équipe » (migration 020), VOIR et
+ * ÉCRIRE ne sont plus la même question : un porteur voit les fiches de son
+ * binôme et n'en modifie aucune. Les six outils qui écrivent appellent donc
+ * `refusSiPasProprietaire` EN PLUS de `resolveProspect` — s'en tenir à la
+ * visibilité rendrait l'assistant plus puissant que l'écran, exactement là où
+ * la RLS n'est pas là pour rattraper l'oubli.
  */
 
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
@@ -30,13 +37,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   loadViewer,
   canSeeProspect,
+  canEditProspect,
   scopeProspects,
   scopeJoinedProspects,
+  NOT_EDITABLE,
   type Viewer,
 } from "@/lib/crm/access";
 import {
   filtrerProspects,
   filtrerTaches,
+  peutElargir,
   type Perimetre,
 } from "@/lib/crm/perimetre";
 import { verifyJwt } from "@/lib/mcp/jwt";
@@ -118,17 +128,54 @@ const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
 
 /**
  * Le périmètre d'affichage (lib/crm/perimetre.ts), version connecteur : « moi »
- * par défaut, « equipe » réservé à l'admin — un non-admin est FORCÉ à « moi »,
- * quoi que demande le client. C'est du confort par-dessus la sécurité :
- * `scopeProspects` (la cloison) s'applique toujours AVANT.
+ * par défaut, « equipe » réservé à l'admin et aux PORTEURS de l'interrupteur
+ * d'équipe (migration 020) — tout autre appelant est FORCÉ à « moi », quoi que
+ * demande le client.
+ *
+ * C'est du confort par-dessus la sécurité, et ici la nuance est vitale : le
+ * mode « equipe » ne filtre RIEN. Sur une page, la RLS borne quand même le
+ * résultat ; ici il n'y a pas de RLS, donc `scopeProspects` (la cloison) doit
+ * s'appliquer AVANT, sans exception. L'outil `agenda`, qui ne part pas de
+ * `prospects`, porte son propre `in` pour la même raison.
  */
 function perimetreDe(
   viewer: Viewer,
   demande: "moi" | "equipe" | undefined
 ): Perimetre {
-  return viewer.isAdmin && demande === "equipe"
+  return demande === "equipe" && peutElargir(viewer)
     ? { mode: "equipe" }
     : { mode: "moi" };
+}
+
+/**
+ * Le droit d'ÉCRIRE sur une fiche, pour les six outils qui écrivent.
+ *
+ * `resolveProspect` ne répond qu'à « puis-je la VOIR ». Depuis l'interrupteur
+ * d'équipe (migration 020), les deux questions ont des réponses différentes :
+ * un porteur voit les fiches de son binôme et n'en modifie aucune. Côté
+ * interface, les policies rebasées sur `owner_id` refuseraient de toute façon ;
+ * ici le serveur agit en `service_role`, RLS contournée — ce test EST le seul
+ * garde-fou.
+ *
+ * Le refus NOMME le propriétaire, contrairement à celui d'une fiche invisible :
+ * la fiche est sous les yeux de l'appelant, il n'y a rien à cacher, et savoir à
+ * qui elle est, c'est justement ce que l'interrupteur apporte.
+ */
+async function refusSiPasProprietaire(
+  admin: SupabaseClient,
+  viewer: Viewer,
+  resolved: ResolvedProspect
+): Promise<string | null> {
+  if (canEditProspect(viewer, resolved.owner_id)) return null;
+  const { data } = await admin
+    .from("crm_users")
+    .select("full_name, email")
+    .eq("id", resolved.owner_id ?? "")
+    .maybeSingle();
+  const proprio =
+    ((data?.full_name as string | null) ?? null) ||
+    ((data?.email as string | null) ?? null);
+  return NOT_EDITABLE(proprio);
 }
 
 /** Nettoie une recherche texte avant de la passer à un filtre PostgREST or(). */
@@ -292,7 +339,7 @@ function register(server: McpServer) {
   // --- lister_prospects -----------------------------------------------------
   server.tool(
     "lister_prospects",
-    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe » pour voir toute l'équipe. Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
+    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
     {
       statut: z.enum(STATUS_ENUM).optional().describe("Filtrer sur une étape précise."),
       a_relancer: z
@@ -305,7 +352,7 @@ function register(server: McpServer) {
         .enum(["moi", "equipe"])
         .optional()
         .describe(
-          "Défaut « moi » : uniquement les fiches de l'appelant. « equipe » (admin uniquement) élargit à toute l'équipe ; sans effet pour un commercial."
+          "Défaut « moi » : uniquement les fiches de l'appelant. « equipe » élargit à l'équipe — administrateur, ou commercial qui « travaille en équipe » ; sans effet pour les autres."
         ),
     },
     async (args, extra) => {
@@ -448,13 +495,13 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe » pour toute l'équipe. Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
     {
       perimetre: z
         .enum(["moi", "equipe"])
         .optional()
         .describe(
-          "Défaut « moi » : uniquement les relances de l'appelant. « equipe » (admin uniquement) élargit à toute l'équipe ; sans effet pour un commercial."
+          "Défaut « moi » : uniquement les relances de l'appelant. « equipe » élargit à l'équipe — administrateur, ou commercial qui « travaille en équipe » ; sans effet pour les autres."
         ),
     },
     async (args, extra) => {
@@ -620,6 +667,8 @@ function register(server: McpServer) {
       const { admin, viewer } = ctx;
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
+      const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+      if (refus) return fail(refus);
 
       // « Rendez-vous » n'est pas une intention, c'est un FAIT : sans
       // rendez-vous enregistré (activité datée ou rendez-vous à venir),
@@ -696,6 +745,8 @@ function register(server: McpServer) {
       const { admin, viewer } = ctx;
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
+      const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+      if (refus) return fail(refus);
 
       // Un rendez-vous mentionné dans la note : validé strictement (jour ET
       // heure), puis délégué au cœur agenda via saveExchangeCore — la note
@@ -789,6 +840,8 @@ function register(server: McpServer) {
 
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
+      const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+      if (refus) return fail(refus);
 
       const { data: fiche } = await admin
         .from("prospects")
@@ -931,6 +984,8 @@ function register(server: McpServer) {
       const { admin, viewer } = ctx;
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
+      const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+      if (refus) return fail(refus);
 
       const r = await saveExchangeCore(admin, viewer.userId, {
         prospectId: resolved.id,
@@ -966,7 +1021,7 @@ function register(server: McpServer) {
   // --- agenda ---------------------------------------------------------------
   server.tool(
     "agenda",
-    "Liste les rendez-vous de l'agenda sur une période (défaut : les 7 prochains jours). Par DÉFAUT, uniquement les rendez-vous de l'appelant (périmètre « moi ») ; un administrateur peut passer perimetre: « equipe ». Les rendez-vous PERSONNELS des autres membres n'exposent que leur créneau (« Occupé »), jamais leur intitulé.",
+    "Liste les rendez-vous de l'agenda sur une période (défaut : les 7 prochains jours). Par DÉFAUT, uniquement les rendez-vous de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Les rendez-vous PERSONNELS des autres membres n'exposent que leur créneau (« Occupé »), jamais leur intitulé.",
     {
       du: z
         .string()
@@ -981,7 +1036,7 @@ function register(server: McpServer) {
       perimetre: z
         .enum(["moi", "equipe"])
         .optional()
-        .describe("Défaut « moi ». « equipe » (admin uniquement) superpose toute l'équipe."),
+        .describe("Défaut « moi ». « equipe » superpose l'équipe — réservé à l'administrateur et aux commerciaux qui « travaillent en équipe »."),
     },
     async (args, extra) => {
       const ctx = await context(extra);
@@ -997,6 +1052,16 @@ function register(server: McpServer) {
       const fin = localInputToISO(`${au}T23:59`);
       if (!debut || !fin) return fail("Période invalide.");
 
+      // LA CLOISON, ICI, EST CE `in` — et rien d'autre.
+      //
+      // Cet outil ne part pas de `prospects` : ni `scopeProspects` ni
+      // `scopeJoinedProspects` ne peuvent le borner. Avant l'interrupteur
+      // d'équipe, le mode « equipe » était réservé à l'admin et l'absence de
+      // filtre ne se voyait pas. Ouvert à un porteur, il aurait rendu TOUS les
+      // rendez-vous de la base — ceux de Bora et ceux de Rémi compris — et
+      // `meetings_visibles` n'aurait masqué aucun RDV personnel, son `CASE`
+      // reposant sur `auth.uid()`, qui est NUL sous service_role. Le titre, le
+      // lieu et les notes d'un rendez-vous privé seraient sortis en clair.
       let q = admin
         .from("meetings_visibles")
         .select("id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status")
@@ -1005,6 +1070,7 @@ function register(server: McpServer) {
         .order("starts_at", { ascending: true })
         .limit(100);
       if (per.mode === "moi") q = q.eq("owner_id", viewer.userId);
+      else if (!viewer.isAdmin) q = q.in("owner_id", viewer.visiblesIds);
 
       const { data, error } = await q;
       if (error) return fail(`Erreur : ${error.message}`);
@@ -1107,6 +1173,8 @@ function register(server: McpServer) {
           nom: args.nom,
         });
         if ("error" in resolved) return fail(resolved.error);
+        const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+        if (refus) return fail(refus);
         prospectId = resolved.id;
         societe = resolved.company_name;
       }
@@ -1226,13 +1294,39 @@ function register(server: McpServer) {
           .eq("id", args.id)
           .maybeSingle();
         if (!data) return fail(`Aucune activité avec l'identifiant ${args.id}.`);
-        // Une entrée du journal appartient à son prospect : elle n'est
-        // supprimable que par qui peut voir la fiche. Même message que
-        // « introuvable » — ne pas révéler l'existence de l'entrée.
+        // Une entrée du journal appartient à son prospect.
+        //
+        // ⚠ CETTE BRANCHE NE PASSE PAS PAR `resolveProspect` : elle part d'un
+        // identifiant d'activité, pas de prospect. Le garde-fou de propriété
+        // doit donc être posé ICI, à la main — c'est le seul endroit du
+        // connecteur où il ne vient pas avec `resolveProspect`, et c'est
+        // exactement celui qu'on oublie. Tester la seule VISIBILITÉ suffisait
+        // tant que voir == posséder ; depuis l'interrupteur d'équipe
+        // (migration 020) un porteur voit le journal de son binôme, et
+        // supprimer définitivement une trace de SON journal n'est pas une
+        // lecture.
+        //
+        // Deux refus distincts, et c'est voulu : une fiche invisible se
+        // comporte comme inexistante (ne pas révéler qu'elle existe) ; une
+        // fiche visible mais qui n'est pas la nôtre est nommée, puisqu'on la
+        // voit de toute façon.
         const proprio =
           (data.prospects as { owner_id?: string | null } | null)?.owner_id ?? null;
         if (!canSeeProspect(viewer, proprio)) {
           return fail(`Aucune activité avec l'identifiant ${args.id}.`);
+        }
+        if (!canEditProspect(viewer, proprio)) {
+          const { data: p } = await admin
+            .from("crm_users")
+            .select("full_name, email")
+            .eq("id", proprio ?? "")
+            .maybeSingle();
+          return fail(
+            NOT_EDITABLE(
+              ((p?.full_name as string | null) ?? null) ||
+                ((p?.email as string | null) ?? null)
+            )
+          );
         }
 
         const apercu = {
@@ -1267,6 +1361,8 @@ function register(server: McpServer) {
         nom: args.nom,
       });
       if ("error" in resolved) return fail(resolved.error);
+      const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+      if (refus) return fail(refus);
 
       const { data: rows } = await admin
         .from("activities")

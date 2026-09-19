@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession } from "@/lib/auth";
+import { getSession, getPerimetreViewer } from "@/lib/auth";
 import { PageHeader, Icone } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import {
@@ -11,6 +11,8 @@ import {
 import {
   lirePerimetre,
   filtrerProspects,
+  peutElargir,
+  membresProposables,
   type PerimetreViewer,
 } from "@/lib/crm/perimetre";
 import { localInputToISO, isoToLocalInput } from "@/lib/time";
@@ -56,10 +58,10 @@ export default async function AgendaPage({
   const supabase = await createClient();
   const session = await getSession();
 
-  const viewer: PerimetreViewer = {
-    userId: session?.userId ?? "",
-    isAdmin: session?.me?.role === "admin",
-  };
+  // `getPerimetreViewer` porte aussi l'interrupteur « travaille en équipe »
+  // et la liste des porteurs (migration 020) — `cache()`é, donc une seule
+  // requête par rendu, et zéro pour un admin.
+  const viewer: PerimetreViewer = await getPerimetreViewer();
   const perimetre = lirePerimetre(params, viewer);
 
   const aujourdHui = isoToLocalInput(new Date().toISOString()).slice(0, 10);
@@ -196,7 +198,8 @@ export default async function AgendaPage({
           role={session?.me?.role ?? "commercial"}
           viewerId={viewer.userId}
           perimetre={perimetre}
-          membres={membres}
+          membres={membresProposables(membres, viewer)}
+          voitEquipe={viewer.voitEquipe === true}
           basePath="/agenda"
           searchParams={params}
         />

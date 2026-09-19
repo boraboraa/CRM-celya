@@ -35,9 +35,17 @@ import { dateInputToISO } from "@/lib/time";
 export function RelancesSection({
   prospectId,
   openTasks,
+  lectureSeule = false,
 }: {
   prospectId: string;
   openTasks: TaskWithProspect[];
+  /**
+   * Fiche d'un collègue (interrupteur d'équipe) : ses relances se LISENT. On
+   * ne coche pas, on ne reporte pas, on n'en pose pas — `tasks_update` et
+   * `tasks_insert` les refuseraient, et une relance qu'un autre a posée sur ma
+   * fiche déplace MON « À faire ».
+   */
+  lectureSeule?: boolean;
 }) {
   const { vue, erreur, setErreur, enCours, geste } = useOptimisticTasks(openTasks);
   const [provisoires, setProvisoires] = useState<Set<string>>(new Set());
@@ -102,13 +110,13 @@ export function RelancesSection({
             enCours={enCours}
             geste={geste}
             compact
-            lecture={(i) => i === 0}
+            lecture={(i) => lectureSeule || i === 0}
             provisoires={provisoires}
           />
         </ul>
       )}
 
-      <details className="group mt-3">
+      <details className={`group mt-3 ${lectureSeule ? "hidden" : ""}`}>
         <summary className="btn-link cursor-pointer list-none text-xs">
           {/* Le ＋ pivote en ✕ une fois le formulaire ouvert : l'état du bloc
               se lit sur son propre bouton. */}

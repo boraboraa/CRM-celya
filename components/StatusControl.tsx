@@ -31,12 +31,20 @@ export function StatusControl({
   locked,
   autoReason,
   suggestion,
+  lectureSeule = false,
 }: {
   prospectId: string;
   status: ProspectStatus;
   locked: boolean;
   autoReason: string | null;
   suggestion: { status: ProspectStatus; reason: string | null } | null;
+  /**
+   * Fiche d'un collègue vue grâce à l'interrupteur d'équipe : l'étape se LIT.
+   * Une pastille, pas un bouton — un contrôle qu'on ne peut pas actionner ne
+   * doit pas ressembler à un contrôle. La policy `prospects_update` refuserait
+   * de toute façon, mais un refus après le clic n'est pas une interface.
+   */
+  lectureSeule?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
@@ -76,6 +84,15 @@ export function StatusControl({
   }
 
   const autres = STATUS_ORDER.filter((s) => s !== vue.status);
+
+  if (lectureSeule) {
+    return (
+      <span className={`chip min-h-[36px] ${STATUS_CHIP[status]}`}>
+        <Icone nom={STATUS_ICON[status]} className="h-3 w-3" />
+        {STATUS_LABEL[status]}
+      </span>
+    );
+  }
 
   return (
     <div className={`space-y-2.5 ${pending ? "opacity-60" : ""} transition-opacity`}>

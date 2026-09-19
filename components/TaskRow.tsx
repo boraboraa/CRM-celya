@@ -17,6 +17,12 @@ export type TaskWithProspect = {
   status: string;
   priority: number;
   prospect_id: string | null;
+  /**
+   * À qui la relance est assignée. Chargée seulement là où il faut savoir si
+   * on a le droit d'y toucher — « À faire » en périmètre d'équipe, où l'on voit
+   * aussi les relances d'un collègue (interrupteur d'équipe, migration 020).
+   */
+  assignee_id?: string | null;
   prospects?: {
     id: string;
     company_name: string;

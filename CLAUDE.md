@@ -5,7 +5,25 @@ contexte acquis : ne le redemande pas.
 
 ---
 
-## État au 25 août 2026
+## État au 19 septembre 2026
+
+L'équipe est **à cinq comptes actifs**, vérifié en base : Bora (admin, 52
+fiches), **Rémi Perez** (`640f3e05…`, commercial, 25 fiches — et non 13 comme
+l'indiquait la version précédente de ce fichier), et **deux commerciaux arrivés
+le 19 septembre**, `collinscraig.mohe@gmail.com` (**Collins**, `fc088df7…`) et
+`nathanlouismabu@gmail.com` (**Nathan**, `f9d07f3f…`), 0 fiche chacun. Total :
+77 fiches · 132 activités · 54 relances · 174 emails · 1 rendez-vous.
+
+⚠ Un cinquième compte traîne, **actif** : `recette-epuration@celya.test`
+(« Recette Connecteur », commercial, 0 fiche). C'est un compte de recette que la
+règle du projet dit de supprimer après usage. Il apparaît dans `/equipe` et dans
+le sélecteur de périmètre de l'admin — **à supprimer**.
+
+**Collins et Nathan travaillent ENSEMBLE, sur le même marché** ; Rémi travaille
+SEUL sur un autre marché et doit rester cloisonné **dans les deux sens**. D'où
+l'interrupteur « travaille en équipe » — voir le Modèle de sécurité.
+
+### État au 25 août 2026
 
 L'équipe est **réellement à deux** : `dogrulbora@gmail.com` (admin) et
 `remi.perezweber@zohomail.eu` (commercial, actif) — ce dernier n'a **ni boîte
@@ -177,6 +195,69 @@ Vérifié empiriquement le 2 août : un compte commercial ne voit pas les fiches
 d'un autre, ne peut pas s'auto-promouvoir admin (`P0001`), ne peut pas appeler
 `crm-admin` (403), et la clé publique seule renvoie `42501`.
 
+### L'interrupteur « travaille en équipe » (migration `020`, 19 septembre)
+
+Collins et Nathan sont sur **le même marché**. Cloisonnés l'un de l'autre, ils
+appellent les mêmes sociétés sans pouvoir le savoir, et la règle d'attribution
+(« au premier qui l'enregistre, réservé 90 jours ») est **invérifiable par ceux
+qui doivent la respecter**. Un cloisonnement qu'on ne peut pas contrôler est une
+collision programmée.
+
+**Une case par personne, `crm_users.voit_equipe`, défaut faux, cochée par
+l'admin dans `/equipe`. Elle est RÉCIPROQUE** : cochée, elle donne le droit ET
+expose — personne n'est regardé sans être regardant. Pas de table `teams`, pas
+de concept d'équipe, pas de migration de données : ce sera pour le deuxième
+binôme, pas pour celui-ci.
+
+```sql
+partage_equipe(p_owner)  -- l'APPELANT et le PROPRIÉTAIRE, tous deux actifs,
+                         -- commerciaux, et cochés
+can_see_prospect(owner)  -- … or partage_equipe(owner)
+meetings_select          -- … or partage_equipe(owner_id)
+```
+
+**L'admin ne porte pas l'interrupteur** : il voit tout par `is_admin()`, et
+`partage_equipe` exige `role = 'commercial'` **des deux côtés** — même cochée par
+erreur, la case n'exposerait aucune fiche de Bora. Rémi, non coché, reste
+invisible pour le binôme et ne voit rien de plus, **sans exception écrite à son
+nom**. Décocher suffit à tout défaire ; retirer `or partage_equipe(...)` restaure
+`016` à l'identique.
+
+**LECTURE PARTAGÉE, ÉCRITURE PERSO — et c'est là qu'était le piège.** Quatre
+tables héritent de la cloison par un `EXISTS` sur `prospects` : élargir la
+lecture élargissait l'**écriture** dans le même geste, sans que rien ne le dise.
+Cinq policies ont donc été **rebasées sur le propriétaire** (`prospects_update`,
+`tasks_update`, `emails_update`, `activities_insert`, `tasks_insert`) — voir les
+deux pièges correspondants. Elles sont iso-comportement le jour de leur
+application : elles ne retirent rien, elles refusent de s'élargir.
+
+Côté TypeScript, `lib/crm/access.ts` porte désormais **deux** prédicats, et la
+distinction est vitale pour le connecteur MCP (service_role, RLS contournée) :
+
+```ts
+canSeeProspect(viewer, owner)   // moi | l'équipe qui partage | admin
+canEditProspect(viewer, owner)  // moi | admin — JAMAIS l'équipe
+lirePorteurs(client)            // les cochés ; TOLÉRANT (42703 → personne)
+Viewer.visiblesIds              // ce que je peux LIRE ; scopeProspects fait un `in`
+```
+
+`scopeProspects` est passé de `eq` à **`in`** : un porteur voit plusieurs
+propriétaires. La liste n'est jamais vide pour un non-admin, donc le filtre mord
+toujours. Les **six outils MCP qui écrivent** appellent `refusSiPasProprietaire`
+**en plus** de `resolveProspect` : s'en tenir à la visibilité rendrait
+l'assistant plus puissant que l'écran. Testé par **`npm run test:equipe`**
+(`lib/crm/access.test.ts`, 38 cas, sans réseau).
+
+**Sur la fiche d'un collègue, tout ce qui écrit est MASQUÉ, pas désactivé** :
+étape, confiance, résultat d'appel, « Fait »/« Relancer »/« Email », bloc
+« Agir », « Modifier la fiche », suppression, brouillons, relances. Un bandeau
+ambre dit à qui elle est. Même logique ailleurs : carte du pipeline non
+déplaçable, relance d'un collègue en lecture dans « À faire », raccourci « ✉ »
+absent de sa ligne. Et les **deux zones d'ACTION** du tableau de bord
+(« Réponses reçues », « Rendez-vous à débriefer ») restent personnelles même en
+périmètre d'équipe : ce sont ses boucles à lui, les lui prendre les ferait
+disparaître de son écran.
+
 ### Le périmètre d'affichage — du confort, PAS de la sécurité (31 août)
 
 La RLS cloisonnait, mais les écrans requêtaient `tasks` et `prospects` sans
@@ -184,9 +265,15 @@ filtre : en admin, Bora recevait l'union des portefeuilles. D'où
 `lib/crm/perimetre.ts` — `lirePerimetre` (`?perimetre=moi | equipe | <uuid>`),
 `filtrerTaches` (`assignee_id`), `filtrerProspects` (`owner_id`),
 `filtrerJointProspects`, `restreindreAuxProspects` (les vues sans `owner_id`).
-**Défaut « moi » pour tout le monde, admin compris** ; un non-admin est forcé à
-« moi » quoi qu'il y ait dans l'URL. Le sélecteur (`PerimetreSwitcher`, admin
-seulement) vit sur `/dashboard` et `/prospects` ; les outils MCP
+**Défaut « moi » pour tout le monde, admin compris**. Depuis la migration `020`,
+un **porteur** de l'interrupteur d'équipe peut élargir lui aussi — mais borné aux
+autres porteurs : viser l'uuid de Bora ou de Rémi retombe sur « moi », pour que
+l'URL ne serve pas de sonde. Un commercial sans interrupteur reste forcé à
+« moi » quoi qu'il y ait dans l'URL, et `membresProposables` garantit que le
+sélecteur ne NOMME jamais quelqu'un hors partage (`crm_users_select` laisse tout
+membre lire la table d'équipe entière). Le sélecteur (`PerimetreSwitcher`) vit
+sur `/dashboard`, `/prospects` **et `/agenda`** — trois pages, pas deux ; les
+outils MCP
 `lister_prospects` / `a_faire` acceptent `perimetre: "moi" | "equipe"` (défaut
 « moi », appliqué APRÈS `scopeProspects`). **Ne jamais fusionner ce module avec
 `access.ts`** : le périmètre se DÉSACTIVE (mode équipe), la cloison jamais —
@@ -198,7 +285,7 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 
 | Table | Rôle |
 |---|---|
-| `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password` |
+| `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password`, `voit_equipe` (l'interrupteur d'équipe, migration `020` — gardé par `guard_profile_privileges`, personne ne se le coche) |
 | `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at` |
 | `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` — le RÉSULTAT d'appel, colonne de 001 réactivée le 7 août, **bornée le 2 septembre** (migration `019`, contrainte `activities_outcome_connu`) à cinq valeurs : `sans_reponse` · `barrage` · `rappeler` · `interesse` · `refus`. Reste en `text` : on borne, on ne convertit pas |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
@@ -1328,8 +1415,8 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
   (voir `STATUS_CHIP`), jamais par interpolation — le JIT ne les verrait pas.
 
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
-`npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia` (purs, sans
-réseau). **`npm run lint` n'est PAS configuré** : le script existe, mais le
+`npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
+`npm run test:equipe` (purs, sans réseau). **`npm run lint` n'est PAS configuré** : le script existe, mais le
 dépôt n'a aucune configuration ESLint et `next lint` ouvre alors un assistant
 interactif qui installe des dépendances — il bloque une session non
 interactive. Ne pas en ajouter une au passage : ce serait une décision d'outil,
@@ -1394,6 +1481,26 @@ est inchangé. Vérifié en base juste après : `reloptions` porte toujours
 réel le remet à 0, et un `outcome` inconnu est refusé (`23514`) — le tout dans
 des transactions annulées.
 
+`020_interrupteur_equipe.sql` (19 septembre) est **écrite, testée, PAS
+appliquée** — c'est Bora qui applique. Additive : `crm_users.voit_equipe` naît à
+`false`, donc `partage_equipe` est faux pour tout le monde et **rien ne change
+tant que personne n'est coché**. Le code du même lot lit la colonne de façon
+TOLÉRANTE (`lirePorteurs` : un `42703` vaut « personne ne partage »), il tourne
+donc contre la base d'avant comme d'après — c'est ce qui permet de respecter
+« le code part en premier » sans fenêtre de casse.
+
+**Recette jouée en transaction ANNULÉE contre la base de production** (migration
++ données de test + assertions, l'exception finale garantissant le rollback ;
+production revérifiée intacte après coup : 77/132/54/1, colonne et fonction
+absentes, anciennes policies en place). 17 assertions sur 17 conformes : Collins
+voit 1 fiche / 1 activité / 1 relance / 2 RDV de Nathan et « Occupé » sans lieu
+ni notes sur son RDV perso ; il ne peut ni la modifier, ni s'l'attribuer, ni y
+écrire une note (`42501`), ni y poser une relance (`42501`), ni cocher la sienne,
+ni déplacer son RDV ; la relance LIBRE sans prospect marche toujours ; il ne peut
+pas toucher à son propre `voit_equipe` ; **Rémi est inchangé** (25/16/3/0/0/25) et
+ne voit pas la fiche de Nathan ; Nathan modifie et écrit sur la sienne ; Bora voit
+tout.
+
 L'edge function `crm-mail` est en ligne en **v11** (25 août) : `save_account`
 ouvert à tout membre actif (avec le garde-fou 409 sur une adresse déjà prise et
 le refus 403 d'un `user_id` visé par un non-admin), `pickAccount` sans repli,
@@ -1436,6 +1543,65 @@ Edge functions : déployées via le MCP Supabase —
 ---
 
 ## Pièges déjà rencontrés — ne pas les redécouvrir
+
+**Élargir une LECTURE élargit l'ÉCRITURE, en silence (19 septembre 2026).**
+`activities_insert` avait pour `WITH CHECK` `is_member() AND EXISTS(prospects…)`
+— le MÊME `EXISTS` que la lecture. Il n'était fermé que **parce que** la lecture
+l'était : mesuré refusé (`42501`) avant la migration `020`, il se serait ouvert à
+la seconde où `can_see_prospect` s'élargit. Collins aurait écrit des notes et des
+résultats d'appel sur les fiches de Nathan, et « lecture partagée, écriture
+perso » aurait été faux dès le premier jour — sans qu'aucune erreur ne le signale.
+Idem pour `prospects_update` (qui utilisait `can_see_prospect`), `tasks_update` et
+`emails_update` (un `EXISTS` sur `prospects`). **Règle générale : avant
+d'élargir un prédicat de lecture, chercher toutes les policies d'ÉCRITURE qui le
+partagent, et les rebaser sur le propriétaire dans le MÊME geste.** Une policy
+d'écriture ne doit jamais emprunter son périmètre à la lecture.
+
+**Un `WITH CHECK` à `is_member()` seul n'est pas un garde-fou.** `tasks_insert`
+valait `is_member()` et rien d'autre : mesuré, **Rémi pouvait poser une relance
+sur une fiche de Bora qu'il ne voit pas**, et le trigger `sync_next_action`
+déplaçait le « À faire » de Bora. Le trou existait depuis le début et ne se
+voyait pas, faute d'un écran qui y mène. Corrigé en `020`, en gardant la relance
+LIBRE (`prospect_id is null`, le pense-bête du tableau de bord). **Un `USING`
+serré avec un `WITH CHECK` large ne protège que la modification, jamais
+l'insertion** — et les deux se relisent séparément.
+
+**Une nouvelle colonne de PRIVILÈGE s'ajoute au garde-fou, sinon elle
+s'auto-sert.** `crm_users_update_self` autorise un membre à écrire sa propre
+ligne, et `guard_profile_privileges` ne protégeait que `role` et `is_active`.
+Mesuré : un commercial met à jour n'importe quelle colonne non gardée de sa ligne
+(accepté, 1 ligne), et l'auto-promotion admin échoue (`P0001`). Sans l'ajout de
+`voit_equipe` au trigger, **Rémi se cochait lui-même et entrait dans le partage,
+dans les deux sens**. Règle : toute colonne qui accorde un droit rejoint la liste
+gardée dans la même migration. (À noter : le corps du trigger EN LIGNE référence
+bien `crm_users`, alors que `001_crm_schema.sql` dans le dépôt dit encore
+`public.profiles` — la production a été corrigée hors dépôt.)
+
+**Un outil MCP qui ne part pas de `prospects` n'est borné par RIEN
+(19 septembre 2026).** L'outil `agenda` lisait `meetings_visibles` avec un filtre
+`owner_id` **uniquement en périmètre « moi »**, et aucun en « equipe » — sans
+conséquence tant que « equipe » était réservé à l'admin. Ouvert à un porteur, il
+aurait rendu **tous les rendez-vous de la base**, Bora et Rémi compris, et
+`meetings_visibles` n'aurait masqué **aucun** RDV personnel : son `CASE` repose
+sur `auth.uid()`, qui est **NUL sous service_role**. Le titre, le lieu et les
+notes d'un rendez-vous privé sortaient en clair — exactement ce que la vue existe
+pour empêcher. **`scopeProspects` ne peut pas protéger ce qui ne passe pas par
+`prospects` : un tel outil porte son propre `in`, explicitement.**
+
+**Voir et écrire sont deux questions.** `resolveProspect` répond « puis-je la
+voir ». Tant que voir == posséder, il servait de contrôle d'écriture par accident.
+Dès qu'un tiers peut VOIR sans POSSÉDER, les six outils MCP d'écriture
+(`mettre_a_jour_statut`, `ajouter_note`, `envoyer_email`, `planifier_relance`,
+`poser_rendez_vous`, `supprimer_activite`) ont besoin d'un second prédicat —
+`canEditProspect` — sans quoi **l'assistant devient plus puissant que l'écran**,
+là précisément où aucune RLS ne rattrape l'oubli.
+
+**Masquer, pas désactiver.** Une fiche visible mais non modifiable, c'est vingt
+contrôles qui échoueraient après le clic. La base refuse correctement (échec
+fermé) ; ce n'est pas une interface. Chaque composant d'écriture a reçu un
+`lectureSeule` qui le rend en **texte** (pastille d'étape, badge de confiance) ou
+ne le rend pas du tout — et un bandeau dit à qui la fiche appartient, **avant**
+qu'on cherche un bouton absent.
 
 **Compter à l'écran, pas dans le code (5 septembre 2026).** Le bouton
 « Résultat » de `TaskRow` était censé donner au résultat d'appel **trois**

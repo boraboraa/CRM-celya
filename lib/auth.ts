@@ -1,6 +1,8 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { lirePorteurs } from "@/lib/crm/access";
+import type { PerimetreViewer } from "@/lib/crm/perimetre";
 import type { Profile } from "@/lib/types";
 
 export type Session = {
@@ -50,6 +52,37 @@ export const getSession = cache(async (): Promise<Session | null> => {
     userId: claims.sub,
     email: typeof claims.email === "string" ? claims.email : "",
     me: (me as Profile) ?? null,
+  };
+});
+
+/**
+ * Qui regarde, au sens du PÉRIMÈTRE d'affichage (lib/crm/perimetre.ts) —
+ * identité, rôle, et l'interrupteur « travaille en équipe » avec la liste des
+ * porteurs.
+ *
+ * `cache()` comme `getSession` : les quatre écrans qui portent le sélecteur
+ * (tableau de bord, prospects, agenda, fiche) l'appellent chacun une fois par
+ * rendu et ne paient qu'une seule requête — et zéro pour un admin, qui n'est
+ * pas filtré.
+ *
+ * `lirePorteurs` est tolérante à l'absence de la colonne `voit_equipe` (elle
+ * renvoie une liste vide) : cette fonction marche donc contre la base EN
+ * PRODUCTION, avant comme après la migration 020.
+ */
+export const getPerimetreViewer = cache(async (): Promise<PerimetreViewer> => {
+  const session = await getSession();
+  const userId = session?.userId ?? "";
+  const isAdmin = session?.me?.role === "admin" && session.me.is_active === true;
+  if (!userId || isAdmin) return { userId, isAdmin };
+
+  const supabase = await createClient();
+  const porteurs = await lirePorteurs(supabase);
+  const voitEquipe = porteurs.includes(userId);
+  return {
+    userId,
+    isAdmin,
+    voitEquipe,
+    partageIds: voitEquipe ? porteurs : [userId],
   };
 });
 

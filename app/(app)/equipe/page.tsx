@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { PageHeader, Avatar, Icone, type IconeNom } from "@/components/ui";
 import { CreateUserForm, ResetPasswordForm } from "@/components/TeamForms";
 import { adminUpdateUserAction } from "@/app/actions";
+import { lirePorteurs } from "@/lib/crm/access";
 import { fmtDate, fmtDateTime, ACTIVITY_LABEL } from "@/lib/constants";
 
 /**
@@ -72,9 +73,17 @@ export default async function TeamPage({
 
   const supabase = await createClient();
 
-  // Deux requêtes pour toute la page : l'agrégat, et le journal récent de
-  // TOUS les comptes d'un coup (groupé en mémoire pour les lignes dépliées).
-  const [overviewRes, recentRes] = await Promise.all([
+  // Trois requêtes pour toute la page : l'agrégat, le journal récent de TOUS
+  // les comptes d'un coup (groupé en mémoire pour les lignes dépliées), et les
+  // porteurs de l'interrupteur d'équipe.
+  //
+  // `voit_equipe` ne passe PAS par `admin_team_overview` : y ajouter une
+  // colonne obligerait à `drop` puis recréer une fonction `security definer`
+  // (on ne change pas le type de retour d'un `returns table` par un
+  // `create or replace`) — un geste risqué en production pour une case à
+  // cocher. `lirePorteurs` est une lecture de cinq lignes, tolérante à
+  // l'absence de la colonne : la page rend donc aussi avant la migration 020.
+  const [overviewRes, recentRes, porteurs] = await Promise.all([
     supabase.rpc("admin_team_overview", { p_since: since }),
     supabase
       .from("activities")
@@ -82,9 +91,11 @@ export default async function TeamPage({
       .eq("is_draft", false)
       .order("occurred_at", { ascending: false })
       .limit(240),
+    lirePorteurs(supabase),
   ]);
 
   const rows = (overviewRes.data ?? []) as Row[];
+  const partage = new Set(porteurs);
 
   type Recent = {
     id: string;
@@ -307,6 +318,53 @@ export default async function TeamPage({
                     ))}
                   </ul>
                 </details>
+              )}
+
+              {/* -- L'interrupteur « travaille en équipe » --------------------
+                  Une case par personne, RÉCIPROQUE : cochée, elle donne le
+                  droit de voir ET expose. Personne n'est regardé sans être
+                  regardant — c'est ce qui permet à un commercial qui travaille
+                  seul de rester cloisonné dans les deux sens sans exception
+                  écrite à son nom.
+
+                  Pas d'interrupteur pour un ADMIN : il voit déjà tout, et ses
+                  fiches ne doivent être exposées à personne (`partage_equipe`
+                  exige `role = 'commercial'` des deux côtés, même si la case
+                  était cochée par erreur). */}
+              {u.role !== "admin" && (
+                <form
+                  action={adminUpdateUserAction}
+                  className="mt-4 border-t border-white/[0.06] pt-4"
+                >
+                  <input type="hidden" name="op" value="set_voit_equipe" />
+                  <input type="hidden" name="user_id" value={u.user_id} />
+                  <input
+                    type="hidden"
+                    name="voit_equipe"
+                    value={partage.has(u.user_id) ? "0" : "1"}
+                  />
+                  <button
+                    type="submit"
+                    className="flex items-start gap-2.5 text-left"
+                    aria-pressed={partage.has(u.user_id)}
+                  >
+                    <span
+                      className={
+                        partage.has(u.user_id)
+                          ? "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-celya-blue bg-celya-blue text-slate-950"
+                          : "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-white/20 bg-white/[0.03]"
+                      }
+                    >
+                      {partage.has(u.user_id) && (
+                        <Icone nom="coche" className="h-3 w-3" />
+                      )}
+                    </span>
+                    <span className="text-xs text-slate-300">
+                      Travaille en équipe (voit et est vu par les autres membres
+                      cochés)
+                    </span>
+                  </button>
+                </form>
               )}
 
               {/* -- Gestion du compte (rôle, activation, mot de passe) -- */}

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession } from "@/lib/auth";
+import { getSession, getPerimetreViewer } from "@/lib/auth";
 import {
   PageHeader,
   StatusChip,
@@ -29,6 +29,8 @@ import {
   lirePerimetre,
   filtrerProspects,
   restreindreAuxProspects,
+  peutElargir,
+  membresProposables,
   type PerimetreViewer,
 } from "@/lib/crm/perimetre";
 import type { ConfidenceLevel } from "@/lib/types";
@@ -66,10 +68,10 @@ export default async function ProspectsPage({
   // triées par date du dernier envoi — pour les retrouver d'un coup.
   const filtreEmails = filtre === "emails";
 
-  const viewer: PerimetreViewer = {
-    userId: session?.userId ?? "",
-    isAdmin: session?.me?.role === "admin",
-  };
+  // `getPerimetreViewer` porte aussi l'interrupteur « travaille en équipe »
+  // et la liste des porteurs (migration 020) — `cache()`é, donc une seule
+  // requête par rendu, et zéro pour un admin.
+  const viewer: PerimetreViewer = await getPerimetreViewer();
   const perimetre = lirePerimetre(params, viewer);
 
   let query = filtrerProspects(
@@ -116,7 +118,7 @@ export default async function ProspectsPage({
       .from("prospect_action_state")
       .select(LAST_ACTION_SELECT)
       .limit(2000),
-    viewer.isAdmin
+    peutElargir(viewer)
       ? supabase
           .from("crm_users")
           .select("id, full_name, email")
@@ -129,6 +131,10 @@ export default async function ProspectsPage({
     full_name: string | null;
     email: string;
   }[];
+  // Écrire est un geste d'écriture : réservé au propriétaire (et à l'admin).
+  const aMoi = (ownerId: string | null | undefined) =>
+    viewer.isAdmin || ownerId === viewer.userId;
+
   const lastActions = mapLastActions(
     restreindreAuxProspects(
       (actionsRes.data ?? []) as unknown as LastActionRow[],
@@ -149,6 +155,8 @@ export default async function ProspectsPage({
     confidence_locked: boolean | null;
     next_action_at: string | null;
     last_contact_at: string | null;
+    /** Déjà demandé par le select ; utile pour savoir ce qu'on a le droit de faire. */
+    owner_id: string | null;
     crm_users: { full_name: string | null } | null;
   }[]).map((p) => ({ ...p, status: normalizeStatus(p.status) }));
 
@@ -183,6 +191,7 @@ export default async function ProspectsPage({
     last_outcome: lastActions.get(p.id)?.last_outcome ?? null,
     last_text: lastActions.get(p.id)?.last_text ?? null,
     last_no_answer_streak: lastActions.get(p.id)?.last_no_answer_streak ?? null,
+    modifiable: aMoi(p.owner_id),
   }));
 
   /** URL de la page en conservant recherche, étape, tri, vue, filtre — et
@@ -228,7 +237,8 @@ export default async function ProspectsPage({
           role={session?.me?.role ?? "commercial"}
           viewerId={viewer.userId}
           perimetre={perimetre}
-          membres={membres}
+          membres={membresProposables(membres, viewer)}
+          voitEquipe={viewer.voitEquipe === true}
           basePath="/prospects"
           searchParams={params}
         />
@@ -433,7 +443,12 @@ export default async function ProspectsPage({
                     {/* Écrire sans passer par la fiche puis par le composeur :
                         le lien ouvre la fiche, composeur déplié. */}
                     <td className="td text-right">
-                      {p.email && (
+                      {/* Écrire n'est proposé que sur SA fiche : sur celle d'un
+                          collègue le composeur n'existe pas (lecture seule), et
+                          le mail partirait de sa boîte à lui. Un raccourci qui
+                          mène à un écran sans composeur est un raccourci
+                          cassé. */}
+                      {p.email && aMoi(p.owner_id) && (
                         <Link
                           href={composerHref(p.id)}
                           prefetch={false}

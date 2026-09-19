@@ -22,7 +22,12 @@ export type ReplyCardEmail = {
   intent_confidence: number | null;
   intent_summary: string | null;
   proposed_due_at: string | null;
-  prospects: { id: string; company_name: string } | null;
+  /**
+   * `owner_id` sert au tableau de bord : trier une réponse écrit sur la fiche
+   * (rattachement, relance), donc la zone « Réponses reçues » reste celle de
+   * ses PROPRES fiches, même en périmètre d'équipe.
+   */
+  prospects: { id: string; company_name: string; owner_id?: string | null } | null;
 };
 
 /** Carte « Réponses reçues » : l'IA propose, Bora décide. */

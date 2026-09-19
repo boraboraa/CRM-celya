@@ -12,14 +12,23 @@
  *   · défaut « moi » POUR TOUT LE MONDE, admin compris ;
  *   · l'admin peut élargir (?perimetre=equipe) ou viser un membre
  *     (?perimetre=<uuid>) ;
- *   · un non-admin reste « moi », quoi qu'il y ait dans l'URL — ce n'est pas
- *     lui qui tient la cloison (la RLS s'en charge), mais il n'a aucune raison
- *     de voir un sélecteur mensonger.
+ *   · depuis l'interrupteur d'équipe (migration 020), un PORTEUR en a le droit
+ *     lui aussi — mais borné aux autres porteurs : « equipe » ne veut pas dire
+ *     « tout le monde », il veut dire « ceux qui partagent avec moi » ;
+ *   · un commercial sans interrupteur reste « moi », quoi qu'il y ait dans
+ *     l'URL — ce n'est pas lui qui tient la cloison (la RLS s'en charge), mais
+ *     il n'a aucune raison de voir un sélecteur mensonger.
  *
  * NE PAS mélanger avec `lib/crm/access.ts` : `scopeProspects` / `canSeeProspect`
  * tiennent la SÉCURITÉ du connecteur MCP (service_role, RLS contournée). Le
  * périmètre est du confort et se pose APRÈS ; les fusionner, c'est un jour
  * désactiver le confort et ouvrir la sécurité avec.
+ *
+ * Le mode « equipe » pose d'ailleurs exactement ce piège : il ne filtre RIEN
+ * (`perimetreUserId` renvoie null). Sur une page, la RLS borne quand même le
+ * résultat. Dans le connecteur MCP il n'y a pas de RLS — c'est `scopeProspects`
+ * qui borne, et il doit donc être appliqué AVANT, à chaque outil, sans
+ * exception. Voir l'outil `agenda`, qui a dû gagner son propre `in`.
  */
 
 export type Perimetre =
@@ -27,30 +36,75 @@ export type Perimetre =
   | { mode: "equipe" }
   | { mode: "membre"; id: string };
 
-/** Le minimum à savoir de qui regarde. `Viewer` (access.ts) et la session de
- *  l'app le satisfont tous deux structurellement. */
-export type PerimetreViewer = { userId: string; isAdmin: boolean };
+/**
+ * Le minimum à savoir de qui regarde. `Viewer` (access.ts) et la session de
+ * l'app le satisfont tous deux structurellement.
+ *
+ * `voitEquipe` / `partageIds` sont optionnels : un appelant qui les ignore
+ * obtient le comportement d'avant l'interrupteur (admin seul élargit).
+ */
+export type PerimetreViewer = {
+  userId: string;
+  isAdmin: boolean;
+  voitEquipe?: boolean;
+  /** Les porteurs de l'interrupteur, soi inclus. Le seul élargissement permis. */
+  partageIds?: readonly string[];
+};
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A-t-on le droit de sortir de « moi » ? L'admin, ou un porteur. */
+export function peutElargir(viewer: PerimetreViewer): boolean {
+  return viewer.isAdmin || viewer.voitEquipe === true;
+}
+
 /**
  * Lit `?perimetre=` — « moi » (défaut), « equipe », ou l'uuid d'un membre.
- * Un non-admin obtient TOUJOURS « moi », quoi qu'il y ait dans l'URL.
+ *
+ * Un commercial sans interrupteur obtient TOUJOURS « moi », quoi qu'il y ait
+ * dans l'URL. Un PORTEUR peut demander « equipe » ou l'uuid d'un autre porteur
+ * — et rien d'autre : viser l'uuid de Bora ou de Rémi retombe sur « moi », pour
+ * que l'URL ne serve pas de sonde (« mon écran change, donc cette personne
+ * existe et partage »).
  */
 export function lirePerimetre(
   searchParams: { perimetre?: string | string[] },
   viewer: PerimetreViewer
 ): Perimetre {
-  if (!viewer.isAdmin) return { mode: "moi" };
+  if (!peutElargir(viewer)) return { mode: "moi" };
 
   const raw = Array.isArray(searchParams.perimetre)
     ? searchParams.perimetre[0]
     : searchParams.perimetre;
   if (!raw || raw === "moi") return { mode: "moi" };
   if (raw === "equipe") return { mode: "equipe" };
-  if (UUID_RE.test(raw)) return { mode: "membre", id: raw };
-  return { mode: "moi" };
+  if (!UUID_RE.test(raw)) return { mode: "moi" };
+  if (viewer.isAdmin) return { mode: "membre", id: raw };
+  return (viewer.partageIds ?? []).includes(raw)
+    ? { mode: "membre", id: raw }
+    : { mode: "moi" };
+}
+
+/**
+ * Les membres qu'on a le droit de PROPOSER dans le sélecteur.
+ *
+ * `crm_users_select` laisse tout membre lire toute la table d'équipe : la
+ * requête des pages remonte donc Bora et Rémi même pour Collins. Les afficher
+ * révélerait qui existe, et un clic rendrait un écran vide sans un mot. Un
+ * admin propose tout le monde ; un porteur, les seuls porteurs.
+ *
+ * Écrit ici et pas dans les trois pages : une liste blanche recopiée trois fois
+ * est une liste blanche qu'on corrigera deux fois (leçon d'`estHoteMaps`).
+ */
+export function membresProposables<M extends { id: string }>(
+  membres: M[],
+  viewer: PerimetreViewer
+): M[] {
+  if (viewer.isAdmin) return membres;
+  if (!viewer.voitEquipe) return [];
+  const permis = viewer.partageIds ?? [];
+  return membres.filter((m) => permis.includes(m.id));
 }
 
 /** L'identifiant sur lequel filtrer — null en mode « equipe » (pas de filtre). */

@@ -2,13 +2,23 @@ import Link from "next/link";
 import type { Perimetre } from "@/lib/crm/perimetre";
 
 /**
- * Le sélecteur de périmètre — « Moi », chaque membre actif, « Toute l'équipe ».
+ * Le sélecteur de périmètre — « Moi », les autres, « Toute l'équipe ».
  *
- * Rendu UNIQUEMENT pour un admin : un commercial ne voit que son portefeuille
- * (la RLS l'y contraint de toute façon) et un sélecteur qui ne change rien
- * serait un mensonge. Navigation par lien : `?perimetre=` est réécrit en
- * CONSERVANT les autres paramètres de la page (q, statut, tri, vue, filtre…)
- * — même mécanique que le `makeHref` de /prospects.
+ * Rendu pour un ADMIN, et depuis la migration 020 pour un PORTEUR de
+ * l'interrupteur « travaille en équipe ». Un commercial sans interrupteur n'en
+ * voit toujours rien : il ne voit que son portefeuille (la RLS l'y contraint de
+ * toute façon) et un sélecteur qui ne change rien serait un mensonge.
+ *
+ * ⚠ `membres` doit arriver DÉJÀ FILTRÉ pour un porteur : la policy
+ * `crm_users_select` laisse tout membre lire TOUTE la table d'équipe, donc la
+ * requête des pages remonte aussi Bora et Rémi. Les lister ici dirait à Collins
+ * qui existe, et un clic lui rendrait un écran vide sans explication. C'est
+ * l'appelant qui borne (voir les trois pages), et `lirePerimetre` refuse de
+ * toute façon un uuid hors partage.
+ *
+ * Navigation par lien : `?perimetre=` est réécrit en CONSERVANT les autres
+ * paramètres de la page (q, statut, tri, vue, filtre…) — même mécanique que le
+ * `makeHref` de /prospects.
  *
  * Composant serveur, sans état : le périmètre EST l'URL.
  */
@@ -19,18 +29,21 @@ export function PerimetreSwitcher({
   membres,
   basePath,
   searchParams = {},
+  voitEquipe = false,
 }: {
   role: string;
   viewerId: string;
   perimetre: Perimetre;
-  /** Membres actifs de crm_users (l'admin lui-même est couvert par « Moi »). */
+  /** Membres à proposer (soi inclus, couvert par « Moi »). Déjà borné au partage. */
   membres: { id: string; full_name: string | null; email: string }[];
   /** Chemin de la page qui porte le sélecteur (« /dashboard », « /prospects »…). */
   basePath: string;
   /** Les paramètres actuels de l'URL, conservés tels quels. */
   searchParams?: Record<string, string | string[] | undefined>;
+  /** Porte l'interrupteur « travaille en équipe » (non-admin). */
+  voitEquipe?: boolean;
 }) {
-  if (role !== "admin") return null;
+  if (role !== "admin" && !voitEquipe) return null;
 
   const href = (valeur: "moi" | "equipe" | string) => {
     const params = new URLSearchParams();
@@ -45,6 +58,10 @@ export function PerimetreSwitcher({
   };
 
   const autres = membres.filter((m) => m.id !== viewerId);
+  // Un porteur seul (personne d'autre n'a coché la case) : « Moi » et « Toute
+  // l'équipe » rendraient le même écran. Deux boutons pour un seul résultat,
+  // c'est le sélecteur mensonger qu'on refuse à un non-porteur.
+  if (role !== "admin" && autres.length === 0) return null;
 
   const options: { cle: string; label: string; actif: boolean }[] = [
     {

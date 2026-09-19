@@ -33,11 +33,14 @@ export function ConfidenceControl({
   level,
   reason,
   locked,
+  lectureSeule = false,
 }: {
   prospectId: string;
   level: ConfidenceLevel | null;
   reason: string | null;
   locked: boolean;
+  /** Fiche d'un collègue : la confiance se lit, elle ne se corrige pas. */
+  lectureSeule?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string>();
@@ -77,6 +80,22 @@ export function ConfidenceControl({
       const res = await action(fd);
       if (res && "error" in res && res.error) setNotice(res.error);
     });
+  }
+
+  if (lectureSeule) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+          Confiance
+        </span>
+        <ConfidenceBadge level={level} reason={reason} locked={locked} />
+        {reason && (
+          <span className="text-[11px] leading-relaxed text-slate-400">
+            {reason.charAt(0).toUpperCase() + reason.slice(1)}
+          </span>
+        )}
+      </div>
+    );
   }
 
   return (

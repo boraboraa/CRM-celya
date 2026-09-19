@@ -71,6 +71,13 @@ export type BoardProspect = {
   last_outcome: string | null;
   last_text: string | null;
   last_no_answer_streak: number | null;
+  /**
+   * Peut-on la DÉPLACER ? Faux sur la fiche d'un collègue vue grâce à
+   * l'interrupteur d'équipe (migration 020) : changer l'étape est une écriture,
+   * et `prospects_update` la refuse. Une carte qui se laisse saisir puis revient
+   * en place est pire qu'une carte qui ne bouge pas.
+   */
+  modifiable?: boolean;
 };
 
 /**
@@ -240,8 +247,12 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                     return (
                       <article
                         key={c.id}
-                        draggable
+                        draggable={c.modifiable !== false}
                         onDragStart={(e) => {
+                          if (c.modifiable === false) {
+                            e.preventDefault();
+                            return;
+                          }
                           setDragId(c.id);
                           e.dataTransfer.effectAllowed = "move";
                           e.dataTransfer.setData("text/plain", c.id);
@@ -250,7 +261,11 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                           setDragId(null);
                           setOverColumn(null);
                         }}
-                        className={`card card-hover card-lift cursor-grab border-l-4 p-3.5 active:cursor-grabbing ${
+                        className={`card card-hover card-lift border-l-4 p-3.5 ${
+                          c.modifiable === false
+                            ? "cursor-default"
+                            : "cursor-grab active:cursor-grabbing"
+                        } ${
                           STATUS_EDGE[c.status]
                         } ${
                           isDragged

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession } from "@/lib/auth";
+import { getSession, getPerimetreViewer } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
 import { PageHeader, EmptyState, Icone } from "@/components/ui";
 import { type TaskWithProspect } from "@/components/TaskRow";
@@ -23,6 +23,8 @@ import {
   filtrerProspects,
   filtrerJointProspects,
   restreindreAuxProspects,
+  peutElargir,
+  membresProposables,
   type PerimetreViewer,
 } from "@/lib/crm/perimetre";
 
@@ -83,14 +85,14 @@ export default async function TodoPage({
   const [session, params] = await Promise.all([getSession(), searchParams]);
   const { start, end } = todayBounds();
 
-  const viewer: PerimetreViewer = {
-    userId: session?.userId ?? "",
-    isAdmin: session?.me?.role === "admin",
-  };
+  // `getPerimetreViewer` porte aussi l'interrupteur « travaille en équipe » et
+  // la liste des porteurs (migration 020) — `cache()`é, donc une seule requête
+  // par rendu, et zéro pour un admin.
+  const viewer: PerimetreViewer = await getPerimetreViewer();
   const perimetre = lirePerimetre(params, viewer);
 
   const TASK_SELECT =
-    "id, title, details, due_at, status, priority, prospect_id, prospects(id, company_name, contact_name, phone, email)";
+    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email)";
 
   // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un
@@ -143,7 +145,7 @@ export default async function TodoPage({
       supabase
         .from("emails")
         .select(
-          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name)"
+          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id)"
         )
         .eq("direction", "entrant")
         .eq("triage", "a_traiter")
@@ -173,8 +175,9 @@ export default async function TodoPage({
       viewer
     ).limit(500),
 
-    // Les membres actifs — pour le sélecteur de périmètre (admin seulement).
-    viewer.isAdmin
+    // Les membres actifs — pour le sélecteur de périmètre (admin, ou porteur
+    // de l'interrupteur d'équipe ; la liste est bornée au partage juste après).
+    peutElargir(viewer)
       ? supabase
           .from("crm_users")
           .select("id, full_name, email")
@@ -219,7 +222,18 @@ export default async function TodoPage({
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
   const todayAll = (todayRes.data ?? []) as unknown as TaskWithProspect[];
-  const replies = (repliesRes.data ?? []) as unknown as ReplyCardEmail[];
+  // Les DEUX zones d'action du tableau restent personnelles, même en périmètre
+  // d'équipe : trier une réponse et débriefer un rendez-vous ÉCRIVENT (l'un
+  // rattache un email et pose une relance, l'autre clôt un RDV et verse un
+  // compte rendu au journal). `emails_update` et `meetings_update` les
+  // refuseraient sur le travail d'un collègue — et surtout, ce sont ses boucles
+  // à lui : les lui prendre, c'est les faire disparaître de son écran.
+  const aMoi = (ownerId: string | null | undefined) =>
+    viewer.isAdmin || ownerId === viewer.userId;
+
+  const replies = (
+    (repliesRes.data ?? []) as unknown as ReplyCardEmail[]
+  ).filter((e) => aMoi(e.prospects?.owner_id));
   const membres = (membresRes.data ?? []) as {
     id: string;
     full_name: string | null;
@@ -263,7 +277,9 @@ export default async function TodoPage({
   // de fiche (contact, téléphone, lieu de la carte) viennent d'une requête
   // groupée — c'est ce qui rend l'agenda utile depuis un téléphone.
   const meetingsToday = (meetingsTodayRes.data ?? []) as unknown as MeetingRow[];
-  const aDebriefer = (debriefRes.data ?? []) as unknown as MeetingRow[];
+  const aDebriefer = ((debriefRes.data ?? []) as unknown as MeetingRow[]).filter(
+    (m) => aMoi(m.owner_id)
+  );
   const meetingProspectIds = [
     ...new Set(
       [...meetingsToday, ...aDebriefer]
@@ -320,6 +336,13 @@ export default async function TodoPage({
   );
   const inZone1 = (t: TaskWithProspect) =>
     !t.prospect_id || !replyIds.has(t.prospect_id);
+  // Une relance d'un collègue se LIT. En périmètre « moi » tout est à moi, donc
+  // ce prédicat ne coûte rien ; en « équipe » il empêche d'offrir « Fait »,
+  // « Reporter » et « Résultat » sur le travail d'un autre — que `tasks_update`
+  // et `activities_insert` refuseraient, et qui déplacerait SON « À faire ».
+  const relanceLue = (t: TaskWithProspect) =>
+    !viewer.isAdmin && Boolean(t.assignee_id) && t.assignee_id !== viewer.userId;
+
   const overdue = overdueAll.filter(inZone1).map(avecDerniereAction);
   const today = todayAll.filter(inZone1).map(avecDerniereAction);
 
@@ -378,14 +401,16 @@ export default async function TodoPage({
         }
       />
 
-      {/* Le périmètre — admin seulement (le composant ne rend rien sinon). */}
-      {viewer.isAdmin && (
+      {/* Le périmètre — admin, ou porteur de l'interrupteur d'équipe. Le
+          composant ne rend rien pour les autres, ni pour un porteur seul. */}
+      {peutElargir(viewer) && (
         <div className="mb-5">
           <PerimetreSwitcher
             role={session?.me?.role ?? "commercial"}
             viewerId={viewer.userId}
             perimetre={perimetre}
-            membres={membres}
+            membres={membresProposables(membres, viewer)}
+          voitEquipe={viewer.voitEquipe === true}
             basePath="/dashboard"
             searchParams={params}
           />
@@ -488,8 +513,17 @@ export default async function TodoPage({
               </div>
             ) : (
               <div className="space-y-6">
-                <TaskSection title="En retard" tone="late" tasks={overdue} />
-                <TaskSection title="Aujourd'hui" tasks={today} />
+                <TaskSection
+                  title="En retard"
+                  tone="late"
+                  tasks={overdue}
+                  lecture={relanceLue}
+                />
+                <TaskSection
+                  title="Aujourd'hui"
+                  tasks={today}
+                  lecture={relanceLue}
+                />
               </div>
             )}
           </section>
@@ -610,10 +644,13 @@ function TaskSection({
   title,
   tasks,
   tone,
+  lecture,
 }: {
   title: string;
   tasks: TaskWithProspect[];
   tone?: "late";
+  /** Les relances d'un collègue se lisent (voir `relanceLue`). */
+  lecture?: (task: TaskWithProspect) => boolean;
 }) {
   if (tasks.length === 0) return null;
 
@@ -635,6 +672,7 @@ function TaskSection({
       <TaskList
         tasks={tasks}
         className="card animate-rise divide-y divide-white/[0.05]"
+        lecture={lecture ? (_i, t) => lecture(t) : undefined}
       />
     </div>
   );

@@ -259,6 +259,7 @@ distinction est vitale pour le connecteur MCP (service_role, RLS contournée) :
 ```ts
 canSeeProspect(viewer, owner)   // moi | l'équipe qui partage | admin
 canEditProspect(viewer, owner)  // moi | admin — JAMAIS l'équipe
+relanceEnLecture(viewer, assignee) // la même frontière sur une RELANCE
 lirePorteurs(client)            // les cochés ; TOLÉRANT (42703 → personne)
 Viewer.visiblesIds              // ce que je peux LIRE ; scopeProspects fait un `in`
 ```
@@ -268,7 +269,7 @@ propriétaires. La liste n'est jamais vide pour un non-admin, donc le filtre mor
 toujours. Les **six outils MCP qui écrivent** appellent `refusSiPasProprietaire`
 **en plus** de `resolveProspect` : s'en tenir à la visibilité rendrait
 l'assistant plus puissant que l'écran. Testé par **`npm run test:equipe`**
-(`lib/crm/access.test.ts`, 38 cas, sans réseau).
+(`lib/crm/access.test.ts`, 44 cas, sans réseau).
 
 ⚠ **`supprimer_activite` est l'exception, et c'est celle qu'on oublie** : sa
 branche « une entrée précise » part d'un identifiant d'ACTIVITÉ, pas de prospect,
@@ -517,6 +518,17 @@ reste visible barré) ; tableau de bord : zone « **Aujourd'hui** » en tête
 « **Rendez-vous à débriefer** » (passés, non débriefés : « Ça s'est fait /
 Annulé / Reporté » + compte rendu d'une ligne). **Un RDV passé non débriefé
 reste dans cette zone — c'est le SEUL rappel du produit, ne pas en ajouter.**
+
+La ligne de la zone « Aujourd'hui » se dérive dans **`lib/crm/agendaJour.ts`**
+(pur, neutre, testé par `npm run test:agenda`) : le JSX ne fait plus que poser
+les champs. Extrait le 21/09 parce que ce bloc n'avait jamais vu qu'un seul
+rendez-vous de test — toujours rattaché à une fiche, toujours pourvu d'un lieu —
+et que sa branche « **perso, sans prospect et sans lieu** » (le « Rdv Ephec » du
+21/09) n'était parcourue par aucun test. Elle l'est maintenant, avec le cas
+d'une fiche rattachée mais introuvable (aucun lien mort) et celui des chaînes
+vides (rien, jamais un bouton Maps vide). **Une branche qu'aucun test ne
+parcourt n'est pas une branche sûre, c'est une branche dont on ignore l'état** —
+celle-ci se portait bien, encore fallait-il regarder.
 
 Outils MCP : `agenda` (période, périmètre — le masquage « Occupé » des RDV
 perso d'autrui est RÉAPPLIQUÉ EN CODE, car sous service_role `auth.uid()` est
@@ -1445,7 +1457,11 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
-`npm run test:equipe` (purs, sans réseau). **`npm run lint` n'est PAS configuré** : le script existe, mais le
+`npm run test:equipe`, `npm run test:agenda`, `npm run test:frontiere` (purs,
+sans réseau). **`test:frontiere` n'est pas un test de règle mais un test de
+STRUCTURE** — il relit la frontière serveur → client, que ni `tsc` ni
+`next build` ne voient (voir le piège du 21/09). C'est le seul qui protège
+d'une panne à 100 % des pages. **`npm run lint` n'est PAS configuré** : le script existe, mais le
 dépôt n'a aucune configuration ESLint et `next lint` ouvre alors un assistant
 interactif qui installe des dépendances — il bloque une session non
 interactive. Ne pas en ajouter une au passage : ce serait une décision d'outil,
@@ -1734,10 +1750,55 @@ toutes les pages internes) et le build reste vert, car les routes dynamiques ne
 s'exécutent pas à la compilation. Les constantes partagées vivent dans un module
 neutre — voir `lib/nav.ts`.
 
-**Connecteur MCP Vercel.** Il ne voit pas le projet `celya-accounting-app`
-(l'équipe `bora` accessible au connecteur n'en contient pas la trace) : suivi de
-déploiement impossible par le MCP. Vérifier la production directement en HTTP,
-ou depuis vercel.com.
+**UNE FONCTION NE TRAVERSE PAS LA FRONTIÈRE SERVEUR → CLIENT — et c'est la
+panne du 21 septembre 2026.** `/dashboard` est tombé en « Application error »
+(digest `1714811351`) pour le seul compte ayant une relance en retard : Bora.
+`TaskSection` (serveur, dans la page) rendait `TaskList` (`"use client"`) en lui
+passant une PROP FONCTION — `lecture={lecture ? (_i, t) => lecture(t) : undefined}`,
+arrivée avec la PR #11. React refuse de sérialiser une fonction dans le flux RSC
+(« Functions cannot be passed directly to Client Components ») et toute la page
+tombe. Seules les **server actions** ont le droit de passer : ce sont des
+références, pas des closures.
+
+Trois choses à retenir, et elles se répètent dans ce projet :
+
+- **Les trois filets étaient verts.** `npx tsc --noEmit` : le type de la prop
+  autorisait la fonction, et TypeScript ne connaît pas cette frontière.
+  `next build` : les routes dynamiques ne s'exécutent pas à la compilation —
+  **exactement le piège `NAV_ITEMS` ci-dessus**, et c'est la deuxième fois.
+  Les tests purs : ils testent des règles, pas des rendus.
+- **Le crash dépendait des DONNÉES, donc il ne touchait qu'une personne.**
+  `TaskSection` sort sur `if (tasks.length === 0) return null` avant d'atteindre
+  la ligne fautive : Bora avait 13 relances échues, Rémi zéro. D'où un symptôme
+  qui ressemblait à un problème de permissions ou de rendez-vous, et n'en était
+  pas. **Quand un seul compte tombe, chercher ce qu'il a de plus que les
+  autres — mais le chercher dans le CODE QU'IL TRAVERSE, pas dans ses données.**
+  Les 3 `meetings` de Bora étaient un indice parfaitement trompeur : le bloc
+  « Aujourd'hui » encaissait très bien son rendez-vous perso sans fiche ni lieu.
+- **La correction est un TYPE, pas une vigilance.** `TaskList.lecture` vaut
+  désormais `boolean | string[]` : le serveur envoie la LISTE des relances à
+  lire, la closure naît côté client. Une fonction ne compile plus. `TaskRows`,
+  appelé seulement depuis du client (`RelancesSection`), garde la forme
+  fonction.
+
+Et un filet qui, lui, voit cette frontière : **`npm run test:frontiere`**
+(`lib/rsc-frontiere.test.ts`). Il lit l'AST de chaque module SANS `"use client"`
+et refuse toute prop pouvant valoir une fonction sur une balise importée d'un
+module `"use client"` — server actions exceptées. Il descend dans les ternaires,
+`&&`, objets et tableaux, **jamais dans les arguments d'un appel** (sans quoi
+`drafts={drafts.map((d) => …)}`, parfaitement juste, serait signalé — et un test
+qui crie au loup finit désactivé). Il se teste lui-même sur le code exact de
+fc4cfbc. Remis devant la page d'avant, il désigne `page.tsx:675`.
+
+**Connecteur MCP Vercel.** Il **liste** bien le projet `celya-accounting-app`
+(`prj_kK7E10MBZe04YOAh89CL3rBwK6vQ`, équipe `bora`) — corrigé le 21/09, la
+version précédente de ce fichier disait qu'il ne le voyait pas. Mais son jeton
+n'a aucun droit de LECTURE dessus : `get_runtime_errors`, `get_runtime_logs` et
+`list_deployments` répondent **403**. Pas de trace d'exception ni de suivi de
+déploiement par le MCP. Conséquence pratique : sur une « Application error » en
+production, **le digest ne mène à rien** — reproduire en local (voir la panne du
+21/09, reproduite avec le moteur RSC de `next/dist/compiled/react-server-dom-webpack`)
+ou lire les logs depuis vercel.com.
 
 **Utilisateur créé en SQL dans `auth.users`.** GoTrue plante en
 `Database error querying schema` si les colonnes texte de jetons

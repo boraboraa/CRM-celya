@@ -157,6 +157,31 @@ export function canEditProspect(viewer: Viewer, ownerId: string | null): boolean
 }
 
 /**
+ * La même frontière, mais sur une RELANCE : le pendant exact de `tasks_update`,
+ * rebasée sur `assignee_id` par la migration 020.
+ *
+ * « Lecture partagée, écriture perso » s'applique aussi au tableau de bord : en
+ * périmètre d'équipe, la relance d'un collègue s'AFFICHE (savoir qu'il l'a en
+ * main) et ne s'actionne pas. Cocher « Fait » sur la sienne déplacerait SON
+ * « À faire », et `activities_insert` refuserait le résultat d'appel qui va
+ * avec — la base tiendrait, mais après le clic : on masque, on ne désactive
+ * pas.
+ *
+ * Volontairement typée sur la forme MINIMALE `{ userId, isAdmin }` : `Viewer`
+ * (connecteur MCP) comme `PerimetreViewer` (les écrans) la satisfont, et la
+ * règle n'a pas besoin d'en savoir plus. Une relance LIBRE (`assignee_id` nul,
+ * le pense-bête du tableau de bord) reste à qui la regarde.
+ */
+export function relanceEnLecture(
+  viewer: { userId: string; isAdmin: boolean },
+  assigneeId: string | null | undefined
+): boolean {
+  // `Boolean` et non `!== null` : iso-comportement avec le prédicat qui vivait
+  // en ligne dans le tableau de bord, une chaîne vide valant « pas d'assigné ».
+  return !viewer.isAdmin && Boolean(assigneeId) && assigneeId !== viewer.userId;
+}
+
+/**
  * La même règle, poussée dans la requête PostgREST — pour que le filtrage se
  * fasse en base et non après un `limit` qui aurait déjà tronqué les bonnes
  * lignes.

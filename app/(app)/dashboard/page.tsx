@@ -17,6 +17,8 @@ import {
   mapLastActions,
   type LastActionRow,
 } from "@/lib/crm/lastAction";
+import { relanceEnLecture } from "@/lib/crm/access";
+import { ligneAgendaJour } from "@/lib/crm/agendaJour";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -51,14 +53,6 @@ type MeetingRow = {
   location: string | null;
   status: string;
 };
-
-/** Heure de Bruxelles, « 11:00 ». */
-const heure = (iso: string) =>
-  new Date(iso).toLocaleTimeString("fr-BE", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Brussels",
-  });
 
 /**
  * À faire — trois états, jamais mélangés :
@@ -341,10 +335,18 @@ export default async function TodoPage({
   // « Reporter » et « Résultat » sur le travail d'un autre — que `tasks_update`
   // et `activities_insert` refuseraient, et qui déplacerait SON « À faire ».
   const relanceLue = (t: TaskWithProspect) =>
-    !viewer.isAdmin && Boolean(t.assignee_id) && t.assignee_id !== viewer.userId;
+    relanceEnLecture(viewer, t.assignee_id);
 
   const overdue = overdueAll.filter(inZone1).map(avecDerniereAction);
   const today = todayAll.filter(inZone1).map(avecDerniereAction);
+
+  // Le résultat du prédicat, pas le prédicat : `TaskList` est un composant
+  // CLIENT, et une fonction ne traverse pas la frontière serveur → client
+  // (React la refuse à la sérialisation, toute la page tombe). Une liste
+  // d'identifiants, elle, est de la donnée.
+  const relancesLues = [...overdue, ...today]
+    .filter(relanceLue)
+    .map((t) => t.id);
 
   // La zone calme ne liste que les fiches dont RIEN n'est encore dû : dès que
   // la relance « si pas de réponse » échoit, la fiche remonte en zone 1 et
@@ -436,47 +438,48 @@ export default async function TodoPage({
           </h2>
           <ul className="card animate-rise divide-y divide-white/[0.05]">
             {meetingsToday.map((m) => {
-              const p = m.prospect_id
-                ? meetingProspects.get(m.prospect_id)
-                : undefined;
+              // Toute la dérivation vit dans lib/crm/agendaJour.ts — pur, donc
+              // testable, y compris la branche « rendez-vous perso, sans fiche
+              // ni lieu » que ce bloc n'avait jamais rencontrée.
+              const l = ligneAgendaJour(m, meetingProspects);
               return (
                 <li
-                  key={m.id}
+                  key={l.id}
                   className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
                 >
                   <span className="w-24 shrink-0 text-sm font-semibold tabular-nums text-blue-300">
-                    {heure(m.starts_at)}–{heure(m.ends_at)}
+                    {l.creneau}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-100">
-                      {p ? (
+                      {l.lienFiche ? (
                         <Link
-                          href={`/prospects/${p.id}`}
+                          href={l.lienFiche}
                           prefetch={false}
                           className="underline-offset-2 hover:text-celya-blue hover:underline"
                         >
-                          {m.title}
+                          {l.titre}
                         </Link>
                       ) : (
-                        m.title
+                        l.titre
                       )}
                     </p>
                     <p className="flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
-                      {p?.contact_name && <span>{p.contact_name}</span>}
-                      {p?.phone && (
+                      {l.contact && <span>{l.contact}</span>}
+                      {l.telHref && (
                         <a
-                          href={`tel:${p.phone.replace(/\s/g, "")}`}
+                          href={l.telHref}
                           className="text-celya-blue hover:underline"
                         >
-                          {p.phone}
+                          {l.telephone}
                         </a>
                       )}
                       {/* L'adresse en clientèle : un bouton, pas un texte à
                           recopier dans Maps. */}
-                      {m.location && (
+                      {l.lieu && (
                         <BoutonsMaps
-                          valeur={m.location}
-                          ville={p?.city}
+                          valeur={l.lieu}
+                          ville={l.ville ?? undefined}
                           compact
                         />
                       )}
@@ -517,12 +520,12 @@ export default async function TodoPage({
                   title="En retard"
                   tone="late"
                   tasks={overdue}
-                  lecture={relanceLue}
+                  lecture={relancesLues}
                 />
                 <TaskSection
                   title="Aujourd'hui"
                   tasks={today}
-                  lecture={relanceLue}
+                  lecture={relancesLues}
                 />
               </div>
             )}
@@ -649,8 +652,13 @@ function TaskSection({
   title: string;
   tasks: TaskWithProspect[];
   tone?: "late";
-  /** Les relances d'un collègue se lisent (voir `relanceLue`). */
-  lecture?: (task: TaskWithProspect) => boolean;
+  /**
+   * Les identifiants des relances qui se LISENT (voir `relanceLue`) — de la
+   * donnée, pas un prédicat : `TaskList` est un composant client et nous
+   * sommes côté serveur. Les identifiants étrangers à cette section ne
+   * dérangent pas, la ligne se reconnaît par le sien.
+   */
+  lecture?: string[];
 }) {
   if (tasks.length === 0) return null;
 
@@ -672,7 +680,7 @@ function TaskSection({
       <TaskList
         tasks={tasks}
         className="card animate-rise divide-y divide-white/[0.05]"
-        lecture={lecture ? (_i, t) => lecture(t) : undefined}
+        lecture={lecture}
       />
     </div>
   );

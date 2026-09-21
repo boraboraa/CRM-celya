@@ -23,6 +23,12 @@ le sélecteur de périmètre de l'admin — **à supprimer**.
 SEUL sur un autre marché et doit rester cloisonné **dans les deux sens**. D'où
 l'interrupteur « travaille en équipe » — voir le Modèle de sécurité.
 
+**Au 21 septembre**, la migration `020` est **appliquée en production** (Collins
+et Nathan cochés, Bora et Rémi non). **Quatre étudiants arrivent** : Collins,
+Nathan et Bora doivent voir leur travail, un étudiant ne doit voir que le sien.
+C'est l'objet de la `021` (table `supervision`, relation **orientée**) — écrite
+et recettée, **pas encore appliquée**. Voir « L'encadrement ».
+
 ### État au 25 août 2026
 
 L'équipe est **réellement à deux** : `dogrulbora@gmail.com` (admin) et
@@ -288,6 +294,62 @@ absent de sa ligne. Et les **deux zones d'ACTION** du tableau de bord
 périmètre d'équipe : ce sont ses boucles à lui, les lui prendre les ferait
 disparaître de son écran.
 
+### L'encadrement (migration `021`, 21 septembre — ÉCRITE, PAS APPLIQUÉE)
+
+Quatre étudiants arrivent. Collins, Nathan et Bora doivent voir ce qu'ils font ;
+**un étudiant ne voit QUE ce qu'il a mis lui-même** — ni les fiches de Collins ou
+Nathan, ni celles des autres étudiants.
+
+`voit_equipe` ne peut pas l'exprimer : elle est **réciproque par construction**,
+la même expression accorde le droit ET expose. D'où une seconde notion,
+**ORIENTÉE**, portée par une TABLE et non par un drapeau :
+
+```sql
+supervision(encadrant_id, commercial_id)   -- une ligne par couple, admin seul
+encadre(p_owner)          -- encadrant_id = auth.uid() AND commercial_id = p_owner
+can_see_prospect(owner)   -- … or encadre(owner)
+meetings_select           -- … or encadre(owner_id)
+```
+
+**Un étudiant ne porte AUCUN drapeau** : son comportement par défaut (ne voir que
+soi) est déjà le bon depuis la 016 ; on n'ajoute que les lignes d'encadrement.
+Corollaire à ne pas perdre : le privilège n'étant **pas une colonne de
+`crm_users`**, `guard_profile_privileges` n'a rien à gagner — c'est la RLS de
+`supervision` qui protège, et elle est vérifiée par deux assertions.
+
+Trois propriétés tiennent à la **forme** de la requête, à préserver si on la
+réécrit : elle est **orientée** (l'étudiant ne gagne rien) ; elle **ne saute
+qu'une fois** (Nathan encadre Collins, Collins encadre un étudiant → Nathan ne
+voit PAS l'étudiant — ne jamais la passer en `with recursive`) ; et **deux
+étudiants sous le même encadrant ne se voient pas** (ce serait faux si la règle
+disait « nous avons un encadrant en commun »). `c.role = 'commercial'` sur
+l'encadré : une ligne posée vers Bora n'exposerait aucune de ses 52 fiches.
+
+**AUCUNE policy d'écriture n'est modifiée, et c'est le cœur du lot.** La 020
+avait dû en rebaser neuf parce que la protection en écriture venait de la
+cloison de LECTURE ; depuis, ses `with check` testent la **fiche de
+destination**, donc ils sont indifférents à tout élargissement de lecture.
+Mesuré : quinze écritures d'un encadrant sur les données de son étudiant, toutes
+refusées (42501 pour les insertions et les déplacements, 0 ligne pour les
+modifications et suppressions). « Lecture partagée, écriture perso » est tenu
+**sans une ligne de SQL supplémentaire** — ne pas « compléter » la 021 par des
+policies d'écriture.
+
+Côté TypeScript, la règle entre par **`Viewer.visiblesIds`** (l'union : moi + les
+co-porteurs si je suis porteur + mes encadrés), que `scopeProspects`,
+`scopeJoinedProspects` et le `in` de l'outil `agenda` consultent déjà — aucun
+outil MCP n'a eu besoin d'être réécrit. **`canEditProspect` NE BOUGE PAS.**
+`lireEncadres` est tolérante à l'absence de la table (42P01 → « je n'encadre
+personne »), donc le code tourne avant comme après la migration.
+
+**Ce que l'encadrant voit de l'AGENDA** : tous les rendez-vous de l'étudiant,
+mais un `kind='perso'` sort « Occupé », sans lieu ni notes — `meetings_visibles`
+n'est pas touchée et ne doit pas l'être. C'est la protection due à un
+indépendant, et elle vaut pareil pour un étudiant.
+
+**Réversible** : supprimer les lignes suffit ; retirer `or encadre(...)` des deux
+policies de lecture restaure la 020 à l'identique.
+
 ### Le périmètre d'affichage — du confort, PAS de la sécurité (31 août)
 
 La RLS cloisonnait, mais les écrans requêtaient `tasks` et `prospects` sans
@@ -296,16 +358,25 @@ filtre : en admin, Bora recevait l'union des portefeuilles. D'où
 `filtrerTaches` (`assignee_id`), `filtrerProspects` (`owner_id`),
 `filtrerJointProspects`, `restreindreAuxProspects` (les vues sans `owner_id`).
 **Défaut « moi » pour tout le monde, admin compris**. Depuis la migration `020`,
-un **porteur** de l'interrupteur d'équipe peut élargir lui aussi — mais borné aux
-autres porteurs : viser l'uuid de Bora ou de Rémi retombe sur « moi », pour que
-l'URL ne serve pas de sonde. Un commercial sans interrupteur reste forcé à
-« moi » quoi qu'il y ait dans l'URL, et `membresProposables` garantit que le
-sélecteur ne NOMME jamais quelqu'un hors partage (`crm_users_select` laisse tout
-membre lire la table d'équipe entière). Le sélecteur (`PerimetreSwitcher`) vit
+un **porteur** de l'interrupteur d'équipe peut élargir lui aussi, et depuis la
+`021` un **encadrant** — chacun borné à son propre partage (`partageIds` en est
+l'UNION : moi, mes co-porteurs, mes encadrés). Viser l'uuid de Bora ou de Rémi
+retombe sur « moi », silencieusement, pour que l'URL ne serve pas de sonde. Un
+commercial qui n'est ni l'un ni l'autre reste forcé à « moi » quoi qu'il y ait
+dans l'URL, et `membresProposables` garantit que le sélecteur ne NOMME jamais
+quelqu'un hors partage (`crm_users_select` laisse tout membre lire la table
+d'équipe entière). **Le droit d'élargir se calcule à UN seul endroit**,
+`peutElargir` : `PerimetreSwitcher` le reçoit en prop (`peutElargir`) au lieu de
+rejouer la règle — il la rejouait avant la 021, et c'est la copie qu'on oublie
+quand une troisième branche arrive. Le sélecteur vit
 sur `/dashboard`, `/prospects` **et `/agenda`** — trois pages, pas deux ; les
 outils MCP
 `lister_prospects` / `a_faire` acceptent `perimetre: "moi" | "equipe"` (défaut
-« moi », appliqué APRÈS `scopeProspects`). **Ne jamais fusionner ce module avec
+« moi », appliqué APRÈS `scopeProspects`). Depuis la `021`, chaque relance de
+`a_faire` porte **`a_moi`** : en périmètre « equipe » la liste mélange les
+miennes et celles des gens que je vois, et sans ce drapeau Claude propose de
+traiter la relance d'un collègue — que la base refuserait après coup. L'outil
+`agenda` le portait déjà, pour la même raison. **Ne jamais fusionner ce module avec
 `access.ts`** : le périmètre se DÉSACTIVE (mode équipe), la cloison jamais —
 les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort.
 
@@ -316,6 +387,7 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 | Table | Rôle |
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password`, `voit_equipe` (l'interrupteur d'équipe, migration `020` — gardé par `guard_profile_privileges`, personne ne se le coche) |
+| `supervision` | l'encadrement (migration `021`) : `(encadrant_id, commercial_id)`, clé primaire composée, une ligne par couple. **À SENS UNIQUE** — l'encadrant VOIT, l'encadré ne gagne rien. RLS : lecture bornée aux lignes qui me désignent, **écriture admin seul**. Ne pas confondre avec `voit_equipe`, qui est réciproque |
 | `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at` |
 | `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` — le RÉSULTAT d'appel, colonne de 001 réactivée le 7 août, **bornée le 2 septembre** (migration `019`, contrainte `activities_outcome_connu`) à cinq valeurs : `sans_reponse` · `barrage` · `rappeler` · `interesse` · `refus`. Reste en `text` : on borne, on ne convertit pas |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
@@ -662,7 +734,15 @@ l'IA ne marche pas, ancre `#assistant-ia`) · `/acces-refuse`. `/taches` redirig
     jamais noyé dans un tableau uniforme ;
   · **aucun secret** n'y figure — ni mot de passe d'application, ni jeton :
     « connecté / pas connecté » suffit.
-  Tout vient d'**un seul agrégat**, `admin_team_overview(p_since)`, qui **lève
+  Depuis la `021`, chaque carte porte aussi « **Encadré par** » : une case par
+  commercial actif, sur la carte de la personne ENCADRÉE — c'est le sens où l'on
+  se pose la question en créant un compte d'étudiant (« qui doit voir son
+  travail ? »), même si la table est rangée par encadrant, parce que c'est le
+  sens où la RLS l'interroge. Le libellé **dit le sens** (« voit son travail, ne
+  le modifie pas ») : un droit de regard qui n'est pas un droit de modification,
+  ça ne se devine pas d'une case à cocher. Pas de case sur (ni vers) un admin —
+  `encadre()` exige `role = 'commercial'` côté encadré, la ligne serait morte.
+  Tout le reste vient d'**un seul agrégat**, `admin_team_overview(p_since)`, qui **lève
   `42501` hors admin** : masquer le lien ne suffirait pas, un appel direct à la
   route est refusé en base. La gestion des rôles reste ici, et nulle part
   ailleurs.
@@ -1059,8 +1139,15 @@ Architecture (edge function `crm-mail`, service_role jamais côté Next) :
   OAuth HS256 maison n'est pas vérifiable par Supabase Auth — c'est ce qui
   empêchait tout outil MCP d'envoyer un mail). Même motif que `x-cron-secret`
   pour la relève. Le secret **authentifie, il n'autorise pas** : le rôle est
-  relu dans `crm_users` et le contrôle d'accès au prospect (règle de
-  `can_see_prospect`) est réappliqué à l'identique. Vérifié en production le
+  relu dans `crm_users` et le contrôle d'accès au prospect est réappliqué.
+  ⚠ **Ce contrôle est `owner_id = callerId`, PAS `can_see_prospect`** — les
+  versions précédentes de ce fichier disaient le contraire, et c'était faux
+  depuis la 020 : les deux notions ont divergé le jour où un porteur a pu VOIR
+  sans POSSÉDER (relu dans le code déployé le 21/09). Le code est donc le PLUS
+  ÉTROIT des deux, l'équivalent de `canEditProspect` — et c'est le bon choix :
+  ni un porteur ni un encadrant ne doit envoyer un mail depuis la fiche d'un
+  autre. **Ne jamais « réaligner » l'edge function sur `can_see_prospect`.**
+  Vérifié en production le
   12 août : mauvais secret → 401, utilisateur inconnu → 401, commercial sur un
   prospect qui ne lui appartient pas → **403**, admin sur prospect inexistant
   → 404, envoi réel → 200 + lignes `emails` et `activities` (author_id correct).
@@ -1526,8 +1613,46 @@ est inchangé. Vérifié en base juste après : `reloptions` porte toujours
 réel le remet à 0, et un `outcome` inconnu est refusé (`23514`) — le tout dans
 des transactions annulées.
 
-`020_interrupteur_equipe.sql` (19 septembre) est **écrite, testée, PAS
-appliquée** — c'est Bora qui applique. Additive : `crm_users.voit_equipe` naît à
+`021_encadrement.sql` (21 septembre) est **écrite, testée, PAS appliquée** —
+c'est Bora qui applique, puis qui pose les liens depuis `/equipe`. **Additive
+et sans donnée** : la table naît vide, donc `encadre()` est faux pour tout le
+monde et rien ne change tant qu'aucun lien n'est posé. Le code du même lot lit
+la table de façon TOLÉRANTE (`lireEncadres` : un `42P01` vaut « je n'encadre
+personne »), il tourne donc contre la base d'avant comme d'après.
+
+**Recette différentielle rejouée en transaction ANNULÉE contre la production**
+(baseline mesurée dans la même transaction, puis la migration **verbatim**, les
+sondes, les assertions, l'exception finale garantissant le rollback) :
+**43 assertions, 0 en échec**. Production revérifiée intacte après coup — table
+et fonction absentes, `can_see_prospect` et `meetings_select` dans leur état du
+19/09, 5 comptes, 77 fiches, zéro ligne de sonde.
+
+Ce qu'elle établit : Collins voit les fiches, le journal, les relances et les
+2 RDV de son étudiant, avec « Occupé » sans lieu ni notes sur le RDV perso ;
+**l'étudiant ne voit QUE sa fiche** — ni son encadrant, ni l'autre étudiant
+(qui a pourtant le même encadrant), ni Rémi, ni Bora ; **Nathan encadre Collins
+et n'hérite NI de ses étudiants NI de leur agenda** ; Rémi est inchangé à la
+ligne près et ne voit aucune fiche d'étudiant ; Bora voit tout. Côté écriture,
+**les quinze tentatives de Collins sur les données de son étudiant échouent**
+(42501 pour `activities_insert`, `tasks_insert`, `meetings_insert`,
+`emails_insert` et les quatre déplacements ; 0 ligne pour modifier la fiche,
+se l'attribuer, réécrire sa note, cocher sa relance, confirmer son RDV,
+supprimer sa fiche ou sa note) — tandis que chacun continue de modifier SA
+fiche, d'y consigner un appel et de cocher SA relance. Enfin : ni l'étudiant ni
+Collins ne peuvent écrire dans `supervision` (42501), l'étudiant ne se libère
+pas de son lien, `guard_profile_privileges` tient toujours (`P0001`), et une
+ligne `(Collins → Bora)` posée par erreur n'expose **aucune** fiche de l'admin.
+
+⚠ **Deux assertions FAUSSES au premier passage, corrigées** — elles valent
+d'être retenues : (1) un encadrant lit **trois** liens, pas deux, parce que la
+policy lui sert aussi celui où quelqu'un l'encadre LUI (c'est voulu : savoir
+qu'on est suivi) ; (2) `update crm_users set voit_equipe = true` sur un compte
+**déjà** à `true` ne déclenche PAS `guard_profile_privileges`, dont le test est
+`is distinct from` — un test de garde-fou doit demander un vrai CHANGEMENT,
+sinon il passe sans rien prouver.
+
+`020_interrupteur_equipe.sql` (19 septembre) — **appliquée en production le
+21 septembre**, avec `voit_equipe` sur Collins et Nathan. Additive : `crm_users.voit_equipe` naît à
 `false`, donc `partage_equipe` est faux pour tout le monde et **rien ne change
 tant que personne n'est coché**. Le code du même lot lit la colonne de façon
 TOLÉRANTE (`lirePorteurs` : un `42703` vaut « personne ne partage »), il tourne
@@ -1615,6 +1740,19 @@ Idem pour `prospects_update` (qui utilisait `can_see_prospect`), `tasks_update` 
 d'élargir un prédicat de lecture, chercher toutes les policies d'ÉCRITURE qui le
 partagent, et les rebaser sur le propriétaire dans le MÊME geste.** Une policy
 d'écriture ne doit jamais emprunter son périmètre à la lecture.
+
+**Un test de garde-fou qui ne DEMANDE RIEN passe sans rien prouver
+(21 septembre 2026).** La recette de la `021` vérifiait que
+`guard_profile_privileges` empêche toujours un commercial de toucher son propre
+`voit_equipe` — en écrivant `set voit_equipe = true` sur Collins, **déjà à
+`true`**. Le trigger teste `new.voit_equipe is distinct from old.voit_equipe` :
+pas de changement, pas de levée, `update` accepté, assertion rouge. Le garde-fou
+allait parfaitement bien ; c'est le test qui ne lui demandait rien. **Règle
+générale : un test de garde-fou doit demander un vrai CHANGEMENT** — et une
+assertion qui échoue mérite qu'on regarde d'abord si c'est elle qui a tort.
+(Deuxième leçon du même passage : un encadrant lit **trois** lignes de
+`supervision`, pas deux — la policy lui sert aussi celle où quelqu'un l'encadre
+LUI. C'est voulu, savoir qu'on est suivi n'est pas une fuite.)
 
 **Un `WITH CHECK` à `is_member()` seul n'est pas un garde-fou.** `tasks_insert`
 valait `is_member()` et rien d'autre : mesuré, **Rémi pouvait poser une relance

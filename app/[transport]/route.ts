@@ -27,6 +27,21 @@
  * `refusSiPasProprietaire` EN PLUS de `resolveProspect` — s'en tenir à la
  * visibilité rendrait l'assistant plus puissant que l'écran, exactement là où
  * la RLS n'est pas là pour rattraper l'oubli.
+ *
+ * L'ENCADREMENT (migration 021) élargit encore ce que « VOIR » recouvre — un
+ * encadrant lit les fiches, le journal, les relances et l'agenda de ses
+ * étudiants — et ne touche à « ÉCRIRE » en rien. Aucun outil n'a eu besoin
+ * d'être réécrit pour ça, et ce n'est pas un hasard : la règle est entrée par
+ * `Viewer.visiblesIds`, que `scopeProspects`, `scopeJoinedProspects` et le `in`
+ * de l'outil `agenda` consultent déjà. La seule chose à ne jamais faire est de
+ * brancher une ÉCRITURE sur `visiblesIds` ou sur `canSeeProspect` : c'est
+ * `canEditProspect` qui répond à cette question, et il ignore délibérément et
+ * l'équipe et l'encadrement.
+ *
+ * ⚠ Le corollaire du 19/09 vaut toujours, et il vaut DOUBLE ici : un outil qui
+ * ne part pas de `prospects` n'est borné par RIEN. `agenda` porte son propre
+ * `in`. Tout nouvel outil qui lit une table par un autre chemin doit porter le
+ * sien, explicitement.
  */
 
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
@@ -38,6 +53,7 @@ import {
   loadViewer,
   canSeeProspect,
   canEditProspect,
+  relanceEnLecture,
   scopeProspects,
   scopeJoinedProspects,
   NOT_EDITABLE,
@@ -514,7 +530,7 @@ function register(server: McpServer) {
       // la vérification en mémoire ci-dessous. La cloison (scopeJoinedProspects)
       // d'abord, le périmètre (assignee_id, comme l'écran « À faire ») ensuite.
       const SELECT =
-        "id, title, due_at, priority, prospect_id, prospects!inner(company_name, phone, owner_id)";
+        "id, title, due_at, priority, prospect_id, assignee_id, prospects!inner(company_name, phone, owner_id)";
 
       const [overdue, today] = await Promise.all([
         filtrerTaches(
@@ -536,6 +552,7 @@ function register(server: McpServer) {
       ]);
 
       type Row = Record<string, unknown> & {
+        assignee_id?: string | null;
         prospects?: { company_name?: string; phone?: string; owner_id?: string | null } | null;
       };
       const visible = (t: Row) =>
@@ -547,6 +564,15 @@ function register(server: McpServer) {
         societe: t.prospects?.company_name ?? null,
         telephone: t.prospects?.phone ?? null,
         prospect_id: t.prospect_id,
+        // À QUI EST CETTE RELANCE — et c'est nécessaire, pas décoratif.
+        //
+        // En périmètre « equipe », cette liste mélange mes relances et celles
+        // des gens que je vois : mon binôme (020), mes étudiants (021). Sans
+        // ce drapeau, Claude lit « relance en retard chez Garage X » et propose
+        // de la traiter — alors que la cocher déplacerait le « À faire » de
+        // quelqu'un d'autre, et que la base refuserait après coup. L'outil
+        // `agenda` porte déjà `a_moi` pour exactement la même raison.
+        a_moi: !relanceEnLecture(viewer, (t.assignee_id as string | null) ?? null),
       });
 
       return json("À faire — relances en retard puis du jour.", {

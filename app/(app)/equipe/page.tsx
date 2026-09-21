@@ -5,7 +5,7 @@ import { getSession } from "@/lib/auth";
 import { PageHeader, Avatar, Icone, type IconeNom } from "@/components/ui";
 import { CreateUserForm, ResetPasswordForm } from "@/components/TeamForms";
 import { adminUpdateUserAction } from "@/app/actions";
-import { lirePorteurs } from "@/lib/crm/access";
+import { lirePorteurs, lireLiensEncadrement } from "@/lib/crm/access";
 import { fmtDate, fmtDateTime, ACTIVITY_LABEL } from "@/lib/constants";
 
 /**
@@ -73,9 +73,9 @@ export default async function TeamPage({
 
   const supabase = await createClient();
 
-  // Trois requêtes pour toute la page : l'agrégat, le journal récent de TOUS
-  // les comptes d'un coup (groupé en mémoire pour les lignes dépliées), et les
-  // porteurs de l'interrupteur d'équipe.
+  // Quatre requêtes pour toute la page : l'agrégat, le journal récent de TOUS
+  // les comptes d'un coup (groupé en mémoire pour les lignes dépliées), les
+  // porteurs de l'interrupteur d'équipe, et les liens d'encadrement.
   //
   // `voit_equipe` ne passe PAS par `admin_team_overview` : y ajouter une
   // colonne obligerait à `drop` puis recréer une fonction `security definer`
@@ -83,7 +83,7 @@ export default async function TeamPage({
   // `create or replace`) — un geste risqué en production pour une case à
   // cocher. `lirePorteurs` est une lecture de cinq lignes, tolérante à
   // l'absence de la colonne : la page rend donc aussi avant la migration 020.
-  const [overviewRes, recentRes, porteurs] = await Promise.all([
+  const [overviewRes, recentRes, porteurs, liens] = await Promise.all([
     supabase.rpc("admin_team_overview", { p_since: since }),
     supabase
       .from("activities")
@@ -92,10 +92,27 @@ export default async function TeamPage({
       .order("occurred_at", { ascending: false })
       .limit(240),
     lirePorteurs(supabase),
+    // Tolérante à l'absence de la table : la page rend aussi avant la 021.
+    lireLiensEncadrement(supabase),
   ]);
 
   const rows = (overviewRes.data ?? []) as Row[];
   const partage = new Set(porteurs);
+
+  // Qui encadre qui — indexé DANS LE SENS OÙ L'ÉCRAN POSE LA QUESTION, c'est-à-
+  // dire « qui voit le travail de cette personne ». La table est stockée dans
+  // l'autre sens (une ligne par encadrant) parce que c'est le sens où la RLS
+  // l'interroge ; l'écran, lui, parle depuis la carte de l'encadré.
+  const encadrantsDe = new Map<string, Set<string>>();
+  for (const l of liens) {
+    const s = encadrantsDe.get(l.commercialId) ?? new Set<string>();
+    s.add(l.encadrantId);
+    encadrantsDe.set(l.commercialId, s);
+  }
+  const nomCourt = (id: string) => {
+    const r = rows.find((x) => x.user_id === id);
+    return r?.full_name?.split(" ")[0] ?? r?.email ?? "—";
+  };
 
   type Recent = {
     id: string;
@@ -365,6 +382,92 @@ export default async function TeamPage({
                     </span>
                   </button>
                 </form>
+              )}
+
+              {/* -- Encadrement (migration 021) --------------------------------
+                  « Encadré par » : une case par encadrant possible, sur la
+                  carte de la personne ENCADRÉE. C'est le sens où l'on se pose
+                  la question quand on crée un compte d'étudiant — « qui doit
+                  voir son travail ? » — même si la table, elle, est rangée par
+                  encadrant, parce que c'est le sens où la RLS l'interroge.
+
+                  Le libellé DIT LE SENS, sans jargon : un droit de regard qui
+                  n'est pas un droit de modification, ce n'est évident pour
+                  personne, et ça ne se devine pas d'une case à cocher.
+
+                  Pas de case pour un ADMIN : `encadre()` exige
+                  `role = 'commercial'` du côté encadré, une ligne posée vers
+                  Bora n'exposerait donc rien. L'afficher promettrait un effet
+                  qui n'aurait pas lieu.
+
+                  Un admin n'apparaît pas non plus comme encadrant POSSIBLE : il
+                  voit déjà tout par `is_admin()`, la ligne serait morte. */}
+              {u.role !== "admin" && (
+                <div className="mt-4 border-t border-white/[0.06] pt-4">
+                  <p className="mb-2 text-xs font-medium text-slate-300">
+                    Encadré par
+                  </p>
+                  <p className="mb-3 text-[11px] leading-relaxed text-slate-400">
+                    La personne cochée voit son travail — fiches, appels,
+                    relances, agenda — et <strong>ne le modifie pas</strong>.
+                    Lui ne voit rien d&apos;elle en retour.
+                  </p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {rows
+                      .filter(
+                        (c) =>
+                          c.user_id !== u.user_id &&
+                          c.role !== "admin" &&
+                          c.is_active
+                      )
+                      .map((c) => {
+                        const coche =
+                          encadrantsDe.get(u.user_id)?.has(c.user_id) === true;
+                        return (
+                          <form key={c.user_id} action={adminUpdateUserAction}>
+                            <input type="hidden" name="op" value="set_encadrement" />
+                            <input type="hidden" name="user_id" value={u.user_id} />
+                            <input
+                              type="hidden"
+                              name="encadrant_id"
+                              value={c.user_id}
+                            />
+                            <input
+                              type="hidden"
+                              name="encadre"
+                              value={coche ? "0" : "1"}
+                            />
+                            <button
+                              type="submit"
+                              className="flex items-center gap-2 text-left"
+                              aria-pressed={coche}
+                            >
+                              <span
+                                className={
+                                  coche
+                                    ? "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-celya-blue bg-celya-blue text-slate-950"
+                                    : "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-white/20 bg-white/[0.03]"
+                                }
+                              >
+                                {coche && <Icone nom="coche" className="h-3 w-3" />}
+                              </span>
+                              <span className="text-xs text-slate-300">
+                                {nomCourt(c.user_id)}
+                              </span>
+                            </button>
+                          </form>
+                        );
+                      })}
+                    {rows.filter(
+                      (c) =>
+                        c.user_id !== u.user_id && c.role !== "admin" && c.is_active
+                    ).length === 0 && (
+                      <p className="text-xs text-slate-500">
+                        Aucun autre commercial actif à proposer.
+                      </p>
+                    )}
+                  </div>
+                </div>
               )}
 
               {/* -- Gestion du compte (rôle, activation, mot de passe) -- */}

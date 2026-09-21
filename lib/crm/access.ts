@@ -48,6 +48,29 @@
  * rattraper l'oubli : tout outil qui ÉCRIT doit appeler `canEditProspect`, et
  * pas seulement `resolveProspect`. Sans ça, l'assistant de Collins modifierait
  * les fiches de Nathan que son écran affiche en lecture seule.
+ *
+ * ---------------------------------------------------------------------------
+ * L'ENCADREMENT (migration `021`, 21 septembre)
+ * ---------------------------------------------------------------------------
+ * Quatre étudiants arrivent. Collins, Nathan et Bora doivent voir ce qu'ils
+ * font ; un étudiant ne doit voir QUE ce qu'il a mis lui-même.
+ *
+ * `voit_equipe` ne peut pas exprimer ça : elle est RÉCIPROQUE par construction
+ * — la même expression accorde le droit ET expose. D'où une seconde notion,
+ * ORIENTÉE, portée par la table `supervision(encadrant_id, commercial_id)` :
+ *
+ *   encadre(owner) = exists(supervision où encadrant = moi et commercial = owner)
+ *
+ * À SENS UNIQUE (l'étudiant ne gagne rien) et SANS RÉCURSION : une seule
+ * lecture de la table, donc si Nathan encadre Collins et Collins un étudiant,
+ * Nathan ne voit PAS l'étudiant. Les deux notions cohabitent sans se connaître.
+ *
+ * ET L'ÉCRITURE, ELLE, NE BOUGE PAS D'UN POUCE. `canEditProspect` ignore
+ * l'encadrement exactement comme il ignore l'équipe : un encadrant VOIT le
+ * travail de son étudiant, il ne le modifie jamais. C'est vérifié en base (les
+ * neuf policies de la 020 testent la fiche de DESTINATION, pas l'appelant) et
+ * c'est vérifié ici — sans quoi l'assistant de Collins irait consigner des
+ * appels sur les fiches de ses étudiants, là où aucune RLS ne le rattraperait.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -61,9 +84,18 @@ export type Viewer = {
   /** Porte l'interrupteur « travaille en équipe » (migration 020). */
   voitEquipe: boolean;
   /**
+   * Les commerciaux que ce compte ENCADRE (migration 021) — sens unique : eux
+   * ne voient rien de lui. Vide pour un admin, qui voit déjà tout.
+   */
+  encadreIds: readonly string[];
+  /**
    * Les propriétaires dont ce compte peut LIRE les fiches — lui-même, plus les
-   * autres porteurs s'il est porteur. Jamais vide pour un non-admin. Vide pour
-   * un admin, qui n'est pas filtré du tout (comme `is_admin()` dans la policy).
+   * autres porteurs s'il est porteur, plus ceux qu'il encadre. Jamais vide pour
+   * un non-admin. Vide pour un admin, qui n'est pas filtré du tout (comme
+   * `is_admin()` dans la policy).
+   *
+   * ⚠ LIRE, et rien d'autre. Ne jamais s'en servir comme test d'écriture :
+   * c'est `canEditProspect` qui répond à cette question-là.
    */
   visiblesIds: readonly string[];
 };
@@ -81,14 +113,95 @@ export type Viewer = {
  * L'échec est FERMÉ : on ne voit jamais plus que soi, on peut voir moins.
  */
 export async function lirePorteurs(client: SupabaseClient): Promise<string[]> {
+  const membres = await lireMembresActifs(client);
+  return membres.filter((m) => m.voitEquipe).map((m) => m.id);
+}
+
+/**
+ * Les commerciaux actifs et leur interrupteur — la lecture dont dérivent À LA
+ * FOIS « qui partage » et « qui j'ai le droit d'encadrer ».
+ *
+ * Elle existe pour que la condition « actif ET commercial » ne soit écrite
+ * qu'UNE fois côté TypeScript, comme elle l'est une fois côté SQL (les jointures
+ * de `partage_equipe` et d'`encadre`). Une règle recopiée deux fois est une
+ * règle qu'on corrigera une fois — leçon d'`estHoteMaps`.
+ *
+ * Même TOLÉRANCE que ci-dessous : toute erreur vaut « personne », jamais
+ * « tout le monde ».
+ */
+async function lireMembresActifs(
+  client: SupabaseClient
+): Promise<{ id: string; voitEquipe: boolean }[]> {
   const { data, error } = await client
     .from("crm_users")
-    .select("id")
+    .select("id, voit_equipe")
     .eq("is_active", true)
-    .eq("role", "commercial")
-    .eq("voit_equipe", true);
+    .eq("role", "commercial");
   if (error) return [];
-  return (data ?? []).map((r) => (r as { id: string }).id);
+  return (data ?? []).map((r) => {
+    const row = r as { id: string; voit_equipe?: boolean | null };
+    return { id: row.id, voitEquipe: row.voit_equipe === true };
+  });
+}
+
+/**
+ * Les commerciaux que `userId` ENCADRE (migration 021) — le pendant TypeScript
+ * exact de `public.encadre()`, à ceci près qu'on résout la liste au lieu de
+ * tester un propriétaire à la fois.
+ *
+ * Trois choses à ne pas perdre en la réécrivant :
+ *
+ *   · ELLE EST ORIENTÉE : on filtre sur `encadrant_id = userId` et on renvoie
+ *     des `commercial_id`. Jamais l'inverse, jamais les deux.
+ *   · ELLE NE SAUTE QU'UNE FOIS : aucune récursion sur le résultat. Encadrer
+ *     Collins ne donne pas les étudiants de Collins.
+ *   · ELLE INTERSECTE avec les commerciaux ACTIFS, comme la jointure du SQL
+ *     (`c.is_active and c.role = 'commercial'`). Sans ça, un compte désactivé
+ *     resterait visible par son encadrant via le connecteur alors que la RLS
+ *     le cache déjà à l'écran — et les deux chemins divergeraient en silence.
+ *
+ * TOLÉRANTE À L'ABSENCE DE LA TABLE, pour la même raison que `lirePorteurs` :
+ * le code doit tourner contre la base d'AVANT la 021 (un 42P01 vaut « je
+ * n'encadre personne »). L'échec est FERMÉ.
+ */
+export async function lireEncadres(
+  client: SupabaseClient,
+  userId: string | null | undefined,
+  membresActifs?: { id: string }[]
+): Promise<string[]> {
+  if (!userId) return [];
+  const { data, error } = await client
+    .from("supervision")
+    .select("commercial_id")
+    .eq("encadrant_id", userId);
+  if (error) return [];
+  const actifs = new Set(
+    (membresActifs ?? (await lireMembresActifs(client))).map((m) => m.id)
+  );
+  return (data ?? [])
+    .map((r) => (r as { commercial_id: string }).commercial_id)
+    .filter((id) => actifs.has(id));
+}
+
+/**
+ * TOUS les liens d'encadrement, pour l'écran d'équipe (admin).
+ *
+ * La policy `supervision_select` ne sert à un non-admin que les lignes qui le
+ * désignent : appelée par quelqu'un d'autre que Bora, cette fonction ne rend
+ * donc pas le graphe complet — c'est voulu, et c'est pourquoi l'appelant reste
+ * un écran déjà réservé à l'admin.
+ */
+export async function lireLiensEncadrement(
+  client: SupabaseClient
+): Promise<{ encadrantId: string; commercialId: string }[]> {
+  const { data, error } = await client
+    .from("supervision")
+    .select("encadrant_id, commercial_id");
+  if (error) return [];
+  return (data ?? []).map((r) => {
+    const row = r as { encadrant_id: string; commercial_id: string };
+    return { encadrantId: row.encadrant_id, commercialId: row.commercial_id };
+  });
 }
 
 /**
@@ -114,18 +227,30 @@ export async function loadViewer(
     .maybeSingle();
   if (!data || !data.is_active) return null;
 
+  const id = data.id as string;
   const isAdmin = data.role === "admin";
-  // L'admin n'est pas filtré : inutile de payer la lecture des porteurs.
-  const porteurs = isAdmin ? [] : await lirePorteurs(admin);
-  const voitEquipe = porteurs.includes(data.id as string);
+
+  // L'admin n'est pas filtré : inutile de payer la lecture des porteurs ni
+  // celle des liens d'encadrement.
+  const membres = isAdmin ? [] : await lireMembresActifs(admin);
+  const porteurs = membres.filter((m) => m.voitEquipe).map((m) => m.id);
+  const voitEquipe = porteurs.includes(id);
+  const encadreIds = isAdmin ? [] : await lireEncadres(admin, id, membres);
 
   return {
-    userId: data.id as string,
+    userId: id,
     role: data.role as string,
     isAdmin,
     fullName: (data.full_name as string | null) ?? null,
     voitEquipe,
-    visiblesIds: isAdmin ? [] : voitEquipe ? porteurs : [data.id as string],
+    encadreIds,
+    // L'UNION des trois branches de `can_see_prospect`, moins `is_admin()` :
+    // moi, l'équipe qui partage, ceux que j'encadre. Dédupliquée — quelqu'un
+    // peut être à la fois porteur et encadré, et un `in` qui répète une valeur
+    // n'est pas faux, seulement bavard.
+    visiblesIds: isAdmin
+      ? []
+      : [...new Set([id, ...(voitEquipe ? porteurs : []), ...encadreIds])],
   };
 }
 
@@ -148,6 +273,17 @@ export function canSeeProspect(viewer: Viewer, ownerId: string | null): boolean 
  * binôme et n'en modifie aucune. L'équipe n'entre donc PAS dans ce prédicat —
  * seuls le propriétaire et l'admin. C'est le pendant exact des policies
  * d'écriture rebasées sur `owner_id` par la migration 020.
+ *
+ * L'ENCADREMENT (021) N'Y ENTRE PAS DAVANTAGE, et c'est la moitié du lot : un
+ * encadrant voit les fiches de son étudiant, il ne les modifie pas, n'y
+ * consigne pas d'appel, n'y pose ni relance ni rendez-vous. Mesuré en base —
+ * les neuf policies de la 020 refusent les quinze écritures correspondantes.
+ * Ce prédicat est ce qui fait tenir la même frontière côté connecteur, où il
+ * n'y a pas de RLS du tout.
+ *
+ * Ne JAMAIS l'écrire à partir de `visiblesIds` : voir et écrire sont deux
+ * questions, et c'est exactement la confusion que la 020 a coûté cher à
+ * démêler.
  *
  * À appeler par tout outil MCP qui écrit : là, aucune RLS ne rattrapera
  * l'oubli.

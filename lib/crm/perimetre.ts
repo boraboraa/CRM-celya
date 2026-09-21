@@ -15,6 +15,10 @@
  *   · depuis l'interrupteur d'équipe (migration 020), un PORTEUR en a le droit
  *     lui aussi — mais borné aux autres porteurs : « equipe » ne veut pas dire
  *     « tout le monde », il veut dire « ceux qui partagent avec moi » ;
+ *   · depuis l'encadrement (migration 021), un ENCADRANT aussi — borné, de la
+ *     même façon, aux gens qu'il encadre. Un encadrant qui ne serait pas
+ *     porteur doit avoir le sélecteur : sans lui, il verrait les fiches de ses
+ *     étudiants en base sans aucun moyen de les afficher ;
  *   · un commercial sans interrupteur reste « moi », quoi qu'il y ait dans
  *     l'URL — ce n'est pas lui qui tient la cloison (la RLS s'en charge), mais
  *     il n'a aucune raison de voir un sélecteur mensonger.
@@ -40,33 +44,54 @@ export type Perimetre =
  * Le minimum à savoir de qui regarde. `Viewer` (access.ts) et la session de
  * l'app le satisfont tous deux structurellement.
  *
- * `voitEquipe` / `partageIds` sont optionnels : un appelant qui les ignore
- * obtient le comportement d'avant l'interrupteur (admin seul élargit).
+ * `voitEquipe` / `encadreIds` / `partageIds` sont optionnels : un appelant qui
+ * les ignore obtient le comportement d'avant l'interrupteur (admin seul
+ * élargit).
  */
 export type PerimetreViewer = {
   userId: string;
   isAdmin: boolean;
   voitEquipe?: boolean;
-  /** Les porteurs de l'interrupteur, soi inclus. Le seul élargissement permis. */
+  /** Les commerciaux qu'on encadre (migration 021). Sens unique. */
+  encadreIds?: readonly string[];
+  /**
+   * L'UNION de ce qu'on a le droit d'afficher : soi, les autres porteurs de
+   * l'interrupteur si on est porteur, et ceux qu'on encadre. Le seul
+   * élargissement permis — `lirePerimetre` refuse tout uuid qui n'y est pas.
+   */
   partageIds?: readonly string[];
 };
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** A-t-on le droit de sortir de « moi » ? L'admin, ou un porteur. */
+/**
+ * A-t-on le droit de sortir de « moi » ? L'admin, un porteur, ou un encadrant.
+ *
+ * Le troisième cas ne se déduit PAS des deux autres : un encadrant peut très
+ * bien ne pas porter l'interrupteur (il voit ses étudiants, personne ne le
+ * voit). Sans cette branche, il aurait les fiches en base et aucun écran pour
+ * les afficher.
+ */
 export function peutElargir(viewer: PerimetreViewer): boolean {
-  return viewer.isAdmin || viewer.voitEquipe === true;
+  return (
+    viewer.isAdmin ||
+    viewer.voitEquipe === true ||
+    (viewer.encadreIds?.length ?? 0) > 0
+  );
 }
 
 /**
  * Lit `?perimetre=` — « moi » (défaut), « equipe », ou l'uuid d'un membre.
  *
- * Un commercial sans interrupteur obtient TOUJOURS « moi », quoi qu'il y ait
- * dans l'URL. Un PORTEUR peut demander « equipe » ou l'uuid d'un autre porteur
- * — et rien d'autre : viser l'uuid de Bora ou de Rémi retombe sur « moi », pour
- * que l'URL ne serve pas de sonde (« mon écran change, donc cette personne
- * existe et partage »).
+ * Un commercial sans interrupteur ni encadrement obtient TOUJOURS « moi », quoi
+ * qu'il y ait dans l'URL. Un PORTEUR ou un ENCADRANT peut demander « equipe »,
+ * ou l'uuid de quelqu'un de son partage — et rien d'autre : viser l'uuid de
+ * Bora ou de Rémi retombe sur « moi », pour que l'URL ne serve pas de sonde
+ * (« mon écran change, donc cette personne existe et je la vois »).
+ *
+ * Le repli sur « moi » est un repli SILENCIEUX, et c'est voulu : dire « vous
+ * n'avez pas accès à ce périmètre » confirmerait que l'uuid désigne quelqu'un.
  */
 export function lirePerimetre(
   searchParams: { perimetre?: string | string[] },
@@ -92,7 +117,9 @@ export function lirePerimetre(
  * `crm_users_select` laisse tout membre lire toute la table d'équipe : la
  * requête des pages remonte donc Bora et Rémi même pour Collins. Les afficher
  * révélerait qui existe, et un clic rendrait un écran vide sans un mot. Un
- * admin propose tout le monde ; un porteur, les seuls porteurs.
+ * admin propose tout le monde ; tout autre compte, les seuls noms de son
+ * partage — ses co-porteurs (020) et ses encadrés (021), jamais la liste
+ * complète.
  *
  * Écrit ici et pas dans les trois pages : une liste blanche recopiée trois fois
  * est une liste blanche qu'on corrigera deux fois (leçon d'`estHoteMaps`).
@@ -102,7 +129,7 @@ export function membresProposables<M extends { id: string }>(
   viewer: PerimetreViewer
 ): M[] {
   if (viewer.isAdmin) return membres;
-  if (!viewer.voitEquipe) return [];
+  if (!peutElargir(viewer)) return [];
   const permis = viewer.partageIds ?? [];
   return membres.filter((m) => permis.includes(m.id));
 }

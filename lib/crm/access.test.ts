@@ -22,6 +22,7 @@ import {
   lirePorteurs,
   canSeeProspect,
   canEditProspect,
+  relanceEnLecture,
   scopeProspects,
   scopeJoinedProspects,
   type Viewer,
@@ -348,6 +349,33 @@ verifie(
   [COLLINS, NATHAN]
 );
 verifie("non-porteur : personne", membresProposables(TOUS, PR), []);
+
+// ---------------------------------------------------------------------------
+// relanceEnLecture — « lecture partagée, écriture perso » appliqué au tableau
+// de bord. Le pendant de `tasks_update`, rebasée sur `assignee_id` par la 020.
+// ---------------------------------------------------------------------------
+console.log("\n— relanceEnLecture —");
+
+const vCollins = { userId: COLLINS, isAdmin: false };
+const vBora = { userId: BORA, isAdmin: true };
+
+verifie("ma relance : je l'actionne", relanceEnLecture(vCollins, COLLINS), false);
+verifie(
+  "la relance de Nathan : je la LIS (tasks_update la refuserait)",
+  relanceEnLecture(vCollins, NATHAN),
+  true
+);
+verifie(
+  "une relance LIBRE reste à qui la regarde",
+  relanceEnLecture(vCollins, null),
+  false
+);
+verifie("… même non renseignée", relanceEnLecture(vCollins, undefined), false);
+verifie(
+  "l'admin actionne tout, y compris la relance de Rémi",
+  [relanceEnLecture(vBora, REMI), relanceEnLecture(vBora, BORA)],
+  [false, false]
+);
 
 console.log(
   echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`

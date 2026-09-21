@@ -10,7 +10,9 @@
     "test:raccourcis": "node --experimental-strip-types lib/crm/raccourcis.test.ts",
     "test:maps": "node --experimental-strip-types lib/crm/maps.test.ts",
     "test:ia": "node --experimental-strip-types lib/ai/provider.test.ts",
-    "test:equipe": "node --experimental-strip-types lib/crm/access.test.ts"
+    "test:equipe": "node --experimental-strip-types lib/crm/access.test.ts",
+    "test:agenda": "node --experimental-strip-types lib/crm/agendaJour.test.ts",
+    "test:frontiere": "node --experimental-strip-types lib/rsc-frontiere.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

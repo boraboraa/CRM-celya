@@ -201,16 +201,29 @@ export function TaskList({
   compact?: boolean;
   className?: string;
   /**
-   * Lecture seule, ligne par ligne. « À faire » s'en sert en périmètre
-   * d'équipe : la relance d'un collègue se LIT (savoir qu'il l'a en main),
-   * elle ne se coche pas — `tasks_update` la refuserait, et cocher la relance
-   * d'un autre déplacerait SON « À faire ».
+   * Lecture seule. « À faire » s'en sert en périmètre d'équipe : la relance
+   * d'un collègue se LIT (savoir qu'il l'a en main), elle ne se coche pas —
+   * `tasks_update` la refuserait, et cocher la relance d'un autre déplacerait
+   * SON « À faire ».
+   *
+   * UN BOOLÉEN OU DES IDENTIFIANTS — JAMAIS UNE FONCTION, et c'est le type qui
+   * le tient. `TaskList` est un composant CLIENT que « À faire » rend depuis un
+   * composant SERVEUR : une fonction ne franchit pas cette frontière, React la
+   * refuse à la sérialisation du flux et toute la page tombe en « Application
+   * error » (vécu le 21/09 — voir le piège dans CLAUDE.md). `TaskRows`, lui,
+   * n'est appelé que depuis du client et garde la forme fonction.
+   *
+   * Le serveur envoie donc la LISTE des relances à lire, pas le prédicat qui
+   * la calcule.
    */
-  lecture?: boolean | ((index: number, task: TaskWithProspect) => boolean);
+  lecture?: boolean | string[];
 }) {
   const { vue, erreur, enCours, geste } = useOptimisticTasks(tasks);
 
   if (vue.length === 0) return null;
+
+  // La closure naît ICI, du côté client de la frontière : elle ne traverse rien.
+  const lues = Array.isArray(lecture) ? new Set(lecture) : null;
 
   return (
     <>
@@ -221,7 +234,7 @@ export function TaskList({
           enCours={enCours}
           geste={geste}
           compact={compact}
-          lecture={lecture}
+          lecture={lues ? (_i, t) => lues.has(t.id) : Boolean(lecture)}
         />
       </ul>
     </>

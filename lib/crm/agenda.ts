@@ -25,7 +25,7 @@ import { applyAutoStatus } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import type { ProspectStatus } from "@/lib/types";
-import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
+import { plusRienDePrevu, type RelanceAnnulee } from "@/lib/crm/prochaineAction";
 
 export type MeetingKind = "prospect" | "perso";
 export type MeetingStatus = "prevu" | "confirme" | "honore" | "annule" | "reporte";
@@ -461,6 +461,12 @@ export type CloturerRendezVousResult = {
    * poser, ou celle qui existait) — ou null si la fiche n'en a plus.
    */
   ensuite?: { title: string; due_at: string } | null;
+  /**
+   * Plus rien n'est prévu sur la fiche après ce débrief (ni relance, ni autre
+   * RDV vivant ; fiche ni gagnée ni perdue) — lu en base après le recalcul du
+   * trigger. L'écran le DIT, sans rien demander.
+   */
+  plusRien?: boolean;
 };
 
 export async function cloturerRendezVous(
@@ -510,12 +516,29 @@ export async function cloturerRendezVous(
     await recalcConfidence(supabase, meeting.prospect_id);
   }
 
+  // Le garde-fou zéro tap : la base (recalc_next_action) dit si la fiche a
+  // encore quelque chose de prévu. Rien → l'écran le dira.
+  let plusRien = false;
+  if (meeting.prospect_id) {
+    const { data: apres } = await supabase
+      .from("prospects")
+      .select("next_action_at, status")
+      .eq("id", meeting.prospect_id)
+      .maybeSingle();
+    plusRien = plusRienDePrevu({
+      nextActionAt: (apres?.next_action_at as string | null) ?? null,
+      status: (apres?.status as string | null) ?? null,
+      aEuUnRdvClos: true,
+    });
+  }
+
   return {
     id: meeting.id,
     title: meeting.title,
     prospectId: meeting.prospect_id,
     resultat: input.resultat,
     ensuite,
+    plusRien,
   };
 }
 

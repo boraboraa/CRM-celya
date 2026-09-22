@@ -21,6 +21,9 @@ import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
 import {
   lireProchaineAction,
+  plusRienDePrevu,
+  rdvClos,
+  PLUS_RIEN_COURT,
   rdvQuiCompte,
   rdvVivant,
 } from "@/lib/crm/prochaineAction";
@@ -246,6 +249,13 @@ export default async function ProspectDetailPage({
   // quand un rendez-vous lui passe devant dans la carte : c'est elle que
   // « Relancer » re-date, jamais une nouvelle.
   const relanceOuverte = relances[0] ?? null;
+  // Le garde-fou zéro tap : un rendez-vous clos sans suite ne laisse pas la
+  // fiche muette — elle dit « Plus rien de prévu sur cette fiche ».
+  const plusRien = plusRienDePrevu({
+    nextActionAt: prospect.next_action_at,
+    status,
+    aEuUnRdvClos: meetings.some((m) => rdvClos(m.status)),
+  });
   const lectureNext = lireProchaineAction(
     prospect.next_action_at,
     prospect.next_action_kind
@@ -374,6 +384,7 @@ export default async function ProspectDetailPage({
           prospectId={prospect.id}
           companyName={prospect.company_name}
           relanceOuverte={relanceOuverte}
+          plusRien={plusRien}
           canEmail={Boolean(prospect.email)}
           lectureSeule={lectureSeule}
         />
@@ -471,7 +482,11 @@ export default async function ProspectDetailPage({
                     <Icone nom={lectureNext.icone} className="h-3.5 w-3.5 text-blue-300" />
                   )}
                   {lectureNext.texte ??
-                    (prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—")}
+                    (prospect.next_action_at
+                      ? fmtDateTime(prospect.next_action_at)
+                      : plusRien
+                        ? PLUS_RIEN_COURT
+                        : "—")}
                 </p>
               </div>
             </div>

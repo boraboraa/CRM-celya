@@ -8,6 +8,7 @@ import {
 } from "@/app/actions";
 import { fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
 import { Icone } from "@/components/ui";
+import { PLUS_RIEN } from "@/lib/crm/prochaineAction";
 
 export type DebriefMeeting = {
   id: string;
@@ -64,6 +65,11 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
   const [reportId, setReportId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [suites, setSuites] = useState<Record<string, Suite>>({});
+  /**
+   * Fiches laissées sans rien de prévu par un débrief sans suite : on le DIT,
+   * passivement, là où la ligne vient de disparaître — aucun geste réclamé.
+   */
+  const [sansSuite, setSansSuite] = useState<string[]>([]);
   const choisir = (id: string, v: Suite) =>
     setSuites((s) => ({ ...s, [id]: s[id] === v ? undefined : v }));
   const [, startTransition] = useTransition();
@@ -80,6 +86,11 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
         suite: suites[id] ?? null,
       });
       if (res?.error) setErreur(res.error);
+      else if (res?.plusRien) {
+        const m = meetings.find((x) => x.id === id);
+        const nom = m?.prospect?.company_name ?? m?.title ?? "Cette fiche";
+        setSansSuite((l) => (l.includes(nom) ? l : [...l, nom]));
+      }
       setEnCours(null);
     });
   }
@@ -101,7 +112,7 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
     });
   }
 
-  if (vue.length === 0 && !erreur) return null;
+  if (vue.length === 0 && !erreur && sansSuite.length === 0) return null;
 
   return (
     <>
@@ -113,6 +124,20 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
           {erreur}
         </p>
       )}
+      {sansSuite.map((nom) => (
+        <p
+          key={nom}
+          role="status"
+          className="mb-2 flex items-center gap-2 rounded-xl bg-white/[0.03] px-4 py-2.5 text-xs text-slate-300 ring-1 ring-white/[0.08]"
+        >
+          <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span>
+            <span className="font-medium text-slate-200">{nom}</span> — {PLUS_RIEN.toLowerCase()}.
+            Elle ne remontera plus dans « À faire ».
+          </span>
+        </p>
+      ))}
+      {vue.length > 0 && (
       <ul className="card animate-rise divide-y divide-white/[0.05]">
         {vue.map((m) => (
           <li
@@ -232,6 +257,7 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
           </li>
         ))}
       </ul>
+      )}
     </>
   );
 }

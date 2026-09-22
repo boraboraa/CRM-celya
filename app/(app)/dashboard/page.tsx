@@ -647,17 +647,20 @@ export default async function TodoPage({
       {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
           Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
           du produit, ne pas en ajouter d'autre. ---------- */}
-      {debriefMeetings.length > 0 && (
-        <section className="mt-8">
+      {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
+          débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
+          après le rafraîchissement — un démontage effacerait ce message. */}
+      <section className={debriefMeetings.length > 0 ? "mt-8" : "mt-8 empty:hidden"}>
+        {debriefMeetings.length > 0 && (
           <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
             Rendez-vous à débriefer
             <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
               {debriefMeetings.length}
             </span>
           </h2>
-          <DebriefList meetings={debriefMeetings} />
-        </section>
-      )}
+        )}
+        <DebriefList meetings={debriefMeetings} />
+      </section>
     </>
   );
 }

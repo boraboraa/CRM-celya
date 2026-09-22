@@ -645,6 +645,17 @@ faux, signée de qui a posé le RDV). Trigger `meetings_prochaine_action`.
   (Demain / +3 j / +1 sem / date) est **offert, jamais exigé** — « Ça s'est
   fait » reste à UN tap. MCP : `deplacer_rendez_vous(annuler, relancer_le)`,
   qui avertit Claude quand la fiche n'a plus rien.
+- **Garde-fou ZÉRO TAP** : une telle fiche le DIT, passivement — « Plus rien de
+  prévu sur cette fiche » sur la carte PROCHAINE ACTION, « Plus rien de prévu »
+  dans la colonne « Prochaine action » de la liste et sur la carte des
+  colonnes, et une ligne dans la zone débrief juste après le clic (`plusRien`
+  renvoyé par `cloturerRendezVous`, lu en base après le recalcul). Aucune
+  relance créée, aucune date imposée, aucun geste réclamé. **Réservé aux
+  fiches qui ONT EU un rendez-vous clos** (`plusRienDePrevu`) : les ~50 fiches
+  « À appeler » jamais planifiées gardent « — » — elles n'ont pas « plus
+  rien », elles n'ont encore rien eu. La section débrief du tableau de bord
+  reste MONTÉE même vide, sinon le message disparaîtrait avec le dernier RDV
+  débriefé.
 - Un RDV saisi **dans le passé** ne clôture rien ; fiche **Gagné / Perdu** :
   rien n'est clôturé ni tracé ; **RDV perso** : hors règle.
 - **La zone « à débriefer » lit aussi `reporte`** : un RDV reporté puis passé

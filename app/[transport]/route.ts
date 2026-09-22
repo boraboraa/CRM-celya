@@ -1317,8 +1317,8 @@ function register(server: McpServer) {
           `✅ Rendez-vous « ${r.title} » annulé.` +
             (r.ensuite
               ? ` Prochaine action de la fiche : « ${r.ensuite.title} » le ${fmtDateTime(r.ensuite.due_at)}.`
-              : r.prospectId
-                ? " ⚠ La fiche n'a plus aucune relance ouverte — proposez à l'utilisateur d'en poser une."
+              : r.plusRien
+                ? " ⚠ Plus rien de prévu sur cette fiche : elle ne remontera plus dans « À faire ». Demandez à l'utilisateur s'il veut poser une suite."
                 : "")
         );
       }

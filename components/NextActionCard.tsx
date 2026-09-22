@@ -15,7 +15,7 @@ import {
   type OpenTask,
 } from "@/lib/crm/nextAction";
 import { openComposer } from "@/lib/crm/composer";
-import { libelleRdv } from "@/lib/crm/prochaineAction";
+import { libelleRdv, PLUS_RIEN } from "@/lib/crm/prochaineAction";
 import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
 
@@ -46,6 +46,7 @@ export function NextActionCard({
   prospectId,
   companyName,
   relanceOuverte,
+  plusRien = false,
   canEmail = false,
   lectureSeule = false,
 }: {
@@ -60,6 +61,11 @@ export function NextActionCard({
    * prochaine action, elle se lit ici.
    */
   relanceOuverte: OpenTask | null;
+  /**
+   * Un rendez-vous a été débriefé sans suite et plus rien n'est prévu (022) :
+   * la carte le DIT — message passif, aucun geste réclamé, aucune date imposée.
+   */
+  plusRien?: boolean;
   /** La fiche porte une adresse : proposer d'écrire tout de suite. */
   canEmail?: boolean;
   /**
@@ -289,11 +295,13 @@ export function NextActionCard({
       ) : (
         <>
           <p className="mt-2 font-display text-lg font-semibold leading-snug text-slate-50">
-            Aucune action planifiée
+            {plusRien ? PLUS_RIEN : "Aucune action planifiée"}
           </p>
           <p className="mt-1.5 text-sm leading-relaxed text-slate-300">
-            {context} Sans date, cette fiche ne remontera pas dans «&nbsp;À
-            faire&nbsp;».
+            {plusRien
+              ? "Le dernier rendez-vous a été débriefé sans suite. "
+              : `${context} `}
+            Sans date, cette fiche ne remontera pas dans «&nbsp;À faire&nbsp;».
           </p>
         </>
       )}

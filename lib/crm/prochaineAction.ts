@@ -145,3 +145,32 @@ export function phraseAnnulees(annulees: RelanceAnnulee[] | null | undefined): s
   }
   return `${annulees.length} relances annulées : le rendez-vous devient la prochaine action, la suite se décidera au débrief.`;
 }
+
+/**
+ * Le garde-fou ZÉRO TAP du débrief sans suite. Les relances d'avant un
+ * rendez-vous sont clôturées à sa pose ; un rendez-vous clos (honoré ou
+ * annulé) sans « Et ensuite ? » laisse donc la fiche sans prochaine action —
+ * elle sort de « À faire ». Elle doit au moins le DIRE, partout où on la
+ * croise (fiche, liste, colonnes), sans rien demander ni rien créer.
+ *
+ * Réservé aux fiches qui ONT EU un rendez-vous clos : une fiche « À appeler »
+ * jamais planifiée n'a pas « plus rien » de prévu, elle n'a encore rien eu.
+ * Gagné / Perdu : la fiche est close, le message n'aurait pas de sens.
+ */
+export const PLUS_RIEN = "Plus rien de prévu sur cette fiche";
+export const PLUS_RIEN_COURT = "Plus rien de prévu";
+
+export function plusRienDePrevu(p: {
+  nextActionAt: string | null | undefined;
+  status: string | null | undefined;
+  aEuUnRdvClos: boolean;
+}): boolean {
+  if (p.nextActionAt) return false;
+  if (p.status === "gagne" || p.status === "perdu") return false;
+  return p.aEuUnRdvClos;
+}
+
+/** Un rendez-vous CLOS : débriefé honoré ou annulé. */
+export function rdvClos(status: string | null | undefined): boolean {
+  return status === "honore" || status === "annule";
+}

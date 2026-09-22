@@ -23,8 +23,11 @@ import {
   libelleRdv,
   lireProchaineAction,
   phraseAnnulees,
+  plusRienDePrevu,
+  rdvClos,
   rdvQuiCompte,
   rdvVivant,
+  PLUS_RIEN,
 } from "./prochaineAction.ts";
 
 let echecs = 0;
@@ -178,6 +181,39 @@ console.log("\n— 5. rdv_annule_sans_suite —");
   // Avec une suite choisie (« +3 j ») : une relance, et une seule.
   const suite = fiche([tache("t6", "2026-10-03T07:00:00Z")], [annule], LE_30);
   verifie("avec « Et ensuite ? » : UNE relance", [combien(suite), suite.task?.id], [1, "t6"]);
+}
+
+// --- 5 bis. Le garde-fou zéro tap : « Plus rien de prévu sur cette fiche » --
+console.log("\n— 5bis. plus_rien_de_prevu —");
+{
+  verifie("le message", PLUS_RIEN, "Plus rien de prévu sur cette fiche");
+  verifie(
+    "RDV annulé sans suite : la fiche le DIT",
+    plusRienDePrevu({ nextActionAt: null, status: "rendez_vous", aEuUnRdvClos: true }),
+    true
+  );
+  verifie(
+    "honoré sans suite : pareil",
+    plusRienDePrevu({ nextActionAt: null, status: "contacte", aEuUnRdvClos: [ "honore" ].some(rdvClos) }),
+    true
+  );
+  verifie(
+    "avec une suite choisie : non (la fiche a sa relance)",
+    plusRienDePrevu({ nextActionAt: "2026-10-03T07:00:00Z", status: "rendez_vous", aEuUnRdvClos: true }),
+    false
+  );
+  verifie(
+    "fiche « À appeler » jamais planifiée : non (elle n'a encore rien eu)",
+    plusRienDePrevu({ nextActionAt: null, status: "a_appeler", aEuUnRdvClos: false }),
+    false
+  );
+  verifie(
+    "fiche Gagné / Perdu : non (close)",
+    [plusRienDePrevu({ nextActionAt: null, status: "gagne", aEuUnRdvClos: true }),
+     plusRienDePrevu({ nextActionAt: null, status: "perdu", aEuUnRdvClos: true })],
+    [false, false]
+  );
+  verifie("un RDV vivant n'est pas clos", ["prevu", "confirme", "reporte"].map(rdvClos), [false, false, false]);
 }
 
 // --- 6. Plusieurs RDV à venir : le plus proche compte ------------------------

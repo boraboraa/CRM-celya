@@ -765,7 +765,7 @@ export async function cloturerRendezVousAction(input: {
   compteRendu?: string | null;
   /** « Et ensuite ? » — FACULTATIF : « YYYY-MM-DD » (09:00 Bruxelles), ou null. */
   suite?: string | null;
-}): Promise<ActionState> {
+}): Promise<ActionState & { plusRien?: boolean }> {
   const session = await getSession();
   if (!session) redirect("/login");
   const supabase = await createClient();
@@ -787,7 +787,7 @@ export async function cloturerRendezVousAction(input: {
   if (r.error) return { error: r.error };
 
   revalidateAgenda(r.prospectId);
-  return {};
+  return { plusRien: r.plusRien ?? false };
 }
 
 // =====================================================================

@@ -22,7 +22,7 @@ import {
   LAST_ACTION_LABEL,
   type LastActionKind,
 } from "@/lib/crm/lastAction";
-import { lireProchaineAction } from "@/lib/crm/prochaineAction";
+import { lireProchaineAction, PLUS_RIEN_COURT } from "@/lib/crm/prochaineAction";
 
 // ---------------------------------------------------------------------------
 // Pictogrammes — un seul jeu, dessiné ici
@@ -521,6 +521,8 @@ export function FormError({ message }: { message?: string }) {
  * 12h » avec le calendrier, et n'est JAMAIS en retard — passé, il dit « À
  * débriefer ». Une relance garde sa date relative, en ambre si elle est échue.
  * `sansDate` : ce qu'on écrit quand il n'y a rien (« — » par défaut).
+ * `plusRien` : la fiche a eu un rendez-vous clos sans suite (voir
+ * `plusRienDePrevu`) — on écrit « Plus rien de prévu », passif, au lieu de « — ».
  */
 export function ProchaineActionTexte({
   at,
@@ -528,6 +530,7 @@ export function ProchaineActionTexte({
   sansDate = "—",
   className = "",
   couleurNeutre = "",
+  plusRien = false,
 }: {
   at: string | null | undefined;
   kind: string | null | undefined;
@@ -536,8 +539,20 @@ export function ProchaineActionTexte({
   className?: string;
   /** Couleur d'une relance À VENIR (le RDV et le retard ont la leur). */
   couleurNeutre?: string;
+  /** RDV clos sans suite : « Plus rien de prévu » au lieu de « — ». */
+  plusRien?: boolean;
 }) {
   const l = lireProchaineAction(at, kind);
+  if (!at && plusRien) {
+    return (
+      <span
+        className={`italic text-slate-400 ${className}`}
+        title="Rendez-vous débriefé sans suite : cette fiche ne remontera plus dans « À faire »."
+      >
+        {PLUS_RIEN_COURT}
+      </span>
+    );
+  }
   if (!at) return <span className={`${couleurNeutre} ${className}`}>{sansDate}</span>;
   if (l.estRdv) {
     return (

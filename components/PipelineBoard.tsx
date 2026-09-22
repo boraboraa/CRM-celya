@@ -71,6 +71,8 @@ export type BoardProspect = {
   next_action_at: string | null;
   /** Ce que désigne next_action_at (migration 022) : un RDV n'est jamais en retard. */
   next_action_kind: string | null;
+  /** RDV clos sans suite : la carte dit « Plus rien de prévu » (022). */
+  plus_rien: boolean;
   /** Dernière action (canal + résultat + texte + date) — prospect_action_state. */
   last_kind: LastActionKind | null;
   last_at: string | null;
@@ -325,6 +327,7 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                             <ProchaineActionTexte
                               at={c.next_action_at}
                               kind={c.next_action_kind}
+                              plusRien={c.plus_rien}
                               className="shrink-0 text-[11px]"
                               couleurNeutre="text-slate-400"
                             />

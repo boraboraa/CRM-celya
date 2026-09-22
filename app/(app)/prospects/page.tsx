@@ -9,6 +9,7 @@ import {
   ConfidenceBadge,
   LastActionLine,
   Icone,
+  ProchaineActionTexte,
 } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
@@ -78,7 +79,7 @@ export default async function ProspectsPage({
     supabase
       .from("prospects")
       .select(
-        "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
+        "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
       ),
     perimetre,
     viewer
@@ -154,6 +155,7 @@ export default async function ProspectsPage({
     confidence_reason: string | null;
     confidence_locked: boolean | null;
     next_action_at: string | null;
+    next_action_kind: string | null;
     last_contact_at: string | null;
     /** Déjà demandé par le select ; utile pour savoir ce qu'on a le droit de faire. */
     owner_id: string | null;
@@ -186,6 +188,7 @@ export default async function ProspectsPage({
     confidence_reason: p.confidence_reason,
     confidence_locked: Boolean(p.confidence_locked),
     next_action_at: p.next_action_at,
+    next_action_kind: p.next_action_kind,
     last_kind: lastActions.get(p.id)?.last_kind ?? null,
     last_at: lastActions.get(p.id)?.last_at ?? null,
     last_outcome: lastActions.get(p.id)?.last_outcome ?? null,
@@ -382,8 +385,6 @@ export default async function ProspectsPage({
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
               {prospects.map((p) => {
-                const overdue =
-                  p.next_action_at && new Date(p.next_action_at).getTime() < Date.now();
                 return (
                   <tr key={p.id} className="transition duration-200 hover:bg-white/[0.04]">
                     <td className="td">
@@ -416,8 +417,8 @@ export default async function ProspectsPage({
                         locked={Boolean(p.confidence_locked)}
                       />
                     </td>
-                    <td className={`td whitespace-nowrap ${overdue ? "text-amber-300" : ""}`}>
-                      {p.next_action_at ? relative(p.next_action_at) : "—"}
+                    <td className="td whitespace-nowrap">
+                      <ProchaineActionTexte at={p.next_action_at} kind={p.next_action_kind} />
                     </td>
                     <td className="td whitespace-nowrap">
                       <LastActionLine

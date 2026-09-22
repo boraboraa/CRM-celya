@@ -22,6 +22,7 @@ import {
   LAST_ACTION_LABEL,
   type LastActionKind,
 } from "@/lib/crm/lastAction";
+import { lireProchaineAction } from "@/lib/crm/prochaineAction";
 
 // ---------------------------------------------------------------------------
 // Pictogrammes — un seul jeu, dessiné ici
@@ -510,5 +511,53 @@ export function FormError({ message }: { message?: string }) {
     <p className="rounded-xl bg-rose-500/10 px-3.5 py-2.5 text-sm text-rose-300 ring-1 ring-rose-400/20">
       {message}
     </p>
+  );
+}
+
+/**
+ * La prochaine action d'une fiche, pour une liste, une carte de pipeline ou
+ * une ligne du tableau de bord : `prospects.next_action_at` +
+ * `next_action_kind` (migration 022). Un rendez-vous s'écrit « RDV le 28/09 à
+ * 12h » avec le calendrier, et n'est JAMAIS en retard — passé, il dit « À
+ * débriefer ». Une relance garde sa date relative, en ambre si elle est échue.
+ * `sansDate` : ce qu'on écrit quand il n'y a rien (« — » par défaut).
+ */
+export function ProchaineActionTexte({
+  at,
+  kind,
+  sansDate = "—",
+  className = "",
+  couleurNeutre = "",
+}: {
+  at: string | null | undefined;
+  kind: string | null | undefined;
+  sansDate?: string;
+  /** Mise en page seulement — la couleur est celle de l'état. */
+  className?: string;
+  /** Couleur d'une relance À VENIR (le RDV et le retard ont la leur). */
+  couleurNeutre?: string;
+}) {
+  const l = lireProchaineAction(at, kind);
+  if (!at) return <span className={`${couleurNeutre} ${className}`}>{sansDate}</span>;
+  if (l.estRdv) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 ${
+          l.aDebriefer ? "text-slate-200" : "text-blue-200"
+        } ${className}`}
+        title={l.aDebriefer ? "Rendez-vous passé : il attend son débrief" : undefined}
+      >
+        <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0" />
+        {l.texte}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 ${l.retard ? "text-amber-300" : couleurNeutre} ${className}`}
+    >
+      {l.retard && <Icone nom="alerte" className="h-3 w-3 shrink-0" />}
+      {relative(at)}
+    </span>
   );
 }

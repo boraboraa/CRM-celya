@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
-import { PageHeader, EmptyState, Icone } from "@/components/ui";
+import { PageHeader, EmptyState, Icone, ProchaineActionTexte } from "@/components/ui";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
@@ -37,6 +37,7 @@ type WaitingProspect = {
   company_name: string;
   contact_name: string | null;
   next_action_at: string | null;
+  next_action_kind: string | null;
   /** Date du dernier mail envoyé. */
   sent_at: string | null;
 };
@@ -112,6 +113,9 @@ export default async function TodoPage({
         .from("tasks")
         .select(TASK_SELECT)
         .eq("status", "a_faire")
+        // Un FILET qui dort (relance reportée après un RDV encore vivant,
+        // migration 022) ne réclame rien : c'est le RDV, puis son débrief.
+        .eq("en_sommeil", false)
         .lt("due_at", start),
       perimetre,
       viewer
@@ -125,6 +129,7 @@ export default async function TodoPage({
         .from("tasks")
         .select(TASK_SELECT)
         .eq("status", "a_faire")
+        .eq("en_sommeil", false)
         .gte("due_at", start)
         .lte("due_at", end),
       perimetre,
@@ -163,7 +168,7 @@ export default async function TodoPage({
     filtrerProspects(
       supabase
         .from("prospects")
-        .select("id, company_name, contact_name, next_action_at")
+        .select("id, company_name, contact_name, next_action_at, next_action_kind")
         .not("status", "in", "(gagne,perdu)"),
       perimetre,
       viewer
@@ -205,7 +210,11 @@ export default async function TodoPage({
           "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status"
         )
         .lt("ends_at", new Date().toISOString())
-        .in("status", ["prevu", "confirme"])
+        // « reporte » AUSSI : un rendez-vous reporté puis passé attend son
+        // débrief comme les autres. Sans lui, tout RDV déplacé une fois
+        // échappait à cette zone pour toujours (Garage Boetendael, 02/09 →
+        // invisible trois semaines). Même liste que `rdv_vivant` (022).
+        .in("status", ["prevu", "confirme", "reporte"])
         .is("debriefed_at", null),
       perimetre,
       viewer
@@ -289,6 +298,7 @@ export default async function TodoPage({
       contact_name: string | null;
       phone: string | null;
       city: string | null;
+      status: string;
     }
   >();
   if (meetingProspectIds.length > 0) {
@@ -296,7 +306,7 @@ export default async function TodoPage({
     // postal — jamais `country`, qui n'est pas fiable (voir lib/crm/maps.ts).
     const { data } = await supabase
       .from("prospects")
-      .select("id, company_name, contact_name, phone, city")
+      .select("id, company_name, contact_name, phone, city, status")
       .in("id", meetingProspectIds);
     for (const p of (data ?? []) as {
       id: string;
@@ -304,6 +314,7 @@ export default async function TodoPage({
       contact_name: string | null;
       phone: string | null;
       city: string | null;
+      status: string;
     }[]) {
       meetingProspects.set(p.id, p);
     }
@@ -318,6 +329,10 @@ export default async function TodoPage({
           id: m.prospect_id,
           company_name:
             meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
+          // Gagné / Perdu : on ne pose plus rien — pas de « Et ensuite ? ».
+          close: ["gagne", "perdu"].includes(
+            meetingProspects.get(m.prospect_id)?.status ?? ""
+          ),
         }
       : null,
   }));
@@ -576,11 +591,19 @@ export default async function TodoPage({
                           {p.contact_name ? ` à ${p.contact_name}` : ""}
                         </p>
                       </div>
-                      <span className="shrink-0 text-xs text-slate-400">
-                        {p.next_action_at
-                          ? `Remonte le ${fmtDate(p.next_action_at)}`
-                          : "Aucune relance posée"}
-                      </span>
+                      {p.next_action_kind === "rendez_vous" ? (
+                        <ProchaineActionTexte
+                          at={p.next_action_at}
+                          kind={p.next_action_kind}
+                          className="shrink-0 text-xs"
+                        />
+                      ) : (
+                        <span className="shrink-0 text-xs text-slate-400">
+                          {p.next_action_at
+                            ? `Remonte le ${fmtDate(p.next_action_at)}`
+                            : "Aucune relance posée"}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

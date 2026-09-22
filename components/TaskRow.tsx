@@ -8,6 +8,7 @@ import { composerHref } from "@/lib/crm/composer";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
+import { libelleRdv } from "@/lib/crm/prochaineAction";
 
 export type TaskWithProspect = {
   id: string;
@@ -17,6 +18,14 @@ export type TaskWithProspect = {
   status: string;
   priority: number;
   prospect_id: string | null;
+  /** Filet d'un rendez-vous (migration 022) — voir `enSommeilJusquA`. */
+  meeting_id?: string | null;
+  /**
+   * La relance est le FILET d'un rendez-vous encore vivant : elle dort
+   * jusqu'à lui (début du RDV, ISO). Elle ne réclame rien et n'est JAMAIS « en
+   * retard » — c'est le RDV, puis son débrief, qui ont la main.
+   */
+  enSommeilJusquA?: string | null;
   /**
    * À qui la relance est assignée. Chargée seulement là où il faut savoir si
    * on a le droit d'y toucher — « À faire » en périmètre d'équipe, où l'on voit
@@ -85,7 +94,9 @@ export function TaskRow({
   onDelete?: () => void;
 }) {
   const done = task.status === "fait";
-  const overdue = !done && new Date(task.due_at).getTime() < Date.now();
+  const endormie = !done && Boolean(task.enSommeilJusquA);
+  const overdue =
+    !done && !endormie && new Date(task.due_at).getTime() < Date.now();
   /** Le résultat d'appel se déplie EN PLACE — sans ouvrir la fiche. */
   const [resultatOuvert, setResultatOuvert] = useState(false);
   /** « À rappeler » vient d'être tapé : la ligne réclame une date. */
@@ -193,6 +204,16 @@ export function TaskRow({
           )}
           {/* En lecture, la date est le seul signal de retard qui reste : elle
               porte donc son pictogramme — la couleur ne parle jamais seule. */}
+          {endormie && (
+            <>
+              <span className="inline-flex items-center gap-1 text-blue-300">
+                <Icone nom="calendrier" className="h-3 w-3" />
+                En attente du {libelleRdv(task.enSommeilJusquA!)} — se réveille s&apos;il
+                tombe à l&apos;eau
+              </span>
+              <span aria-hidden>·</span>
+            </>
+          )}
           <span
             className={overdue ? "inline-flex items-center gap-1 text-amber-300" : ""}
           >

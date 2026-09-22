@@ -55,7 +55,15 @@ export type Prospect = {
   owner_id: string | null;
   tags: string[];
   notes: string | null;
+  /**
+   * La prochaine action, c'est le prochain rendez-vous de la fiche tant qu'il
+   * n'est pas débriefé ; sinon, sa relance la plus proche — sauf relance posée
+   * sciemment avant le RDV (« confirmer la veille »), qui passe devant.
+   * Tenue EN BASE (recalc_next_action, migration 022), jamais écrite ici.
+   */
   next_action_at: string | null;
+  /** Ce que désigne next_action_at. Un RDV passé non débriefé reste « rendez_vous ». */
+  next_action_kind: "rendez_vous" | "relance" | null;
   last_contact_at: string | null;
   lost_reason: string | null;
   created_by: string | null;

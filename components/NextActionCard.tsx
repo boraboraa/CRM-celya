@@ -1,6 +1,7 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
+import Link from "next/link";
 import {
   completeTaskAction,
   rescheduleTaskAction,
@@ -14,6 +15,7 @@ import {
   type OpenTask,
 } from "@/lib/crm/nextAction";
 import { openComposer } from "@/lib/crm/composer";
+import { libelleRdv } from "@/lib/crm/prochaineAction";
 import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
 
@@ -103,7 +105,7 @@ export function NextActionCard({
         // que la relance qu'on vient de poser garde la vedette — c'est
         // deriveNextAction qui tranche, pas cette carte.
         return {
-          ...deriveNextAction([tache], null, null, etat.meeting),
+          ...deriveNextAction([tache], null, null, etat.meeting ?? etat.ensuite),
           context: etat.context,
         };
       }
@@ -115,11 +117,14 @@ export function NextActionCard({
       const taches = patch.fait
         ? []
         : [{ ...etat.task, due_at: patch.due_at ?? etat.task.due_at }];
-      return { ...deriveNextAction(taches, null, null), context: etat.context };
+      return {
+        ...deriveNextAction(taches, null, null, etat.ensuite),
+        context: etat.context,
+      };
     }
   );
 
-  const { task, meeting, context, when, overdue, isMeeting } = vue;
+  const { task, meeting, context, when, overdue, isMeeting, aDebriefer, ensuite } = vue;
 
   // Reporter en conservant l'heure (un RDV à 14:00 le reste) — celle de la
   // relance ouverte, même quand la carte montre un rendez-vous à sa place.
@@ -225,9 +230,26 @@ export function NextActionCard({
             {meeting.title}
           </p>
           {when && (
-            <p className="mt-1.5 text-sm font-medium text-slate-200">
-              {when.charAt(0).toUpperCase()}
-              {when.slice(1)} ({relative(meeting.starts_at)}).
+            <p className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-blue-200">
+              <Icone nom="calendrier" className="h-4 w-4 shrink-0" />
+              <span>
+                {when.charAt(0).toUpperCase()}
+                {when.slice(1)} ({relative(meeting.starts_at)}).
+              </span>
+            </p>
+          )}
+          {aDebriefer && (
+            <p className="mt-1 text-sm text-slate-300">
+              Il attend son débrief —{" "}
+              <Link
+                href="/dashboard"
+                prefetch={false}
+                className="text-celya-blue underline-offset-2 hover:underline"
+              >
+                «&nbsp;Rendez-vous à débriefer&nbsp;»
+              </Link>{" "}
+              du tableau de bord : ça s&apos;est fait, annulé ou reporté. C&apos;est
+              là que la suite se pose.
             </p>
           )}
           {meeting.location && (
@@ -251,6 +273,14 @@ export function NextActionCard({
               {/* Majuscule initiale : « relance prévue le … » ouvre la phrase. */}
               {when.charAt(0).toUpperCase()}
               {when.slice(1)} ({relative(task.due_at)}).
+            </p>
+          )}
+          {/* Une relance posée sciemment AVANT le rendez-vous (« confirmer la
+              veille ») : elle d'abord, le RDV ensuite — jamais l'inverse. */}
+          {ensuite && (
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-blue-200">
+              <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0" />
+              Puis {libelleRdv(ensuite.starts_at)}
             </p>
           )}
           {/* Où on en est — dérivé du dernier événement du journal. */}

@@ -8,6 +8,7 @@ import {
 } from "@/app/actions";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { phraseReportees } from "@/lib/crm/prochaineAction";
 import { fmtDateTime } from "@/lib/constants";
 import { Icone } from "@/components/ui";
 
@@ -194,13 +195,17 @@ export function AgendaGrid({
         setErreur(res.error);
         return;
       }
-      if (res?.conflit) {
-        setInfo(
-          `Posé — mais ce créneau chevauche « ${res.conflit.title} » (${fmtDateTime(
-            res.conflit.starts_at
-          )}).`
-        );
-      }
+      const avis = [
+        res?.conflit
+          ? `Posé — mais ce créneau chevauche « ${res.conflit.title} » (${fmtDateTime(
+              res.conflit.starts_at
+            )}).`
+          : null,
+        // Le RDV devient la prochaine action : on DIT ce qu'il a fait aux
+        // relances, sans rien demander (migration 022).
+        phraseReportees(res?.reportees),
+      ].filter(Boolean);
+      if (avis.length > 0) setInfo(avis.join(" "));
       fermerPanneau();
     });
   }
@@ -227,12 +232,16 @@ export function AgendaGrid({
       deplacer({ id, starts_at: startsISO, ends_at: endsISO });
       const res = await deplacerRendezVousAction({ id, startsAt: local });
       if (res?.error) setErreur(res.error);
-      else if (res?.conflit) {
-        setInfo(
-          `Déplacé — mais ce créneau chevauche « ${res.conflit.title} » (${fmtDateTime(
-            res.conflit.starts_at
-          )}).`
-        );
+      else {
+        const avis = [
+          res?.conflit
+            ? `Déplacé — mais ce créneau chevauche « ${res.conflit.title} » (${fmtDateTime(
+                res.conflit.starts_at
+              )}).`
+            : null,
+          phraseReportees(res?.reportees),
+        ].filter(Boolean);
+        if (avis.length > 0) setInfo(avis.join(" "));
       }
     });
   }

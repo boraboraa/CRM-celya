@@ -608,6 +608,62 @@ nul et la vue ne masque rien), `poser_rendez_vous` (refuse « Il manque le
 jour » / « Il manque l'heure », ne pose JAMAIS une relance à la place — c'est
 ce qui a perdu le RDV du 31/08), `deplacer_rendez_vous` (report ou annulation).
 
+### Une seule prochaine action — le RDV la prend (migration `022`, 22 septembre — ÉCRITE, PAS APPLIQUÉE)
+
+Deux systèmes disaient chacun « la prochaine action » : les relances et
+l'agenda — et **seules les relances écrivaient `next_action_at`** (trigger
+`sync_next_action` sur `tasks`, jamais sur `meetings`). Une fiche vue en
+rendez-vous le 28 réclamait un appel « en retard » le 25, puis, le RDV passé,
+remontait en retard au lieu de demander son débrief.
+
+> **La prochaine action, c'est le prochain rendez-vous de la fiche tant qu'il
+> n'est pas débriefé ; sinon, sa relance la plus proche.**
+
+Cette phrase est en `COMMENT` sur `prospects.next_action_at`, et c'est
+**`recalc_next_action(prospect)`** (SQL) le SEUL écrivain de `next_action_at` et
+de `next_action_kind` (`rendez_vous` | `relance`). La règle vit en SQL parce que
+le connecteur MCP écrit en service_role sans passer par les écrans ; seul le
+CHOIX humain (la suite d'un débrief) reste en TypeScript (`cloturerRendezVous`).
+
+- **Poser ou déplacer un RDV** reporte les relances ouvertes qui tombaient
+  AVANT lui **et qui existaient déjà** (`tasks.updated_at < meetings.created_at`)
+  au **premier jour ouvré qui suit le RDV, 09:00 Bruxelles**
+  (`premier_jour_ouvre_apres`). Elles deviennent son **filet**
+  (`tasks.meeting_id`) : pas supprimées, **endormies**.
+- **Une relance posée ou re-datée APRÈS que le RDV existe n'est JAMAIS
+  reportée** (arbitrage de Bora : « confirmer la veille » évite les lapins). Elle
+  passe devant le RDV, et la fiche dit la relance, **puis** le RDV. L'invariant
+  est « une seule prochaine action AFFICHÉE », pas « une seule ligne ».
+- Un filet **dort** tant que son RDV est vivant (`rdv_vivant` : prévu / confirmé
+  / **reporté**, passé compris) : hors de `next_action_at`, de la zone
+  « À appeler » (`.eq("en_sommeil", false)`, champ calculé PostgREST), de
+  l'outil `a_faire` et du compte `/equipe` des retards.
+- **Clore un RDV** (honoré / annulé, par N'IMPORTE QUEL chemin) **réveille** le
+  filet au premier jour ouvré suivant. Le débrief propose « **Et ensuite ?** »
+  (Demain / +3 j / +1 sem / date / Rien) — **offert, jamais exigé** : « Ça
+  s'est fait » reste à UN tap, et sans choix le réveil fait le travail. MCP :
+  `deplacer_rendez_vous(annuler, relancer_le)`.
+- Un **re-datage humain** d'un filet le **détache** (`tasks_detache_filet`) ;
+  seul le trigger de `meetings` re-date un filet sans le détacher (drapeau
+  transactionnel `celya.report_rdv`).
+- **Un RDV n'est jamais « en retard »** : passé, il dit « À débriefer ». Écrans :
+  `ProchaineActionTexte` (`components/ui.tsx`) sur la liste, les colonnes et la
+  zone calme ; `deriveNextAction` sur la carte de la fiche. Lecture pure et
+  miroirs de la règle dans `lib/crm/prochaineAction.ts` (`npm run
+  test:prochaine-action`).
+- Fiche Gagné / Perdu : aucun filet posé ni déplacé, pas de « Et ensuite ? ».
+- **La zone « à débriefer » lit aussi `reporte`** : un RDV reporté puis passé
+  n'y remontait JAMAIS (Garage Boetendael, RDV du 02/09, invisible trois
+  semaines).
+- La cadence email n'éteint pas un filet endormi, et sa relance « si pas de
+  réponse » naît filet d'un RDV à venir qui la précède.
+
+**Ordre** : la migration d'ABORD (le code du lot lit `next_action_kind`,
+`meeting_id` et `en_sommeil`), le déploiement ensuite. Recette :
+`supabase/recettes/022_assembler.sh` (baseline → migration → 55 assertions →
+exception finale), **55 OK, 0 faute** le 22/09, production revérifiée intacte
+(empreintes md5 identiques).
+
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
 **La probabilité chiffrée à la main est retirée de l'interface** (décision de
@@ -1544,7 +1600,8 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
-`npm run test:equipe`, `npm run test:agenda`, `npm run test:frontiere` (purs,
+`npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
+`npm run test:frontiere` (purs,
 sans réseau). **`test:frontiere` n'est pas un test de règle mais un test de
 STRUCTURE** — il relit la frontière serveur → client, que ni `tsc` ni
 `next build` ne voient (voir le piège du 21/09). C'est le seul qui protège

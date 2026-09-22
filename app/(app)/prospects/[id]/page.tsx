@@ -19,6 +19,12 @@ import { RelancesSection } from "@/components/RelancesSection";
 import { updateProspectAction, deleteProspectAction } from "@/app/actions";
 import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
+import {
+  estEnSommeil,
+  lireProchaineAction,
+  rdvQuiCompte,
+  rdvVivant,
+} from "@/lib/crm/prochaineAction";
 import { replySubject } from "@/lib/crm/email";
 import type { ComposerPrefill } from "@/lib/crm/composer";
 import {
@@ -83,7 +89,7 @@ export default async function ProspectDetailPage({
         .limit(50),
       supabase
         .from("tasks")
-        .select("id, title, details, due_at, status, priority, prospect_id")
+        .select("id, title, details, due_at, status, priority, prospect_id, meeting_id")
         .eq("prospect_id", id)
         .order("status")
         .order("due_at", { ascending: true }),
@@ -208,16 +214,18 @@ export default async function ProspectDetailPage({
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
-  // « Prochaine action » — dérivée sans le moindre appel à un modèle. Le
-  // prochain rendez-vous d'agenda (à venir, non annulé) passe devant la
-  // relance s'il arrive avant elle.
+  // « Prochaine action » — dérivée sans le moindre appel à un modèle, par la
+  // même règle que la base (migration 022, lib/crm/prochaineAction.ts) : le
+  // rendez-vous VIVANT le plus proche — passé compris, il attend alors son
+  // débrief —, sauf relance posée sciemment avant lui. Les filets endormis
+  // (relances reportées après un RDV encore vivant) ne réclament rien.
   const lastEvent: LastEvent = timeline[0]
     ? { kind: timeline[0].kind, at: timeline[0].at }
     : null;
+  const rdvCourant = rdvQuiCompte(meetings);
   const prochainRdv =
     meetings.find(
-      (m) =>
-        m.status !== "annule" && new Date(m.starts_at).getTime() >= Date.now()
+      (m) => rdvVivant(m.status) && new Date(m.starts_at).getTime() >= Date.now()
     ) ?? null;
   // Le lieu d'un rendez-vous, quand la fiche n'a pas encore d'adresse : le
   // prochain rendez-vous d'abord, sinon le plus récent qui en porte un.
@@ -229,16 +237,31 @@ export default async function ProspectDetailPage({
           null);
 
   const relances = openTasks as unknown as OpenTask[];
+  const eveillees = openTasks.filter(
+    (t) => !estEnSommeil(t, meetings)
+  ) as unknown as OpenTask[];
   const nextAction = deriveNextAction(
-    relances,
+    eveillees,
     lastEvent,
     prospect.contact_name,
-    prochainRdv
+    rdvCourant
   );
   // La relance ouverte la plus proche (la liste est triée par échéance), même
-  // quand un rendez-vous lui passe devant dans la carte : c'est elle que
-  // « Relancer » re-date, jamais une nouvelle.
+  // quand un rendez-vous lui passe devant dans la carte — filet endormi
+  // compris : c'est elle que « Relancer » re-date, jamais une nouvelle. Un
+  // re-datage humain réveille le filet (tasks_detache_filet, 022).
   const relanceOuverte = relances[0] ?? null;
+  // Les filets endormis, et le rendez-vous qu'ils attendent — la colonne
+  // « Relances » les dit en sommeil au lieu de les montrer en retard.
+  const sommeil: Record<string, string> = {};
+  for (const t of openTasks) {
+    const m = t.meeting_id ? meetings.find((x) => x.id === t.meeting_id) : null;
+    if (m && rdvVivant(m.status)) sommeil[t.id] = m.starts_at;
+  }
+  const lectureNext = lireProchaineAction(
+    prospect.next_action_at,
+    prospect.next_action_kind
+  );
 
   // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur
   // s'ouvre pré-rempli, destinataire et objet repris du message reçu. Le
@@ -452,14 +475,15 @@ export default async function ProspectDetailPage({
                   Prochaine action
                 </p>
                 <p
-                  className={`mt-0.5 text-sm font-medium ${
-                    prospect.next_action_at &&
-                    new Date(prospect.next_action_at).getTime() < Date.now()
-                      ? "text-amber-300"
-                      : "text-slate-100"
+                  className={`mt-0.5 flex items-center gap-1.5 text-sm font-medium ${
+                    lectureNext.retard ? "text-amber-300" : "text-slate-100"
                   }`}
                 >
-                  {prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—"}
+                  {lectureNext.icone && (
+                    <Icone nom={lectureNext.icone} className="h-3.5 w-3.5 text-blue-300" />
+                  )}
+                  {lectureNext.texte ??
+                    (prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—")}
                 </p>
               </div>
             </div>
@@ -485,7 +509,10 @@ export default async function ProspectDetailPage({
 
             <RelancesSection
               prospectId={prospect.id}
-              openTasks={openTasks}
+              openTasks={openTasks.map((t) => ({
+                ...t,
+                enSommeilJusquA: sommeil[t.id] ?? null,
+              }))}
               lectureSeule={lectureSeule}
             />
 

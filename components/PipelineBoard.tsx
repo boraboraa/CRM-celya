@@ -8,9 +8,13 @@ import {
   STATUS_LABEL,
   STATUS_ICON,
   STATUS_EDGE,
-  relative,
 } from "@/lib/constants";
-import { ConfidenceBadge, Icone, LastActionLine } from "@/components/ui";
+import {
+  ConfidenceBadge,
+  Icone,
+  LastActionLine,
+  ProchaineActionTexte,
+} from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
 
@@ -65,6 +69,8 @@ export type BoardProspect = {
   confidence_reason: string | null;
   confidence_locked: boolean;
   next_action_at: string | null;
+  /** Ce que désigne next_action_at (migration 022) : un RDV n'est jamais en retard. */
+  next_action_kind: string | null;
   /** Dernière action (canal + résultat + texte + date) — prospect_action_state. */
   last_kind: LastActionKind | null;
   last_at: string | null;
@@ -235,9 +241,6 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                   )}
 
                   {list.map((c) => {
-                    const overdue =
-                      c.next_action_at &&
-                      new Date(c.next_action_at).getTime() < Date.now();
                     const isDragged = dragId === c.id;
                     const landed = justMoved === c.id;
                     // Le repère d'attente est sur LA carte manipulée, pas sur
@@ -319,11 +322,12 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                               reason={c.confidence_reason}
                               locked={c.confidence_locked}
                             />
-                            <span
-                              className={`shrink-0 text-[11px] ${overdue ? "text-amber-300" : "text-slate-400"}`}
-                            >
-                              {c.next_action_at ? relative(c.next_action_at) : "—"}
-                            </span>
+                            <ProchaineActionTexte
+                              at={c.next_action_at}
+                              kind={c.next_action_kind}
+                              className="shrink-0 text-[11px]"
+                              couleurNeutre="text-slate-400"
+                            />
                           </p>
                           {c.confidence_reason && !c.confidence_locked && (
                             <p className="mt-1 truncate text-[11px] text-slate-500">

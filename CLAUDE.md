@@ -339,7 +339,7 @@ Côté TypeScript, la règle entre par **`Viewer.visiblesIds`** (l'union : moi +
 co-porteurs si je suis porteur + mes encadrés), que `scopeProspects`,
 `scopeJoinedProspects` et le `in` de l'outil `agenda` consultent déjà — aucun
 outil MCP n'a eu besoin d'être réécrit. **`canEditProspect` NE BOUGE PAS.**
-`lireEncadres` est tolérante à l'absence de la table (42P01 → « je n'encadre
+`lireEncadres` est tolérante à l'absence de la table (`PGRST205` → « je n'encadre
 personne »), donc le code tourne avant comme après la migration.
 
 **Ce que l'encadrant voit de l'AGENDA** : tous les rendez-vous de l'étudiant,
@@ -349,6 +349,16 @@ indépendant, et elle vaut pareil pour un étudiant.
 
 **Réversible** : supprimer les lignes suffit ; retirer `or encadre(...)` des deux
 policies de lecture restaure la 020 à l'identique.
+
+**L'ÉCRITURE est tolérante aussi** (22/09, PR #14). Tant que la 021 n'est pas
+appliquée, `/equipe` remplace les cases « Encadré par » par une phrase
+(« Pas encore disponible… »), via `encadrementDisponible` ; et `set_encadrement`
+ne lève rien sur une table absente, il le journalise. **Le code réel d'une
+table absente est `PGRST205`** (PostgREST, « Could not find the table … in the
+schema cache »), mesuré contre la production — pas `42P01`, que seul le SQL
+direct renvoie. `estTableAbsente` accepte les deux ; les commentaires qui ne
+parlaient que de `42P01` étaient justes par chance, les lectures tolérant
+n'importe quelle erreur.
 
 ### Le périmètre d'affichage — du confort, PAS de la sécurité (31 août)
 
@@ -1686,7 +1696,7 @@ des transactions annulées.
 c'est Bora qui applique, puis qui pose les liens depuis `/equipe`. **Additive
 et sans donnée** : la table naît vide, donc `encadre()` est faux pour tout le
 monde et rien ne change tant qu'aucun lien n'est posé. Le code du même lot lit
-la table de façon TOLÉRANTE (`lireEncadres` : un `42P01` vaut « je n'encadre
+la table de façon TOLÉRANTE (`lireEncadres` : un `PGRST205` vaut « je n'encadre
 personne »), il tourne donc contre la base d'avant comme d'après.
 
 **Recette différentielle rejouée en transaction ANNULÉE contre la production**

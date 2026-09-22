@@ -29,6 +29,7 @@ import {
   type MeetingConflit,
 } from "@/lib/crm/agenda";
 import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
+import { estTableAbsente } from "@/lib/crm/access";
 import { getSession } from "@/lib/auth";
 import {
   importProspectsCore,
@@ -952,19 +953,27 @@ export async function adminUpdateUserAction(fd: FormData) {
     // `supervision_pas_soi_meme` ; on ne la propose pas, on ne l'envoie pas.
     if (!encadrantId || encadrantId === userId) return;
     const supabase = await createClient();
-    if (str(fd, "encadre") === "1") {
-      await supabase
-        .from("supervision")
-        .upsert(
-          { encadrant_id: encadrantId, commercial_id: userId },
-          { onConflict: "encadrant_id,commercial_id" }
-        );
-    } else {
-      await supabase
-        .from("supervision")
-        .delete()
-        .eq("encadrant_id", encadrantId)
-        .eq("commercial_id", userId);
+    const { error } =
+      str(fd, "encadre") === "1"
+        ? await supabase
+            .from("supervision")
+            .upsert(
+              { encadrant_id: encadrantId, commercial_id: userId },
+              { onConflict: "encadrant_id,commercial_id" }
+            )
+        : await supabase
+            .from("supervision")
+            .delete()
+            .eq("encadrant_id", encadrantId)
+            .eq("commercial_id", userId);
+    // Tolérant comme les lectures : tant que la migration 021 n'est pas
+    // appliquée, l'écran ne propose plus les cases (encadrementDisponible) ;
+    // une requête qui arriverait quand même ne fait rien, et le dit dans les
+    // journaux au lieu de lever une erreur brute.
+    if (estTableAbsente(error)) {
+      console.warn("[equipe] set_encadrement ignoré : table supervision absente (migration 021 non appliquée).");
+    } else if (error) {
+      console.error(`[equipe] set_encadrement : ${error.message}`);
     }
   }
 

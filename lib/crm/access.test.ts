@@ -22,6 +22,8 @@ import {
   lirePorteurs,
   lireEncadres,
   lireLiensEncadrement,
+  estTableAbsente,
+  encadrementDisponible,
   canSeeProspect,
   canEditProspect,
   relanceEnLecture,
@@ -96,6 +98,7 @@ function fauxClient(reponses: {
       select: () => c,
       eq: () => c,
       in: () => c,
+      limit: () => c,
       maybeSingle: async () => reponses.ligne ?? { data: null },
       then: (ok: (v: Reponse) => unknown, ko?: (e: unknown) => unknown) =>
         Promise.resolve(liste ?? { data: [] }).then(ok, ko),
@@ -479,6 +482,45 @@ verifie(
     fauxClient({ supervision: { error: { code: "42P01" }, data: null } })
   ),
   []
+);
+
+verifie(
+  "lireLiensEncadrement tolère le code RÉEL de PostgREST (PGRST205, mesuré le 22/09)",
+  await lireLiensEncadrement(
+    fauxClient({ supervision: { error: { code: "PGRST205" }, data: null } })
+  ),
+  []
+);
+
+console.log("\n— l'écriture de l'encadrement, tolérante elle aussi —");
+verifie(
+  "table absente : PGRST205 (PostgREST, le cas réel) et 42P01 (Postgres)",
+  [estTableAbsente({ code: "PGRST205" }), estTableAbsente({ code: "42P01" })],
+  [true, true]
+);
+verifie(
+  "un refus de droits n'est PAS une table absente",
+  [estTableAbsente({ code: "42501" }), estTableAbsente(null)],
+  [false, false]
+);
+verifie(
+  "migration 021 absente : l'écran ne propose pas les cases",
+  await encadrementDisponible(
+    fauxClient({ supervision: { error: { code: "PGRST205" }, data: null } })
+  ),
+  false
+);
+verifie(
+  "migration 021 appliquée : les cases reviennent",
+  await encadrementDisponible(fauxClient({ supervision: { data: [] } })),
+  true
+);
+verifie(
+  "une autre panne ne cache pas la fonctionnalité",
+  await encadrementDisponible(
+    fauxClient({ supervision: { error: { code: "08006" }, data: null } })
+  ),
+  true
 );
 
 console.log("\n— loadViewer : l'union des trois branches —");

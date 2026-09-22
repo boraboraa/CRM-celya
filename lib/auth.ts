@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { lirePorteurs } from "@/lib/crm/access";
+import { lirePorteurs, lireEncadres } from "@/lib/crm/access";
 import type { PerimetreViewer } from "@/lib/crm/perimetre";
 import type { Profile } from "@/lib/types";
 
@@ -57,17 +57,19 @@ export const getSession = cache(async (): Promise<Session | null> => {
 
 /**
  * Qui regarde, au sens du PÉRIMÈTRE d'affichage (lib/crm/perimetre.ts) —
- * identité, rôle, et l'interrupteur « travaille en équipe » avec la liste des
- * porteurs.
+ * identité, rôle, l'interrupteur « travaille en équipe » avec la liste des
+ * porteurs, et les commerciaux qu'on ENCADRE (migration 021).
  *
  * `cache()` comme `getSession` : les quatre écrans qui portent le sélecteur
  * (tableau de bord, prospects, agenda, fiche) l'appellent chacun une fois par
- * rendu et ne paient qu'une seule requête — et zéro pour un admin, qui n'est
- * pas filtré.
+ * rendu et ne paient qu'un seul jeu de requêtes — et zéro pour un admin, qui
+ * n'est pas filtré.
  *
- * `lirePorteurs` est tolérante à l'absence de la colonne `voit_equipe` (elle
- * renvoie une liste vide) : cette fonction marche donc contre la base EN
- * PRODUCTION, avant comme après la migration 020.
+ * `lirePorteurs` et `lireEncadres` sont toutes deux TOLÉRANTES (colonne
+ * `voit_equipe` absente, table `supervision` absente → liste vide, jamais une
+ * erreur) : cette fonction marche donc contre la base EN PRODUCTION, avant
+ * comme après les migrations 020 et 021. C'est ce qui permet au code de partir
+ * en premier, comme la règle du projet l'exige.
  */
 export const getPerimetreViewer = cache(async (): Promise<PerimetreViewer> => {
   const session = await getSession();
@@ -76,13 +78,22 @@ export const getPerimetreViewer = cache(async (): Promise<PerimetreViewer> => {
   if (!userId || isAdmin) return { userId, isAdmin };
 
   const supabase = await createClient();
-  const porteurs = await lirePorteurs(supabase);
+  const [porteurs, encadreIds] = await Promise.all([
+    lirePorteurs(supabase),
+    lireEncadres(supabase, userId),
+  ]);
   const voitEquipe = porteurs.includes(userId);
   return {
     userId,
     isAdmin,
     voitEquipe,
-    partageIds: voitEquipe ? porteurs : [userId],
+    encadreIds,
+    // L'union, dédupliquée — le même ensemble que `Viewer.visiblesIds` côté
+    // connecteur, et pour la même raison : quelqu'un peut être à la fois
+    // co-porteur et encadré.
+    partageIds: [
+      ...new Set([userId, ...(voitEquipe ? porteurs : []), ...encadreIds]),
+    ],
   };
 });
 

@@ -4,10 +4,16 @@ import type { Perimetre } from "@/lib/crm/perimetre";
 /**
  * Le sélecteur de périmètre — « Moi », les autres, « Toute l'équipe ».
  *
- * Rendu pour un ADMIN, et depuis la migration 020 pour un PORTEUR de
- * l'interrupteur « travaille en équipe ». Un commercial sans interrupteur n'en
- * voit toujours rien : il ne voit que son portefeuille (la RLS l'y contraint de
- * toute façon) et un sélecteur qui ne change rien serait un mensonge.
+ * Rendu pour un ADMIN, depuis la migration 020 pour un PORTEUR de
+ * l'interrupteur « travaille en équipe », et depuis la 021 pour un ENCADRANT.
+ * Un commercial qui n'est rien de tout cela n'en voit toujours rien : il ne
+ * voit que son portefeuille (la RLS l'y contraint de toute façon) et un
+ * sélecteur qui ne change rien serait un mensonge.
+ *
+ * Le droit d'élargir arrive en PROP, calculé par `peutElargir` (perimetre.ts) :
+ * le composant ne rejoue pas la règle. Il la rejouait avant la 021 — un
+ * `role !== "admin" && !voitEquipe` recopié ici — et c'est exactement le genre
+ * de copie qu'on oublie de mettre à jour quand une troisième branche arrive.
  *
  * ⚠ `membres` doit arriver DÉJÀ FILTRÉ pour un porteur : la policy
  * `crm_users_select` laisse tout membre lire TOUTE la table d'équipe, donc la
@@ -29,7 +35,7 @@ export function PerimetreSwitcher({
   membres,
   basePath,
   searchParams = {},
-  voitEquipe = false,
+  peutElargir = false,
 }: {
   role: string;
   viewerId: string;
@@ -40,10 +46,13 @@ export function PerimetreSwitcher({
   basePath: string;
   /** Les paramètres actuels de l'URL, conservés tels quels. */
   searchParams?: Record<string, string | string[] | undefined>;
-  /** Porte l'interrupteur « travaille en équipe » (non-admin). */
-  voitEquipe?: boolean;
+  /**
+   * A le droit de sortir de « moi » — porteur de l'interrupteur d'équipe, ou
+   * encadrant. Calculé par `peutElargir` (lib/crm/perimetre.ts), jamais ici.
+   */
+  peutElargir?: boolean;
 }) {
-  if (role !== "admin" && !voitEquipe) return null;
+  if (role !== "admin" && !peutElargir) return null;
 
   const href = (valeur: "moi" | "equipe" | string) => {
     const params = new URLSearchParams();
@@ -58,9 +67,10 @@ export function PerimetreSwitcher({
   };
 
   const autres = membres.filter((m) => m.id !== viewerId);
-  // Un porteur seul (personne d'autre n'a coché la case) : « Moi » et « Toute
+  // Personne d'autre à proposer — un porteur seul à avoir coché la case, ou un
+  // encadrant dont tous les encadrés ont été désactivés : « Moi » et « Toute
   // l'équipe » rendraient le même écran. Deux boutons pour un seul résultat,
-  // c'est le sélecteur mensonger qu'on refuse à un non-porteur.
+  // c'est le sélecteur mensonger qu'on refuse à un simple commercial.
   if (role !== "admin" && autres.length === 0) return null;
 
   const options: { cle: string; label: string; actif: boolean }[] = [

@@ -20,6 +20,8 @@
 import {
   loadViewer,
   lirePorteurs,
+  lireEncadres,
+  lireLiensEncadrement,
   canSeeProspect,
   canEditProspect,
   relanceEnLecture,
@@ -38,6 +40,25 @@ const COLLINS = "fc088df7-6bd5-4d28-b10a-417483964a9f";
 const NATHAN = "f9d07f3f-daea-46b8-ae6c-b9380444be4b";
 const REMI = "640f3e05-d9da-4fdc-a0eb-553a3afa00d6";
 const BORA = "b3fdb505-76b0-4541-84ec-21b330afe58d";
+// Les étudiants de septembre : encadrés par Collins et Nathan, cloisonnés de
+// tout le monde et l'un de l'autre. Identifiants fictifs — ils n'existent pas
+// encore en base, et le test ne doit pas dépendre de leur création.
+const ETU_A = "a0000000-0000-4000-8000-0000000021a0";
+const ETU_B = "a0000000-0000-4000-8000-0000000021b0";
+
+/**
+ * Ce que `lireMembresActifs` rend : TOUS les commerciaux actifs, avec leur
+ * interrupteur. C'est la même lecture qui sert les porteurs et l'intersection
+ * des encadrés — d'où une seule constante, comme en base il n'y a qu'une
+ * jointure.
+ */
+const COMMERCIAUX = [
+  { id: COLLINS, voit_equipe: true },
+  { id: NATHAN, voit_equipe: true },
+  { id: REMI, voit_equipe: false },
+  { id: ETU_A, voit_equipe: false },
+  { id: ETU_B, voit_equipe: false },
+];
 
 let echecs = 0;
 
@@ -53,25 +74,40 @@ function verifie(nom: string, obtenu: unknown, attendu: unknown) {
 }
 
 // ---------------------------------------------------------------------------
-// Un faux client Supabase : de quoi satisfaire `loadViewer` et `lirePorteurs`
-// sans réseau. `maybeSingle()` sert la ligne du porteur du jeton ; attendre la
-// chaîne elle-même sert la liste des porteurs — ce sont les deux seules formes
-// utilisées par access.ts.
+// Un faux client Supabase : de quoi satisfaire `loadViewer`, `lirePorteurs` et
+// `lireEncadres` sans réseau. `maybeSingle()` sert la ligne du porteur du
+// jeton ; attendre la chaîne elle-même sert une liste — ce sont les deux seules
+// formes utilisées par access.ts.
+//
+// Il répond PAR TABLE depuis la 021 : `loadViewer` interroge maintenant
+// `crm_users` ET `supervision`, et leur servir la même réponse ferait passer un
+// test qui ne prouve rien (des porteurs lus comme des encadrés, ou l'inverse).
 // ---------------------------------------------------------------------------
 type Reponse = { data?: unknown; error?: unknown };
 
-function fauxClient(reponses: { ligne?: Reponse; liste?: Reponse }) {
-  const chaine: Record<string, unknown> = {};
-  Object.assign(chaine, {
-    select: () => chaine,
-    eq: () => chaine,
-    in: () => chaine,
-    maybeSingle: async () => reponses.ligne ?? { data: null },
-    then: (ok: (v: Reponse) => unknown, ko?: (e: unknown) => unknown) =>
-      Promise.resolve(reponses.liste ?? { data: [] }).then(ok, ko),
-  });
+function fauxClient(reponses: {
+  ligne?: Reponse;
+  liste?: Reponse;
+  supervision?: Reponse;
+}) {
+  const chaine = (liste: Reponse | undefined) => {
+    const c: Record<string, unknown> = {};
+    Object.assign(c, {
+      select: () => c,
+      eq: () => c,
+      in: () => c,
+      maybeSingle: async () => reponses.ligne ?? { data: null },
+      then: (ok: (v: Reponse) => unknown, ko?: (e: unknown) => unknown) =>
+        Promise.resolve(liste ?? { data: [] }).then(ok, ko),
+    });
+    return c;
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { from: () => chaine } as any;
+  return {
+    from: (table: string) =>
+      chaine(table === "supervision" ? reponses.supervision : reponses.liste),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
 }
 
 /** Un enregistreur de filtres : ce que la requête aurait envoyé à PostgREST. */
@@ -97,6 +133,7 @@ const viewer = (p: Partial<Viewer> & { userId: string }): Viewer => ({
   isAdmin: false,
   fullName: null,
   voitEquipe: false,
+  encadreIds: [],
   visiblesIds: [p.userId],
   ...p,
 });
@@ -107,6 +144,15 @@ const COLLINS_PORTEUR = viewer({
   visiblesIds: [COLLINS, NATHAN],
 });
 const REMI_SEUL = viewer({ userId: REMI });
+/** Collins tel qu'il sera : porteur de l'interrupteur ET encadrant des deux étudiants. */
+const COLLINS_ENCADRANT = viewer({
+  userId: COLLINS,
+  voitEquipe: true,
+  encadreIds: [ETU_A, ETU_B],
+  visiblesIds: [COLLINS, NATHAN, ETU_A, ETU_B],
+});
+/** Un étudiant : aucun drapeau, aucun lien sortant. Le défaut de la 016. */
+const ETUDIANT_A = viewer({ userId: ETU_A });
 const BORA_ADMIN = viewer({
   userId: BORA,
   role: "admin",
@@ -129,10 +175,8 @@ verifie(
   []
 );
 verifie(
-  "deux porteurs : leurs identifiants",
-  await lirePorteurs(
-    fauxClient({ liste: { data: [{ id: COLLINS }, { id: NATHAN }] } })
-  ),
+  "deux porteurs parmi quatre commerciaux : leurs identifiants seuls",
+  await lirePorteurs(fauxClient({ liste: { data: COMMERCIAUX } })),
   [COLLINS, NATHAN]
 );
 verifie(
@@ -167,7 +211,7 @@ const chargeCollins = await loadViewer(
     ligne: {
       data: { id: COLLINS, role: "commercial", is_active: true, full_name: "collins" },
     },
-    liste: { data: [{ id: COLLINS }, { id: NATHAN }] },
+    liste: { data: COMMERCIAUX },
   }),
   COLLINS
 );
@@ -179,7 +223,7 @@ const chargeRemi = await loadViewer(
     ligne: {
       data: { id: REMI, role: "commercial", is_active: true, full_name: "Rémi Perez" },
     },
-    liste: { data: [{ id: COLLINS }, { id: NATHAN }] },
+    liste: { data: COMMERCIAUX },
   }),
   REMI
 );
@@ -191,7 +235,7 @@ const chargeBora = await loadViewer(
     ligne: {
       data: { id: BORA, role: "admin", is_active: true, full_name: "Bora Dogrul" },
     },
-    liste: { data: [{ id: COLLINS }, { id: NATHAN }] },
+    liste: { data: COMMERCIAUX },
   }),
   BORA
 );
@@ -375,6 +419,241 @@ verifie(
   "l'admin actionne tout, y compris la relance de Rémi",
   [relanceEnLecture(vBora, REMI), relanceEnLecture(vBora, BORA)],
   [false, false]
+);
+
+// ---------------------------------------------------------------------------
+// L'ENCADREMENT (migration 021) — une relation ORIENTÉE, et une seule sauteuse.
+//
+// Ce que ces cas défendent, en une phrase : un encadrant VOIT le travail de son
+// étudiant et n'y TOUCHE pas, l'étudiant ne gagne RIEN, et l'encadrement ne se
+// propage pas.
+// ---------------------------------------------------------------------------
+console.log("\n— lireEncadres —");
+
+verifie(
+  "table absente (42P01) : je n'encadre personne",
+  await lireEncadres(
+    fauxClient({
+      liste: { data: COMMERCIAUX },
+      supervision: { error: { code: "42P01" }, data: null },
+    }),
+    COLLINS
+  ),
+  []
+);
+verifie(
+  "deux encadrés : leurs identifiants",
+  await lireEncadres(
+    fauxClient({
+      liste: { data: COMMERCIAUX },
+      supervision: {
+        data: [{ commercial_id: ETU_A }, { commercial_id: ETU_B }],
+      },
+    }),
+    COLLINS
+  ),
+  [ETU_A, ETU_B]
+);
+verifie(
+  "un encadré DÉSACTIVÉ disparaît (la jointure du SQL le fait aussi)",
+  await lireEncadres(
+    fauxClient({
+      // ETU_B n'est plus dans les commerciaux actifs.
+      liste: { data: COMMERCIAUX.filter((m) => m.id !== ETU_B) },
+      supervision: {
+        data: [{ commercial_id: ETU_A }, { commercial_id: ETU_B }],
+      },
+    }),
+    COLLINS
+  ),
+  [ETU_A]
+);
+verifie(
+  "jeton sans sujet : personne",
+  await lireEncadres(fauxClient({}), null),
+  []
+);
+verifie(
+  "lireLiensEncadrement tolère l'absence de la table",
+  await lireLiensEncadrement(
+    fauxClient({ supervision: { error: { code: "42P01" }, data: null } })
+  ),
+  []
+);
+
+console.log("\n— loadViewer : l'union des trois branches —");
+
+const chargeEncadrant = await loadViewer(
+  fauxClient({
+    ligne: {
+      data: { id: COLLINS, role: "commercial", is_active: true, full_name: "Collins" },
+    },
+    liste: { data: COMMERCIAUX },
+    supervision: { data: [{ commercial_id: ETU_A }, { commercial_id: ETU_B }] },
+  }),
+  COLLINS
+);
+verifie(
+  "Collins lit son binôme ET ses étudiants",
+  chargeEncadrant?.visiblesIds,
+  [COLLINS, NATHAN, ETU_A, ETU_B]
+);
+verifie("Collins encadre deux personnes", chargeEncadrant?.encadreIds, [
+  ETU_A,
+  ETU_B,
+]);
+
+// L'ORIENTATION, sur le chemin réel : l'étudiant a les mêmes données en face de
+// lui (mêmes commerciaux actifs, mêmes liens) et n'en tire rien. Le faux client
+// lui sert d'ailleurs la MÊME table `supervision` — ce qui compte, c'est que
+// `lireEncadres` filtre sur `encadrant_id`, jamais sur `commercial_id`.
+const chargeEtudiant = await loadViewer(
+  fauxClient({
+    ligne: {
+      data: { id: ETU_A, role: "commercial", is_active: true, full_name: "Étudiant A" },
+    },
+    liste: { data: COMMERCIAUX },
+    supervision: { data: [] },
+  }),
+  ETU_A
+);
+verifie(
+  "ORIENTATION : l'étudiant A ne lit que lui",
+  chargeEtudiant?.visiblesIds,
+  [ETU_A]
+);
+verifie("… et n'encadre personne", chargeEtudiant?.encadreIds, []);
+
+console.log("\n— l'encadrant VOIT, il n'ÉCRIT pas —");
+
+verifie(
+  "Collins voit les fiches de l'étudiant A",
+  canSeeProspect(COLLINS_ENCADRANT, ETU_A),
+  true
+);
+verifie(
+  "Collins ne MODIFIE PAS la fiche de l'étudiant A",
+  canEditProspect(COLLINS_ENCADRANT, ETU_A),
+  false
+);
+verifie(
+  "l'étudiant A ne voit RIEN de Collins",
+  canSeeProspect(ETUDIANT_A, COLLINS),
+  false
+);
+verifie(
+  "l'étudiant A ne voit rien de l'étudiant B (même encadrant, pourtant)",
+  canSeeProspect(ETUDIANT_A, ETU_B),
+  false
+);
+verifie(
+  "l'étudiant A ne voit ni Bora ni Rémi",
+  [canSeeProspect(ETUDIANT_A, BORA), canSeeProspect(ETUDIANT_A, REMI)],
+  [false, false]
+);
+verifie(
+  "Rémi reste cloisonné DANS LES DEUX SENS, étudiants compris",
+  [
+    canSeeProspect(REMI_SEUL, ETU_A),
+    canSeeProspect(COLLINS_ENCADRANT, REMI),
+    canSeeProspect(ETUDIANT_A, REMI),
+  ],
+  [false, false, false]
+);
+verifie(
+  "Collins <-> Nathan continue de fonctionner (020 intacte)",
+  [
+    canSeeProspect(COLLINS_ENCADRANT, NATHAN),
+    canEditProspect(COLLINS_ENCADRANT, NATHAN),
+  ],
+  [true, false]
+);
+
+// TRANSITIVITÉ — la propriété tient à la FORME de `lireEncadres` : elle lit la
+// table une fois et ne rappelle jamais sur son propre résultat. On le vérifie
+// sur le chemin réel : Nathan encadre Collins, Collins encadre les étudiants,
+// et la table de Nathan ne contient QUE Collins.
+const chargeNathan = await loadViewer(
+  fauxClient({
+    ligne: {
+      data: { id: NATHAN, role: "commercial", is_active: true, full_name: "Nathan" },
+    },
+    liste: { data: COMMERCIAUX },
+    supervision: { data: [{ commercial_id: COLLINS }] },
+  }),
+  NATHAN
+);
+verifie(
+  "TRANSITIVITÉ : Nathan encadre Collins et n'hérite PAS de ses étudiants",
+  chargeNathan?.visiblesIds,
+  [NATHAN, COLLINS]
+);
+
+console.log("\n— le filtre en base, et le sélecteur —");
+
+verifie(
+  "scopeProspects : un in sur les quatre propriétaires lisibles",
+  scopeProspects(fausseRequete(), COLLINS_ENCADRANT).appels,
+  [`in(owner_id,[${COLLINS}|${NATHAN}|${ETU_A}|${ETU_B}])`]
+);
+verifie(
+  "l'étudiant : un in sur lui seul (le filtre MORD toujours)",
+  scopeProspects(fausseRequete(), ETUDIANT_A).appels,
+  [`in(owner_id,[${ETU_A}])`]
+);
+
+// Un encadrant qui ne porte PAS l'interrupteur : le cas qui prouve que le droit
+// au sélecteur ne se déduit pas de `voitEquipe`.
+const PE = {
+  userId: NATHAN,
+  isAdmin: false,
+  voitEquipe: false,
+  encadreIds: [ETU_A],
+  partageIds: [NATHAN, ETU_A],
+};
+const PETU = { userId: ETU_A, isAdmin: false, voitEquipe: false, encadreIds: [] };
+
+verifie(
+  "un encadrant NON porteur a droit au sélecteur",
+  peutElargir(PE),
+  true
+);
+verifie("un étudiant n'y a pas droit", peutElargir(PETU), false);
+verifie(
+  "l'encadrant peut viser son étudiant",
+  lirePerimetre({ perimetre: ETU_A }, PE),
+  { mode: "membre", id: ETU_A }
+);
+verifie(
+  "… et PAS Bora (l'URL n'est pas une sonde)",
+  lirePerimetre({ perimetre: BORA }, PE),
+  { mode: "moi" }
+);
+verifie(
+  "l'étudiant est forcé à « moi », quoi qu'il mette dans l'URL",
+  [
+    lirePerimetre({ perimetre: "equipe" }, PETU),
+    lirePerimetre({ perimetre: COLLINS }, PETU),
+  ],
+  [{ mode: "moi" }, { mode: "moi" }]
+);
+verifie(
+  "l'encadrant ne PROPOSE que son étudiant et lui — jamais Bora ni Rémi",
+  membresProposables(
+    [{ id: BORA }, { id: REMI }, { id: NATHAN }, { id: ETU_A }, { id: ETU_B }],
+    PE
+  ).map((m) => m.id),
+  [NATHAN, ETU_A]
+);
+verifie(
+  "l'étudiant ne propose personne (le sélecteur ne le nomme pas)",
+  membresProposables([{ id: COLLINS }, { id: ETU_B }], PETU),
+  []
+);
+verifie(
+  "la relance de son étudiant est en LECTURE pour l'encadrant",
+  relanceEnLecture({ userId: COLLINS, isAdmin: false }, ETU_A),
+  true
 );
 
 console.log(

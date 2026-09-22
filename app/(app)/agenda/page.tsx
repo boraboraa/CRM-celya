@@ -218,7 +218,7 @@ export default async function AgendaPage({
           viewerId={viewer.userId}
           perimetre={perimetre}
           membres={membresProposables(membres, viewer)}
-          voitEquipe={viewer.voitEquipe === true}
+          peutElargir={peutElargir(viewer)}
           basePath="/agenda"
           searchParams={params}
         />

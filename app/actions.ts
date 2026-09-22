@@ -910,6 +910,44 @@ export async function adminUpdateUserAction(fd: FormData) {
       .from("crm_users")
       .update({ voit_equipe: str(fd, "voit_equipe") === "1" })
       .eq("id", userId);
+  } else if (action === "set_encadrement") {
+    // L'encadrement (migration 021) : une LIGNE, pas une colonne.
+    //
+    // `user_id` est l'ENCADRÉ (c'est sa carte qu'on manipule), `encadrant_id`
+    // celui qui gagne le droit de regard. Les deux noms sont pris dans ce
+    // sens-là partout — les intervertir donnerait un lien silencieusement
+    // inversé, et un lien inversé ne lève aucune erreur : il ouvre juste la
+    // mauvaise porte.
+    //
+    // Écrit EN DIRECT, comme `set_voit_equipe` : les policies de `supervision`
+    // réservent déjà l'écriture à `is_admin()` (vérifié en base — un commercial
+    // qui tente l'insertion reçoit 42501), donc rien à faire passer par l'edge
+    // function `crm-admin`.
+    //
+    // Le rôle est quand même revérifié ICI. Deux verrous, comme partout :
+    // masquer un bouton n'a jamais interdit d'appeler la route, et c'est le
+    // seul garde-fou contre quelqu'un qui se nommerait encadrant lui-même.
+    const session = await getSession();
+    if (session?.me?.role !== "admin" || !session.me.is_active) return;
+    const encadrantId = str(fd, "encadrant_id");
+    // Une ligne « X encadre X » serait refusée par la contrainte
+    // `supervision_pas_soi_meme` ; on ne la propose pas, on ne l'envoie pas.
+    if (!encadrantId || encadrantId === userId) return;
+    const supabase = await createClient();
+    if (str(fd, "encadre") === "1") {
+      await supabase
+        .from("supervision")
+        .upsert(
+          { encadrant_id: encadrantId, commercial_id: userId },
+          { onConflict: "encadrant_id,commercial_id" }
+        );
+    } else {
+      await supabase
+        .from("supervision")
+        .delete()
+        .eq("encadrant_id", encadrantId)
+        .eq("commercial_id", userId);
+    }
   }
 
   revalidatePath("/equipe");

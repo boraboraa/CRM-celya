@@ -238,7 +238,7 @@ export default async function ProspectsPage({
           viewerId={viewer.userId}
           perimetre={perimetre}
           membres={membresProposables(membres, viewer)}
-          voitEquipe={viewer.voitEquipe === true}
+          peutElargir={peutElargir(viewer)}
           basePath="/prospects"
           searchParams={params}
         />

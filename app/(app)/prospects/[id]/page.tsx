@@ -20,7 +20,6 @@ import { updateProspectAction, deleteProspectAction } from "@/app/actions";
 import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
 import {
-  estEnSommeil,
   lireProchaineAction,
   rdvQuiCompte,
   rdvVivant,
@@ -89,7 +88,7 @@ export default async function ProspectDetailPage({
         .limit(50),
       supabase
         .from("tasks")
-        .select("id, title, details, due_at, status, priority, prospect_id, meeting_id")
+        .select("id, title, details, due_at, status, priority, prospect_id")
         .eq("prospect_id", id)
         .order("status")
         .order("due_at", { ascending: true }),
@@ -217,8 +216,8 @@ export default async function ProspectDetailPage({
   // « Prochaine action » — dérivée sans le moindre appel à un modèle, par la
   // même règle que la base (migration 022, lib/crm/prochaineAction.ts) : le
   // rendez-vous VIVANT le plus proche — passé compris, il attend alors son
-  // débrief —, sauf relance posée sciemment avant lui. Les filets endormis
-  // (relances reportées après un RDV encore vivant) ne réclament rien.
+  // débrief —, sauf relance posée après lui et tombant avant (« confirmer la
+  // veille »).
   const lastEvent: LastEvent = timeline[0]
     ? { kind: timeline[0].kind, at: timeline[0].at }
     : null;
@@ -237,27 +236,16 @@ export default async function ProspectDetailPage({
           null);
 
   const relances = openTasks as unknown as OpenTask[];
-  const eveillees = openTasks.filter(
-    (t) => !estEnSommeil(t, meetings)
-  ) as unknown as OpenTask[];
   const nextAction = deriveNextAction(
-    eveillees,
+    relances,
     lastEvent,
     prospect.contact_name,
     rdvCourant
   );
   // La relance ouverte la plus proche (la liste est triée par échéance), même
-  // quand un rendez-vous lui passe devant dans la carte — filet endormi
-  // compris : c'est elle que « Relancer » re-date, jamais une nouvelle. Un
-  // re-datage humain réveille le filet (tasks_detache_filet, 022).
+  // quand un rendez-vous lui passe devant dans la carte : c'est elle que
+  // « Relancer » re-date, jamais une nouvelle.
   const relanceOuverte = relances[0] ?? null;
-  // Les filets endormis, et le rendez-vous qu'ils attendent — la colonne
-  // « Relances » les dit en sommeil au lieu de les montrer en retard.
-  const sommeil: Record<string, string> = {};
-  for (const t of openTasks) {
-    const m = t.meeting_id ? meetings.find((x) => x.id === t.meeting_id) : null;
-    if (m && rdvVivant(m.status)) sommeil[t.id] = m.starts_at;
-  }
   const lectureNext = lireProchaineAction(
     prospect.next_action_at,
     prospect.next_action_kind
@@ -509,10 +497,7 @@ export default async function ProspectDetailPage({
 
             <RelancesSection
               prospectId={prospect.id}
-              openTasks={openTasks.map((t) => ({
-                ...t,
-                enSommeilJusquA: sommeil[t.id] ?? null,
-              }))}
+              openTasks={openTasks}
               lectureSeule={lectureSeule}
             />
 

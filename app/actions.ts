@@ -28,7 +28,7 @@ import {
   cloturerRendezVous,
   type MeetingConflit,
 } from "@/lib/crm/agenda";
-import type { RelanceReportee } from "@/lib/crm/prochaineAction";
+import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
 import { getSession } from "@/lib/auth";
 import {
   importProspectsCore,
@@ -695,8 +695,8 @@ export async function deleteTaskAction(fd: FormData): Promise<ActionState> {
 export type RendezVousState = ActionState & {
   /** Chevauchement détecté — averti, jamais bloquant. */
   conflit?: MeetingConflit | null;
-  /** Relances repoussées derrière le rendez-vous (migration 022) — dites, pas demandées. */
-  reportees?: RelanceReportee[];
+  /** Relances clôturées par la pose du rendez-vous (migration 022) — dites, pas demandées. */
+  annulees?: RelanceAnnulee[];
 };
 
 function revalidateAgenda(prospectId?: string | null) {
@@ -733,7 +733,7 @@ export async function poserRendezVousAction(input: {
   if (r.error) return { error: r.error };
 
   revalidateAgenda(input.personnel ? null : input.prospectId);
-  return { conflit: r.conflit ?? null, reportees: r.reportees ?? [] };
+  return { conflit: r.conflit ?? null, annulees: r.annulees ?? [] };
 }
 
 export async function deplacerRendezVousAction(input: {
@@ -756,26 +756,22 @@ export async function deplacerRendezVousAction(input: {
   if (r.error) return { error: r.error };
 
   revalidateAgenda(r.prospectId);
-  return { conflit: r.conflit ?? null, reportees: r.reportees ?? [] };
+  return { conflit: r.conflit ?? null, annulees: r.annulees ?? [] };
 }
 
 export async function cloturerRendezVousAction(input: {
   id: string;
   resultat: "honore" | "annule";
   compteRendu?: string | null;
-  /**
-   * « Et ensuite ? » — FACULTATIF : « YYYY-MM-DD » (09:00 Bruxelles), « rien »,
-   * ou null (le filet se réveille seul, migration 022).
-   */
+  /** « Et ensuite ? » — FACULTATIF : « YYYY-MM-DD » (09:00 Bruxelles), ou null. */
   suite?: string | null;
 }): Promise<ActionState> {
   const session = await getSession();
   if (!session) redirect("/login");
   const supabase = await createClient();
 
-  let suite: { dueAt: string } | "rien" | null = null;
-  if (input.suite === "rien") suite = "rien";
-  else if (input.suite) {
+  let suite: { dueAt: string } | null = null;
+  if (input.suite) {
     const dueAt = dateInputToISO(input.suite);
     if (!dueAt) return { error: "Date de relance invalide." };
     suite = { dueAt };

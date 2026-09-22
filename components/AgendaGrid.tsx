@@ -8,7 +8,7 @@ import {
 } from "@/app/actions";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
-import { phraseReportees } from "@/lib/crm/prochaineAction";
+import { phraseAnnulees } from "@/lib/crm/prochaineAction";
 import { fmtDateTime } from "@/lib/constants";
 import { Icone } from "@/components/ui";
 
@@ -201,9 +201,9 @@ export function AgendaGrid({
               res.conflit.starts_at
             )}).`
           : null,
-        // Le RDV devient la prochaine action : on DIT ce qu'il a fait aux
-        // relances, sans rien demander (migration 022).
-        phraseReportees(res?.reportees),
+        // Le RDV devient la prochaine action : on DIT quelles relances il a
+        // clôturées, sans rien demander (migration 022).
+        phraseAnnulees(res?.annulees),
       ].filter(Boolean);
       if (avis.length > 0) setInfo(avis.join(" "));
       fermerPanneau();
@@ -239,7 +239,7 @@ export function AgendaGrid({
                 res.conflit.starts_at
               )}).`
             : null,
-          phraseReportees(res?.reportees),
+          phraseAnnulees(res?.annulees),
         ].filter(Boolean);
         if (avis.length > 0) setInfo(avis.join(" "));
       }

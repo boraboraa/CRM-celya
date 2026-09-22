@@ -99,7 +99,7 @@ import {
   fmtDateTime,
 } from "@/lib/constants";
 import { todayBounds, localInputToISO, isoToLocalInput, dateInputToISO } from "@/lib/time";
-import { lireProchaineAction, phraseReportees } from "@/lib/crm/prochaineAction";
+import { lireProchaineAction, phraseAnnulees } from "@/lib/crm/prochaineAction";
 import type { ProspectStatus } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -474,7 +474,7 @@ function register(server: McpServer) {
           .limit(20),
         admin
           .from("tasks")
-          .select("id, title, due_at, priority, status, en_sommeil")
+          .select("id, title, due_at, priority, status")
           .eq("prospect_id", resolved.id)
           .eq("status", "a_faire")
           .order("due_at", { ascending: true }),
@@ -520,9 +520,6 @@ function register(server: McpServer) {
           titre: t.title,
           echeance: t.due_at,
           priorite: t.priority,
-          // FILET d'un rendez-vous encore vivant (migration 022) : elle dort,
-          // ne la proposez pas comme « à faire » — c'est le RDV qui a la main.
-          en_sommeil: Boolean(t.en_sommeil),
         })),
         rendez_vous: (rdvs.data ?? []).map((m) => ({
           id: m.id,
@@ -540,7 +537,7 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre). Une relance repoussée derrière un rendez-vous encore vivant (son « filet ») n'y figure pas : elle dort jusqu'au débrief.",
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre). Poser un rendez-vous clôture les relances qui tombaient avant lui : c'est le débrief du rendez-vous qui décide de la suite.",
     {
       perimetre: z
         .enum(["moi", "equipe"])
@@ -568,7 +565,6 @@ function register(server: McpServer) {
               .from("tasks")
               .select(SELECT)
               .eq("status", "a_faire")
-              .eq("en_sommeil", false)
               .lt("due_at", start),
             viewer
           ),
@@ -581,7 +577,6 @@ function register(server: McpServer) {
               .from("tasks")
               .select(SELECT)
               .eq("status", "a_faire")
-              .eq("en_sommeil", false)
               .gte("due_at", start)
               .lte("due_at", end),
             viewer
@@ -1196,7 +1191,7 @@ function register(server: McpServer) {
   // --- poser_rendez_vous ----------------------------------------------------
   server.tool(
     "poser_rendez_vous",
-    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu.",
+    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu. Poser un rendez-vous CLÔTURE les relances ouvertes de la fiche qui tombaient avant lui (tracé au journal) : c'est son débrief qui décidera de la suite. Une relance que vous posez ensuite (ex. confirmer la veille) n'est jamais touchée.",
     {
       id: z.string().optional().describe("Identifiant du prospect."),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1271,8 +1266,8 @@ function register(server: McpServer) {
           `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}) — signalez-le à l'utilisateur.`
         );
       }
-      const reportees = phraseReportees(r.reportees);
-      if (reportees) bits.push(reportees);
+      const annulees = phraseAnnulees(r.annulees);
+      if (annulees) bits.push(annulees);
       return text(bits.join(" "));
     }
   );
@@ -1293,7 +1288,7 @@ function register(server: McpServer) {
         .string()
         .optional()
         .describe(
-          "Avec « annuler: true » seulement, FACULTATIF : la suite — date de relance « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm ». Absente, la relance que le rendez-vous avait repoussée (s'il y en a une) se réveille seule au premier jour ouvré. Demandez à l'utilisateur s'il a une date en tête plutôt que d'en inventer une."
+          "Avec « annuler: true » seulement, FACULTATIF : la suite — date de relance « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm ». Absente, rien n'est posé : si la fiche n'a plus aucune relance, elle ne remontera plus nulle part — demandez à l'utilisateur s'il a une date en tête plutôt que d'en inventer une."
         ),
     },
     async (args, extra) => {
@@ -1345,9 +1340,9 @@ function register(server: McpServer) {
       const bits = [
         `✅ Rendez-vous « ${r.title} » reporté au ${fmtDateTime(r.startsAtISO)}.`,
       ];
-      // Le filet a suivi le rendez-vous (trigger, migration 022).
-      const suivies = phraseReportees(r.reportees);
-      if (suivies) bits.push(suivies);
+      // Relances qui tombent désormais avant le RDV : clôturées (trigger, 022).
+      const annulees = phraseAnnulees(r.annulees);
+      if (annulees) bits.push(annulees);
       if (r.conflit) {
         bits.push(
           `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`

@@ -11,6 +11,7 @@ out="${1:-/dev/stdout}"
 -- === Baseline, dans la même transaction, juste avant la migration ===
 create temp table base_prospects on commit drop as select id, next_action_at from public.prospects;
 create temp table base_tasks on commit drop as select id, due_at, status from public.tasks;
+create temp table base_counts on commit drop as select count(*) as c from public.activities;
 SQL
   echo "-- === Migration 022, verbatim ==="
   cat supabase/migrations/022_rdv_prochaine_action.sql

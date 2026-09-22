@@ -106,8 +106,7 @@ function describeContext(last: LastEvent, contact: string | null): string {
  * Assemble le bloc « Prochaine action » — la même règle que
  * `recalc_next_action` (migration 022), lue sur les lignes déjà chargées.
  *
- * `openTasks` : les relances ouvertes ÉVEILLÉES (sans les filets endormis,
- * voir `estEnSommeil`), triées par échéance croissante. `meeting` : le
+ * `openTasks` : les relances ouvertes, triées par échéance croissante. `meeting` : le
  * rendez-vous VIVANT le plus proche (`rdvQuiCompte`) — y compris passé : il
  * attend alors son débrief, et c'est ce que la fiche doit dire, jamais « en
  * retard de relance ».

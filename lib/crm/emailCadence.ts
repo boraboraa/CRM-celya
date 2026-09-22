@@ -20,7 +20,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { inDaysAt9 } from "@/lib/time";
 import { normalizeStatus } from "@/lib/constants";
 import { isManualOnly } from "@/lib/crm/status";
-import { estEnSommeil, rdvQuiCompte } from "@/lib/crm/prochaineAction";
 
 /** Sans réponse au bout de 5 jours, la fiche remonte dans « À faire ». */
 export const EMAIL_FOLLOWUP_DAYS = 5;
@@ -56,26 +55,13 @@ export async function applyEmailSentCadence(
   //    « fait » (le trigger stamp_task_completion horodate), les autres sont
   //    annulées. Les tâches « RDV … » ne sont jamais touchées — même
   //    protection que partout ailleurs.
-  //    Un FILET endormi (relance repoussée derrière un rendez-vous encore
-  //    vivant, migration 022) n'est pas l'action en cours : l'envoi n'y touche
-  //    pas — il doit rester là si le rendez-vous tombe à l'eau.
-  const [{ data: openTasks }, { data: rdvs }] = await Promise.all([
-    supabase
-      .from("tasks")
-      .select("id, title, meeting_id")
-      .eq("prospect_id", prospectId)
-      .eq("status", "a_faire")
-      .order("due_at", { ascending: true }),
-    supabase
-      .from("meetings")
-      .select("id, starts_at, status")
-      .eq("prospect_id", prospectId)
-      .eq("kind", "prospect"),
-  ]);
-  const meetings = (rdvs ?? []) as { id: string; starts_at: string; status: string }[];
-  const relances = (openTasks ?? []).filter(
-    (t) => !t.title.startsWith("RDV") && !estEnSommeil(t, meetings)
-  );
+  const { data: openTasks } = await supabase
+    .from("tasks")
+    .select("id, title")
+    .eq("prospect_id", prospectId)
+    .eq("status", "a_faire")
+    .order("due_at", { ascending: true });
+  const relances = (openTasks ?? []).filter((t) => !t.title.startsWith("RDV"));
 
   let completedTitle: string | null = null;
   if (relances.length > 0) {
@@ -103,27 +89,26 @@ export async function applyEmailSentCadence(
     };
   }
 
-  // Un rendez-vous vivant à venir tombe AVANT l'échéance de +5 jours : c'est
-  // lui, la suite (un mail avant un RDV le prépare ou le confirme). La relance
-  // « si pas de réponse » ne réclamerait rien d'utile entre-temps — elle naît
-  // donc directement FILET de ce rendez-vous, au premier jour ouvré qui le
-  // suit (même date que le trigger de la 022, calculée par la base).
-  let followUpAt = inDaysAt9(EMAIL_FOLLOWUP_DAYS);
-  let meetingId: string | null = null;
-  const rdv = rdvQuiCompte(meetings);
-  if (
-    rdv &&
-    new Date(rdv.starts_at).getTime() > Date.now() &&
-    new Date(followUpAt).getTime() < new Date(rdv.starts_at).getTime()
-  ) {
-    const { data: apres } = await supabase.rpc("premier_jour_ouvre_apres", {
-      p_ts: rdv.starts_at,
-    });
-    if (typeof apres === "string") {
-      followUpAt = new Date(apres).toISOString();
-      meetingId = rdv.id;
-    }
+  // Un rendez-vous VIVANT sur la fiche (à venir, ou passé et pas encore
+  // débriefé) est déjà la prochaine action : la suite se décidera au débrief,
+  // pas dans une relance automatique « si pas de réponse » (migration 022 —
+  // décision de Bora, 22/09 : après un RDV, une relance n'a plus de sens). Un
+  // mail avant un RDV le prépare ou le confirme ; il ne rouvre pas de relance.
+  const { count: rdvVivants } = await supabase
+    .from("meetings")
+    .select("id", { count: "exact", head: true })
+    .eq("prospect_id", prospectId)
+    .eq("kind", "prospect")
+    .in("status", ["prevu", "confirme", "reporte"]);
+  if ((rdvVivants ?? 0) > 0) {
+    return {
+      completedTitle,
+      cancelled: Math.max(0, relances.length - 1),
+      followUpAt: null,
+    };
   }
+
+  const followUpAt = inDaysAt9(EMAIL_FOLLOWUP_DAYS);
   await supabase.from("tasks").insert({
     prospect_id: prospectId,
     title: `Relancer ${prospect.company_name} si pas de réponse`,
@@ -131,7 +116,6 @@ export async function applyEmailSentCadence(
     priority: 2,
     assignee_id: userId,
     created_by: userId,
-    meeting_id: meetingId,
   });
 
   return {

@@ -113,9 +113,6 @@ export default async function TodoPage({
         .from("tasks")
         .select(TASK_SELECT)
         .eq("status", "a_faire")
-        // Un FILET qui dort (relance reportée après un RDV encore vivant,
-        // migration 022) ne réclame rien : c'est le RDV, puis son débrief.
-        .eq("en_sommeil", false)
         .lt("due_at", start),
       perimetre,
       viewer
@@ -129,7 +126,6 @@ export default async function TodoPage({
         .from("tasks")
         .select(TASK_SELECT)
         .eq("status", "a_faire")
-        .eq("en_sommeil", false)
         .gte("due_at", start)
         .lte("due_at", end),
       perimetre,

@@ -625,44 +625,45 @@ de `next_action_kind` (`rendez_vous` | `relance`). La règle vit en SQL parce qu
 le connecteur MCP écrit en service_role sans passer par les écrans ; seul le
 CHOIX humain (la suite d'un débrief) reste en TypeScript (`cloturerRendezVous`).
 
-- **Poser ou déplacer un RDV** reporte les relances ouvertes qui tombaient
-  AVANT lui **et qui existaient déjà** (`tasks.updated_at < meetings.created_at`)
-  au **premier jour ouvré qui suit le RDV, 09:00 Bruxelles**
-  (`premier_jour_ouvre_apres`). Elles deviennent son **filet**
-  (`tasks.meeting_id`) : pas supprimées, **endormies**.
-- **Une relance posée ou re-datée APRÈS que le RDV existe n'est JAMAIS
-  reportée** (arbitrage de Bora : « confirmer la veille » évite les lapins). Elle
-  passe devant le RDV, et la fiche dit la relance, **puis** le RDV. L'invariant
-  est « une seule prochaine action AFFICHÉE », pas « une seule ligne ».
-- Un filet **dort** tant que son RDV est vivant (`rdv_vivant` : prévu / confirmé
-  / **reporté**, passé compris) : hors de `next_action_at`, de la zone
-  « À appeler » (`.eq("en_sommeil", false)`, champ calculé PostgREST), de
-  l'outil `a_faire` et du compte `/equipe` des retards.
-- **Clore un RDV** (honoré / annulé, par N'IMPORTE QUEL chemin) **réveille** le
-  filet au premier jour ouvré suivant. Le débrief propose « **Et ensuite ?** »
-  (Demain / +3 j / +1 sem / date / Rien) — **offert, jamais exigé** : « Ça
-  s'est fait » reste à UN tap, et sans choix le réveil fait le travail. MCP :
-  `deplacer_rendez_vous(annuler, relancer_le)`.
-- Un **re-datage humain** d'un filet le **détache** (`tasks_detache_filet`) ;
-  seul le trigger de `meetings` re-date un filet sans le détacher (drapeau
-  transactionnel `celya.report_rdv`).
-- **Un RDV n'est jamais « en retard »** : passé, il dit « À débriefer ». Écrans :
-  `ProchaineActionTexte` (`components/ui.tsx`) sur la liste, les colonnes et la
-  zone calme ; `deriveNextAction` sur la carte de la fiche. Lecture pure et
-  miroirs de la règle dans `lib/crm/prochaineAction.ts` (`npm run
-  test:prochaine-action`).
-- Fiche Gagné / Perdu : aucun filet posé ni déplacé, pas de « Et ensuite ? ».
+**UNE seule mécanique** (décision de Bora, 22/09 : après un rendez-vous, une
+relance n'a plus de sens, tout dépend de ce qu'il a donné) : **poser ou
+déplacer un RDV CLÔTURE les relances ouvertes de la fiche qui tombent avant
+lui**, à cet instant — `annule`, pas reportées — et chacune laisse une note au
+journal (« Relance annulée : rendez-vous posé le 28/09 à 12h », `is_exchange`
+faux, signée de qui a posé le RDV). Trigger `meetings_prochaine_action`.
+
+- **Ce qui est posé APRÈS le RDV n'est jamais touché**, par construction — pas
+  de comparaison d'horodatages. « Confirmer la veille » passe devant le RDV :
+  la fiche dit la relance, **puis** le RDV. Mais un RDV **déplacé plus tard**
+  clôture à son tour ce qui tombe désormais avant lui, confirmation comprise.
+- **Un RDV passé non débriefé reste LA prochaine action**, affiché « À
+  débriefer », jamais en ambre. C'est le seul garde-fou contre une fiche qui
+  disparaît quand on oublie de débriefer — **ne pas l'affaiblir**.
+- **Un RDV clos (honoré / annulé) sans suite laisse la fiche SANS prochaine
+  action** : ses relances d'avant ont été clôturées à la pose. Elle sort de
+  « À faire » et reste dans la liste (« — »), étape inchangée. « Et ensuite ? »
+  (Demain / +3 j / +1 sem / date) est **offert, jamais exigé** — « Ça s'est
+  fait » reste à UN tap. MCP : `deplacer_rendez_vous(annuler, relancer_le)`,
+  qui avertit Claude quand la fiche n'a plus rien.
+- Un RDV saisi **dans le passé** ne clôture rien ; fiche **Gagné / Perdu** :
+  rien n'est clôturé ni tracé ; **RDV perso** : hors règle.
 - **La zone « à débriefer » lit aussi `reporte`** : un RDV reporté puis passé
   n'y remontait JAMAIS (Garage Boetendael, RDV du 02/09, invisible trois
   semaines).
-- La cadence email n'éteint pas un filet endormi, et sa relance « si pas de
-  réponse » naît filet d'un RDV à venir qui la précède.
+- La cadence email ne crée **pas** de relance « si pas de réponse » sur une
+  fiche qui a un RDV vivant : c'est le débrief qui décidera.
+- Écrans : `ProchaineActionTexte` (`components/ui.tsx`) sur la liste, les
+  colonnes et la zone calme ; `deriveNextAction` sur la carte de la fiche ; la
+  pose depuis l'agenda dit quelles relances ont été clôturées
+  (`phraseAnnulees`). Lecture pure dans `lib/crm/prochaineAction.ts`
+  (`npm run test:prochaine-action`).
+- **Reprise** : la migration ne clôture RIEN rétroactivement (la règle vaut à
+  la pose) ; elle recalcule `next_action_*` sur toute la base.
 
-**Ordre** : la migration d'ABORD (le code du lot lit `next_action_kind`,
-`meeting_id` et `en_sommeil`), le déploiement ensuite. Recette :
-`supabase/recettes/022_assembler.sh` (baseline → migration → 55 assertions →
-exception finale), **55 OK, 0 faute** le 22/09, production revérifiée intacte
-(empreintes md5 identiques).
+**Ordre** : la migration d'ABORD (le code du lot lit `next_action_kind`), le
+déploiement ensuite. Recette : `supabase/recettes/022_assembler.sh` (baseline →
+migration → assertions → exception finale), **43 OK, 0 faute** le 22/09,
+production revérifiée intacte (empreintes md5 identiques).
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 

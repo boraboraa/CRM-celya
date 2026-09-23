@@ -327,6 +327,7 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                             <ProchaineActionTexte
                               at={c.next_action_at}
                               kind={c.next_action_kind}
+                              statut={c.status}
                               plusRien={c.plus_rien}
                               className="shrink-0 text-[11px]"
                               couleurNeutre="text-slate-400"

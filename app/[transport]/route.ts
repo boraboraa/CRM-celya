@@ -156,20 +156,28 @@ const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
  * `prospects`, porte son propre `in` pour la même raison.
  */
 /**
- * Ce que désigne la prochaine action (migration 022) — pour que Claude ne
- * dise jamais « en retard » d'une fiche qui attend son rendez-vous, ni ne
- * propose d'appeler un prospect qu'on voit dans trois jours.
+ * La prochaine action et ce qu'elle désigne (migrations 022 et 023) — pour
+ * que Claude ne dise jamais « en retard » d'une fiche qui attend son
+ * rendez-vous, ni ne propose d'appeler un prospect qu'on voit dans trois
+ * jours, ni ne réclame le débrief d'une fiche gagnée ou perdue (une fiche
+ * close ne réclame jamais rien : `statut` est requis pour le savoir).
  */
-function typeProchaineAction(at: unknown, kind: unknown) {
-  const l = lireProchaineAction(at as string | null, kind as string | null);
+function prochaineActionPourClaude(at: unknown, kind: unknown, statut: unknown) {
+  const l = lireProchaineAction(
+    at as string | null,
+    kind as string | null,
+    Date.now(),
+    statut as string | null
+  );
   return {
-    prochaine_action_type: l.estRdv
-      ? l.aDebriefer
-        ? "rendez-vous passé, à débriefer"
-        : "rendez-vous"
-      : at
-        ? "relance"
-        : null,
+    prochaine_action: l.rien ? null : ((at as string | null) ?? null),
+    prochaine_action_type: l.rien
+      ? null
+      : l.estRdv
+        ? l.aDebriefer
+          ? "rendez-vous passé, à débriefer"
+          : "rendez-vous"
+        : "relance",
     prochaine_action_en_retard: l.retard,
   };
 }
@@ -382,7 +390,7 @@ function register(server: McpServer) {
         .boolean()
         .optional()
         .describe(
-          "Ne garder que les prospects dont la prochaine action échoit aujourd'hui ou est en retard. Une fiche dont la prochaine action est un RENDEZ-VOUS passé y figure aussi : elle n'est pas « en retard », elle attend son débrief (champ « prochaine_action_type »)."
+          "Ne garder que les prospects dont la prochaine action échoit aujourd'hui ou est en retard. Une fiche dont la prochaine action est un RENDEZ-VOUS passé y figure aussi : elle n'est pas « en retard », elle attend son débrief (champ « prochaine_action_type »). Jamais une fiche gagnée ou perdue pour un débrief : une fiche close ne réclame rien — seules ses relances et ses rendez-vous à venir comptent."
         ),
       recherche: z.string().optional().describe("Texte recherché dans société, contact, email ou téléphone."),
       limite: z.number().int().min(1).max(200).optional().describe("Nombre maximum de fiches (défaut 50)."),
@@ -442,9 +450,12 @@ function register(server: McpServer) {
           contact: r.contact_name,
           telephone: r.phone,
           etape: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] ?? r.status,
-          prochaine_action: r.next_action_at,
-          ...typeProchaineAction(r.next_action_at, r.next_action_kind),
-        }));
+          ...prochaineActionPourClaude(r.next_action_at, r.next_action_kind, r.status),
+        }))
+        // « À relancer » : une fiche close dont le RDV vient de commencer n'a
+        // plus rien à faire, même si la tâche horaire (023) ne l'a pas encore
+        // recalculée.
+        .filter((r) => !args.a_relancer || r.prochaine_action !== null);
       return json(`${rows.length} prospect(s).`, rows);
     }
   );
@@ -505,8 +516,7 @@ function register(server: McpServer) {
         valeur_ponderee: p.weighted_value,
         etape_verrouillee: p.status_locked,
         etape_motif_auto: p.status_auto_reason,
-        prochaine_action: p.next_action_at,
-        ...typeProchaineAction(p.next_action_at, p.next_action_kind),
+        ...prochaineActionPourClaude(p.next_action_at, p.next_action_kind, p.status),
         dernier_contact: p.last_contact_at,
         notes: p.notes,
         journal: (activites.data ?? []).map((a) => ({

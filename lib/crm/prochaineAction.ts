@@ -9,12 +9,17 @@
  * le RDV (« confirmer la veille ») n'est jamais touchée : elle passe devant, la
  * fiche dit la relance, puis le RDV.
  *
+ * Une fiche gagnée ou perdue ne réclame jamais rien (migration 023) : elle
+ * n'affiche que ce que l'utilisateur a planifié — un RDV à venir, une relance
+ * ouverte même en retard —, jamais le débrief d'un RDV passé.
+ *
  * La DONNÉE est tenue en SQL (`recalc_next_action`, triggers sur tasks et
  * meetings) : c'est là que vit la règle, pour l'écran comme pour le connecteur
  * MCP et le SQL direct. Ce module ne fait que la LIRE et la DIRE, avec des
  * miroirs purs de la même règle — `rdvVivant`, `rdvQuiCompte`,
  * `relancePasseDevant` — pour les écrans qui ont déjà les lignes en main (la
- * fiche). Toute évolution de la 022 se répercute ici, et inversement.
+ * fiche). Toute évolution de la 022 / 023 (`prochaine_action_de`) se répercute
+ * ici, et inversement.
  *
  * Module NEUTRE (ni serveur, ni client), imports relatifs seulement : il est
  * exécuté tel quel par `npm run test:prochaine-action`.
@@ -30,13 +35,37 @@ export function rdvVivant(status: string | null | undefined): boolean {
   return status === "prevu" || status === "confirme" || status === "reporte";
 }
 
-/** Le rendez-vous qui compte : le plus proche des rendez-vous VIVANTS. */
+/**
+ * Une fiche CLOSE (gagnée ou perdue) ne réclame jamais rien : elle n'affiche
+ * que ce que l'utilisateur a lui-même planifié — un rendez-vous À VENIR, une
+ * relance ouverte (même en retard). Le débrief d'un rendez-vous passé, lui,
+ * est ce que le système réclame : il n'existe pas sur une fiche close
+ * (migration 023).
+ */
+export function ficheClose(status: string | null | undefined): boolean {
+  return status === "gagne" || status === "perdu";
+}
+
+/** Un rendez-vous a-t-il commencé ? Miroir de `starts_at > now()` (023). */
+function aCommence(startsAt: string, now: number): boolean {
+  return !(new Date(startsAt).getTime() > now);
+}
+
+/**
+ * Le rendez-vous qui compte : le plus proche des rendez-vous VIVANTS — passé
+ * compris sur une fiche ouverte (il attend son débrief), À VENIR seulement sur
+ * une fiche close. Miroir de `prochaine_action_de` (023).
+ */
 export function rdvQuiCompte<M extends { starts_at: string; status: string }>(
-  meetings: M[]
+  meetings: M[],
+  statutFiche?: string | null,
+  now: number = Date.now()
 ): M | null {
+  const close = ficheClose(statutFiche);
   let best: M | null = null;
   for (const m of meetings) {
     if (!rdvVivant(m.status)) continue;
+    if (close && aCommence(m.starts_at, now)) continue;
     if (!best || new Date(m.starts_at).getTime() < new Date(best.starts_at).getTime()) {
       best = m;
     }
@@ -94,22 +123,39 @@ export type LectureProchaineAction = {
   /** Le rendez-vous est passé : il attend son débrief. */
   aDebriefer: boolean;
   estRdv: boolean;
+  /**
+   * Rien à dire : pas de prochaine action — ou le rendez-vous d'une fiche
+   * close vient de commencer et la base ne l'a pas encore recalculée (la tâche
+   * horaire de la 023 le fera). On écrit alors ce qu'on écrit sans date.
+   */
+  rien: boolean;
+};
+
+const RIEN: LectureProchaineAction = {
+  texte: null,
+  icone: null,
+  retard: false,
+  aDebriefer: false,
+  estRdv: false,
+  rien: true,
 };
 
 /**
  * Lit `prospects.next_action_at` + `next_action_kind` pour une liste, une
  * carte de pipeline ou une ligne du tableau de bord. Un rendez-vous n'est
- * jamais « en retard » : à venir, il se dit ; passé, il demande son débrief.
+ * jamais « en retard » : à venir, il se dit ; passé, il demande son débrief —
+ * sauf sur une fiche close (`statut` gagné / perdu), qui ne réclame jamais
+ * rien (023) : le débrief n'y est pas dit.
  * `kind` absent (base d'avant la 022) = relance, le comportement d'avant.
  */
 export function lireProchaineAction(
   at: string | null | undefined,
   kind: string | null | undefined,
-  now: number = Date.now()
+  now: number = Date.now(),
+  statut?: string | null
 ): LectureProchaineAction {
-  if (!at) {
-    return { texte: null, icone: null, retard: false, aDebriefer: false, estRdv: false };
-  }
+  if (!at) return RIEN;
+  if (kind === "rendez_vous" && ficheClose(statut) && aCommence(at, now)) return RIEN;
   if (kind === "rendez_vous") {
     const passe = new Date(at).getTime() < now;
     return {
@@ -118,6 +164,7 @@ export function lireProchaineAction(
       retard: false,
       aDebriefer: passe,
       estRdv: true,
+      rien: false,
     };
   }
   return {
@@ -126,6 +173,7 @@ export function lireProchaineAction(
     retard: new Date(at).getTime() < now,
     aDebriefer: false,
     estRdv: false,
+    rien: false,
   };
 }
 

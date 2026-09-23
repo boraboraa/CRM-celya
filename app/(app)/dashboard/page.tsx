@@ -19,6 +19,7 @@ import {
 } from "@/lib/crm/lastAction";
 import { relanceEnLecture } from "@/lib/crm/access";
 import { ligneAgendaJour } from "@/lib/crm/agendaJour";
+import { ficheClose } from "@/lib/crm/prochaineAction";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -315,23 +316,27 @@ export default async function TodoPage({
       meetingProspects.set(p.id, p);
     }
   }
-  const debriefMeetings: DebriefMeeting[] = aDebriefer.map((m) => ({
-    id: m.id,
-    title: m.title,
-    starts_at: m.starts_at,
-    ends_at: m.ends_at,
-    prospect: m.prospect_id
-      ? {
-          id: m.prospect_id,
-          company_name:
-            meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
-          // Gagné / Perdu : on ne pose plus rien — pas de « Et ensuite ? ».
-          close: ["gagne", "perdu"].includes(
-            meetingProspects.get(m.prospect_id)?.status ?? ""
-          ),
-        }
-      : null,
-  }));
+  // Une fiche gagnée ou perdue ne réclame jamais de débrief (migration 023) :
+  // sa fiche ne le dit plus, cette zone non plus — une source d'affichage qui
+  // contredirait la fiche serait pire que pas de filtre du tout. Le statut
+  // vient de la requête groupée ci-dessus ; le RDV perso (sans fiche) reste.
+  const debriefMeetings: DebriefMeeting[] = aDebriefer
+    .filter(
+      (m) => !m.prospect_id || !ficheClose(meetingProspects.get(m.prospect_id)?.status)
+    )
+    .map((m) => ({
+      id: m.id,
+      title: m.title,
+      starts_at: m.starts_at,
+      ends_at: m.ends_at,
+      prospect: m.prospect_id
+        ? {
+            id: m.prospect_id,
+            company_name:
+              meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
+          }
+        : null,
+    }));
 
   // Une fiche qui a répondu vit en zone 3 — ses relances n'encombrent pas la
   // zone 1 le temps du tri. (Les rendez-vous ne passent plus par des tâches

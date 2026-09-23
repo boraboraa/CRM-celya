@@ -15,10 +15,15 @@
  *
  * La fiche de référence est celle d'Alain docteur, lue en base le 22/09 :
  * RDV le 28/09 à 10:00 UTC (12h à Bruxelles), relance au 25/09 07:00 UTC.
+ *
+ * Migration 023 (section 9) : une fiche gagnée ou perdue ne réclame jamais
+ * rien — seuls ses RDV à venir et ses relances ouvertes comptent. Mêmes cas
+ * que supabase/recettes/023_corps.sql.
  */
 
 import { deriveNextAction, type OpenTask, type NextMeeting } from "./nextAction.ts";
 import {
+  ficheClose,
   jourHeureCourt,
   libelleRdv,
   lireProchaineAction,
@@ -61,10 +66,13 @@ function tache(id: string, due: string, title = "Relancer Alain docteur"): Tache
   return { id, title, due_at: due, priority: 2, prospect_id: "p-alain" };
 }
 
-/** Ce que la fiche affiche : le même chemin que app/(app)/prospects/[id]. */
-function fiche(taches: Tache[], rdvs: Rdv[], now: number) {
+/**
+ * Ce que la fiche affiche : le même chemin que app/(app)/prospects/[id] —
+ * étape de la fiche comprise (023).
+ */
+function fiche(taches: Tache[], rdvs: Rdv[], now: number, statut: string = "rendez_vous") {
   const ouvertes = [...taches].sort((a, b) => T(a.due_at) - T(b.due_at));
-  return deriveNextAction(ouvertes, null, null, rdvQuiCompte(rdvs), now);
+  return deriveNextAction(ouvertes, null, null, rdvQuiCompte(rdvs, statut, now), now);
 }
 
 /** Combien de prochaines actions la carte affiche-t-elle ? (0 ou 1, jamais 2.) */
@@ -239,8 +247,80 @@ console.log("\n— 8. fiche_gagnee_ou_perdue —");
 {
   // Le trigger ne clôture rien ; si une relance tombe avant, elle reste la
   // prochaine action (c'est l'humain qui gère une fiche close).
-  const v = fiche([tache("t7", "2026-09-25T07:00:00Z")], [RDV_ALAIN], LE_22);
+  const v = fiche([tache("t7", "2026-09-25T07:00:00Z")], [RDV_ALAIN], LE_22, "gagne");
   verifie("la relance non clôturée reste devant", [v.task?.id, v.ensuite?.id], ["t7", "m-alain"]);
+}
+
+// --- 9. Une fiche close ne réclame jamais rien (migration 023) ---------------
+console.log("\n— 9. fiche_close_ne_reclame_rien —");
+{
+  verifie("close : gagné, perdu", ["gagne", "perdu"].map(ficheClose), [true, true]);
+  verifie(
+    "ouvertes : les quatre autres",
+    ["a_appeler", "contacte", "rendez_vous", "proposition"].map(ficheClose),
+    [false, false, false, false]
+  );
+
+  // gagne + RDV à venir (installation) : il s'affiche, comme sur une fiche ouverte.
+  const installe = fiche([], [RDV_ALAIN], LE_22, "gagne");
+  verifie("gagne + RDV à venir : il s'affiche", [installe.isMeeting, installe.when], [true, "RDV le 28/09 à 12h"]);
+  const lInstalle = lireProchaineAction(RDV_ALAIN.starts_at, "rendez_vous", LE_22, "gagne");
+  verifie("…et la liste le dit pareil", [lInstalle.rien, lInstalle.texte], [false, "RDV le 28/09 à 12h"]);
+
+  // gagne + RDV passé non débriefé : rien, nulle part.
+  const gPasse = fiche([], [RDV_ALAIN], LE_30, "gagne");
+  verifie("gagne + RDV passé non débriefé : la fiche ne réclame rien", [combien(gPasse), gPasse.aDebriefer, gPasse.when], [0, false, null]);
+  const lPasse = lireProchaineAction(RDV_ALAIN.starts_at, "rendez_vous", LE_30, "gagne");
+  verifie(
+    "…la liste non plus (état d'avant la tâche horaire)",
+    [lPasse.rien, lPasse.texte, lPasse.aDebriefer, lPasse.retard],
+    [true, null, false, false]
+  );
+
+  // gagne + RDV passé + relance planifiée (« rappeler dans 6 mois ») : la relance.
+  const suivi = fiche([tache("t10", "2027-03-28T07:00:00Z", "Rappeler dans 6 mois")], [RDV_ALAIN], LE_30, "gagne");
+  verifie("gagne + RDV passé + relance planifiée : la relance", [suivi.task?.id, suivi.isMeeting, suivi.ensuite], ["t10", false, null]);
+
+  // perdu + relance ouverte EN RETARD : elle s'affiche, en retard — c'est un
+  // rappel que l'utilisateur a posé (perdu sert aussi de vivier).
+  const vivier = fiche([tache("t11", "2026-09-15T07:00:00Z")], [], LE_22, "perdu");
+  verifie("perdu + relance en retard : elle s'affiche, en retard", [vivier.task?.id, vivier.overdue], ["t11", true]);
+  const lVivier = lireProchaineAction("2026-09-15T07:00:00Z", "relance", LE_22, "perdu");
+  verifie("…la liste aussi, en ambre", [lVivier.rien, lVivier.retard], [false, true]);
+
+  // perdu + RDV passé : rien.
+  const pPasse = fiche([], [RDV_ALAIN], LE_30, "perdu");
+  verifie("perdu + RDV passé : rien", [combien(pPasse), pPasse.aDebriefer], [0, false]);
+
+  // Garage Boetendael, réel : gagné, RDV REPORTÉ du 02/09 jamais débriefé.
+  const boetendael: Rdv = { ...RDV_ALAIN, id: "m-boetendael", starts_at: "2026-09-02T09:00:00Z", ends_at: "2026-09-02T10:00:00Z", status: "reporte" };
+  const LE_23 = T("2026-09-23T09:00:00Z");
+  verifie("Garage Boetendael (gagné) : plus de « À débriefer — RDV du 02/09 »", combien(fiche([], [boetendael], LE_23, "gagne")), 0);
+  verifie(
+    "…ni dans la liste",
+    lireProchaineAction("2026-09-02T09:00:00Z", "rendez_vous", LE_23, "gagne").rien,
+    true
+  );
+  // ZZ Test délivrabilité, réel : perdu, relance du 15/09.
+  verifie(
+    "ZZ Test (perdu) : sa relance du 15/09 reste, en retard",
+    [lireProchaineAction("2026-09-15T07:00:00Z", "relance", LE_23, "perdu").rien,
+     lireProchaineAction("2026-09-15T07:00:00Z", "relance", LE_23, "perdu").retard],
+    [false, true]
+  );
+
+  // Changer l'étape change ce que dit la fiche, dans les deux sens.
+  verifie(
+    "ouverte → gagne : le débrief disparaît ; gagne → ouverte : il revient",
+    [fiche([], [boetendael], LE_23, "contacte").aDebriefer, fiche([], [boetendael], LE_23, "gagne").aDebriefer],
+    [true, false]
+  );
+
+  // Un RDV qui commence à l'instant : commencé (miroir de `starts_at > now()`).
+  const pile = T(RDV_ALAIN.starts_at);
+  verifie("RDV qui commence à l'instant, fiche close : il ne compte plus", rdvQuiCompte([RDV_ALAIN], "gagne", pile), null);
+  verifie("…une minute avant, si", rdvQuiCompte([RDV_ALAIN], "gagne", pile - 60_000)?.id, "m-alain");
+  verifie("sans étape (appel d'avant la 023) : la règle 022", rdvQuiCompte([RDV_ALAIN], undefined, LE_30)?.id, "m-alain");
 }
 
 // --- Bout en bout : une seule prochaine action à chaque étape ----------------

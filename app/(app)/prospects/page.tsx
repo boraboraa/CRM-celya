@@ -446,6 +446,7 @@ export default async function ProspectsPage({
                       <ProchaineActionTexte
                         at={p.next_action_at}
                         kind={p.next_action_kind}
+                        statut={p.status}
                         plusRien={plusRien(p)}
                       />
                     </td>

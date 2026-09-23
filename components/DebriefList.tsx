@@ -15,11 +15,13 @@ export type DebriefMeeting = {
   title: string;
   starts_at: string;
   ends_at: string;
+  /**
+   * Jamais une fiche gagnée ou perdue : une fiche close ne réclame pas de
+   * débrief (023) — le tableau de bord les écarte avant d'arriver ici.
+   */
   prospect: {
     id: string;
     company_name: string;
-    /** Gagné / Perdu : on ne pose plus rien, pas de « Et ensuite ? ». */
-    close?: boolean;
   } | null;
 };
 
@@ -177,7 +179,7 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
               className="input py-1.5 text-xs"
             />
 
-            {m.prospect && !m.prospect.close && (
+            {m.prospect && (
               <div
                 className="flex flex-wrap items-center gap-1"
                 role="group"

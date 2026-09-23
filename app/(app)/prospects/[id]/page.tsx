@@ -217,14 +217,16 @@ export default async function ProspectDetailPage({
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   // « Prochaine action » — dérivée sans le moindre appel à un modèle, par la
-  // même règle que la base (migration 022, lib/crm/prochaineAction.ts) : le
-  // rendez-vous VIVANT le plus proche — passé compris, il attend alors son
+  // même règle que la base (migrations 022 et 023, lib/crm/prochaineAction.ts) :
+  // le rendez-vous VIVANT le plus proche — passé compris, il attend alors son
   // débrief —, sauf relance posée après lui et tombant avant (« confirmer la
-  // veille »).
+  // veille »). Sur une fiche gagnée ou perdue, seul un rendez-vous À VENIR
+  // compte : une fiche close ne réclame jamais de débrief. Sans l'étape, la
+  // carte et la base se contrediraient.
   const lastEvent: LastEvent = timeline[0]
     ? { kind: timeline[0].kind, at: timeline[0].at }
     : null;
-  const rdvCourant = rdvQuiCompte(meetings);
+  const rdvCourant = rdvQuiCompte(meetings, status);
   const prochainRdv =
     meetings.find(
       (m) => rdvVivant(m.status) && new Date(m.starts_at).getTime() >= Date.now()
@@ -258,7 +260,9 @@ export default async function ProspectDetailPage({
   });
   const lectureNext = lireProchaineAction(
     prospect.next_action_at,
-    prospect.next_action_kind
+    prospect.next_action_kind,
+    Date.now(),
+    status
   );
 
   // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur
@@ -482,7 +486,7 @@ export default async function ProspectDetailPage({
                     <Icone nom={lectureNext.icone} className="h-3.5 w-3.5 text-blue-300" />
                   )}
                   {lectureNext.texte ??
-                    (prospect.next_action_at
+                    (!lectureNext.rien && prospect.next_action_at
                       ? fmtDateTime(prospect.next_action_at)
                       : plusRien
                         ? PLUS_RIEN_COURT

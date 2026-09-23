@@ -523,10 +523,13 @@ export function FormError({ message }: { message?: string }) {
  * `sansDate` : ce qu'on écrit quand il n'y a rien (« — » par défaut).
  * `plusRien` : la fiche a eu un rendez-vous clos sans suite (voir
  * `plusRienDePrevu`) — on écrit « Plus rien de prévu », passif, au lieu de « — ».
+ * `statut` : l'étape de la fiche. Gagnée ou perdue, elle ne réclame jamais de
+ * débrief (023) — un rendez-vous qui a commencé n'y est pas dit.
  */
 export function ProchaineActionTexte({
   at,
   kind,
+  statut,
   sansDate = "—",
   className = "",
   couleurNeutre = "",
@@ -534,6 +537,7 @@ export function ProchaineActionTexte({
 }: {
   at: string | null | undefined;
   kind: string | null | undefined;
+  statut?: string | null;
   sansDate?: string;
   /** Mise en page seulement — la couleur est celle de l'état. */
   className?: string;
@@ -542,8 +546,8 @@ export function ProchaineActionTexte({
   /** RDV clos sans suite : « Plus rien de prévu » au lieu de « — ». */
   plusRien?: boolean;
 }) {
-  const l = lireProchaineAction(at, kind);
-  if (!at && plusRien) {
+  const l = lireProchaineAction(at, kind, Date.now(), statut);
+  if (l.rien && plusRien) {
     return (
       <span
         className={`italic text-slate-400 ${className}`}
@@ -553,7 +557,7 @@ export function ProchaineActionTexte({
       </span>
     );
   }
-  if (!at) return <span className={`${couleurNeutre} ${className}`}>{sansDate}</span>;
+  if (!at || l.rien) return <span className={`${couleurNeutre} ${className}`}>{sansDate}</span>;
   if (l.estRdv) {
     return (
       <span

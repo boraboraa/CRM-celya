@@ -30,8 +30,8 @@ C'est l'objet de la `021` (table `supervision`, relation **orientée**). Voir
 « L'encadrement ».
 
 **Au 23 septembre**, la `021` et la `022` sont **appliquées en production**
-(vérifié par Bora). La `023` (une fiche close ne réclame rien) est écrite et
-recettée, **pas encore appliquée**.
+(vérifié par Bora). La `023` (une fiche close ne réclame rien) est **appliquée
+depuis le 23/09 à 11h38 UTC**, fichier du commit `4330114` tel quel.
 
 ### État au 25 août 2026
 
@@ -698,7 +698,7 @@ retirés** à l'application (logique identique, relue le 23/09) — les empreint
 `md5(prosrc)` de `recalc_next_action` et `meetings_prochaine_action` diffèrent
 donc du fichier sans qu'il y ait de dérive.
 
-### Une fiche close ne réclame jamais rien (migration `023`, 23 septembre — ÉCRITE, PAS APPLIQUÉE)
+### Une fiche close ne réclame jamais rien (migration `023`, 23 septembre — appliquée le 23/09 à 11h38 UTC)
 
 La `022` ne regardait pas l'étape : Garage Boetendael, **gagné**, affichait en
 permanence « À débriefer — RDV du 02/09 ».
@@ -748,7 +748,14 @@ les fiches closes de la zone débrief (le drapeau `close` de `DebriefList` est
 retiré, devenu mort) ; `lister_prospects(a_relancer)` écarte une fiche close
 dont le RDV vient de commencer. Aucun bouton, aucun filtre, aucun tap ajouté.
 
-**Ordre** : indifférent. La `023` n'ajoute aucune colonne ; le code de la PR
+**Appliquée le 23/09 à 11h38 UTC** (fichier du commit `4330114` tel quel,
+commentaires compris). Vérifié par Bora juste après : Boetendael sans prochaine
+action, Alain docteur et ZZ Test gardent leurs relances, 16 fiches avec une
+action et 0 incohérence, aucune relance / RDV / note touchés, déclencheur
+d'étape actif, tâche horaire passée seule à 12h07 UTC (réussie, 0 fiche à
+corriger).
+
+**Ordre** (pour mémoire) : indifférent. La `023` n'ajoute aucune colonne ; le code de la PR
 tourne contre la base d'avant (la fiche calcule elle-même, la liste masque le
 débrief d'une fiche close) comme d'après. **Reprise** mesurée : une seule
 fiche change, Garage Boetendael → plus rien ; aucune relance, aucun RDV, aucune

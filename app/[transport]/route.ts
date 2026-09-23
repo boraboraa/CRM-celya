@@ -74,6 +74,7 @@ import {
   poserRendezVous,
   deplacerRendezVous,
   cloturerRendezVous,
+  prochainRdvAVenir,
   MEETING_STATUS_LABEL,
   type MeetingStatus,
 } from "@/lib/crm/agenda";
@@ -99,7 +100,11 @@ import {
   fmtDateTime,
 } from "@/lib/constants";
 import { todayBounds, localInputToISO, isoToLocalInput, dateInputToISO } from "@/lib/time";
-import { lireProchaineAction, phraseAnnulees } from "@/lib/crm/prochaineAction";
+import {
+  lireProchaineAction,
+  phraseAnnulees,
+  refusRelanceAvantRdv,
+} from "@/lib/crm/prochaineAction";
 import type { ProspectStatus } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -1038,7 +1043,7 @@ function register(server: McpServer) {
   // --- planifier_relance ----------------------------------------------------
   server.tool(
     "planifier_relance",
-    "Pose une relance datée sur un prospect (met à jour next_action_at et la tâche associée, sans jamais créer de doublon : la relance ouverte existante est re-datée). La date est « YYYY-MM-DD » (échéance à 09:00) ou « YYYY-MM-DDTHH:mm » (heure précise, heure de Bruxelles). Pour un RENDEZ-VOUS, utilisez « poser_rendez_vous » (agenda, jour ET heure obligatoires) — le type « rendez_vous » ici exige aussi une heure et crée le même rendez-vous d'agenda.",
+    "Pose une relance datée sur un prospect (met à jour next_action_at et la tâche associée, sans jamais créer de doublon : la relance ouverte existante est re-datée). La date est « YYYY-MM-DD » (échéance à 09:00) ou « YYYY-MM-DDTHH:mm » (heure précise, heure de Bruxelles). REFUSE une date qui tombe avant un rendez-vous à venir de la fiche : c'est lui la prochaine action, aucune relance n'est posée — ne réessayez pas une autre date avant lui ; proposez plutôt une relance après le rendez-vous, ou demandez à l'utilisateur. Pour un RENDEZ-VOUS, utilisez « poser_rendez_vous » (agenda, jour ET heure obligatoires) — le type « rendez_vous » ici exige aussi une heure et crée le même rendez-vous d'agenda.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -1057,6 +1062,16 @@ function register(server: McpServer) {
       if ("error" in resolved) return fail(resolved.error);
       const refus = await refusSiPasProprietaire(admin, viewer, resolved);
       if (refus) return fail(refus);
+
+      // Aucune relance posée AUTOMATIQUEMENT avant un rendez-vous à venir
+      // (024) : c'est lui la prochaine action. Un humain, à l'écran, garde ce
+      // droit — c'est l'outil, chemin automatique, qui refuse.
+      if ((args.type ?? "note") === "note") {
+        const dueAt = dateInputToISO(args.date);
+        const rdv = await prochainRdvAVenir(admin, resolved.id);
+        const refusRdv = dueAt ? refusRelanceAvantRdv(dueAt, rdv?.starts_at) : null;
+        if (refusRdv) return fail(refusRdv);
+      }
 
       const r = await saveExchangeCore(admin, viewer.userId, {
         prospectId: resolved.id,
@@ -1201,7 +1216,7 @@ function register(server: McpServer) {
   // --- poser_rendez_vous ----------------------------------------------------
   server.tool(
     "poser_rendez_vous",
-    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu. Poser un rendez-vous CLÔTURE les relances ouvertes de la fiche qui tombaient avant lui (tracé au journal) : c'est son débrief qui décidera de la suite. Une relance que vous posez ensuite (ex. confirmer la veille) n'est jamais touchée.",
+    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu. Poser un rendez-vous CLÔTURE les relances ouvertes de la fiche qui tombaient avant lui (tracé au journal) : c'est son débrief qui décidera de la suite. Tant qu'il est à venir, c'est LUI la prochaine action — « planifier_relance » refuse toute relance datée avant lui.",
     {
       id: z.string().optional().describe("Identifiant du prospect."),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),

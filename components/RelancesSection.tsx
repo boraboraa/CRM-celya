@@ -11,6 +11,7 @@ import {
   useOptimisticTasks,
 } from "@/components/TaskList";
 import { dateInputToISO } from "@/lib/time";
+import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
 
 /**
  * Les relances de la fiche : la liste ouverte, le formulaire pour en poser une
@@ -36,9 +37,20 @@ export function RelancesSection({
   prospectId,
   openTasks,
   lectureSeule = false,
+  premiereDansLaCarte = true,
+  rdvAVenir = null,
 }: {
   prospectId: string;
   openTasks: TaskWithProspect[];
+  /**
+   * La carte PROCHAINE ACTION pilote-t-elle la première relance ? Oui quand
+   * elle l'affiche. Non quand un rendez-vous tient la carte (024) : la relance
+   * reste une tâche, et ses commandes restent ICI — sinon elle ne serait
+   * cochable nulle part sur la fiche.
+   */
+  premiereDansLaCarte?: boolean;
+  /** Début (ISO) du prochain rendez-vous à venir : une ligne d'information. */
+  rdvAVenir?: string | null;
   /**
    * Fiche d'un collègue (interrupteur d'équipe) : ses relances se LISENT. On
    * ne coche pas, on ne reporte pas, on n'en pose pas — `tasks_update` et
@@ -110,7 +122,7 @@ export function RelancesSection({
             enCours={enCours}
             geste={geste}
             compact
-            lecture={(i) => lectureSeule || i === 0}
+            lecture={(i) => lectureSeule || (premiereDansLaCarte && i === 0)}
             provisoires={provisoires}
           />
         </ul>
@@ -128,6 +140,15 @@ export function RelancesSection({
         </summary>
         <form ref={formRef} action={planifier} className="card mt-2 space-y-3 p-5">
           <input type="hidden" name="prospect_id" value={prospectId} />
+          {/* On informe, on ne bloque pas (024) : la relance sera posée, elle
+              remontera dans « À appeler » le jour venu, mais la fiche dira
+              toujours le rendez-vous. */}
+          {rdvAVenir && (
+            <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
+              {infoRdvPrevu(rdvAVenir)}
+            </p>
+          )}
           <div>
             <label className="label" htmlFor="title">
               Quoi faire

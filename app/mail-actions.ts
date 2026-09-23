@@ -18,6 +18,8 @@ import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { hasPlaceholder, PLACEHOLDER_ERROR } from "@/lib/crm/email";
+import { prochainRdvAVenir } from "@/lib/crm/agenda";
+import { relanceAvantRdv } from "@/lib/crm/prochaineAction";
 import type { ActionState } from "@/app/actions";
 import type { Email, EmailIntent } from "@/lib/types";
 
@@ -375,7 +377,15 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
   // On ne touche jamais aux tâches RDV.
   const openTasks = (openTasksRaw ?? []).filter((t) => !t.title.startsWith("RDV"));
 
+  // La date vient du TRI (déduite par le modèle, ou une valeur par défaut),
+  // pas d'un choix humain : elle ne pose ni ne re-date jamais une relance
+  // avant un rendez-vous à venir — c'est lui la prochaine action (024). Le
+  // tri, lui, est quand même accepté : la fiche montre déjà le rendez-vous.
+  const rdv = await prochainRdvAVenir(supabase, prospectId);
+  const avantLeRdv = (dueAt: string) => relanceAvantRdv(dueAt, rdv?.starts_at);
+
   const upsertTask = async (title: string, dueAt: string) => {
+    if (avantLeRdv(dueAt)) return;
     if (openTasks.length > 0) {
       await supabase
         .from("tasks")
@@ -436,6 +446,7 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
       // « Je suis en congé jusqu'au 20 » n'est pas une réponse : on décale,
       // on n'annule pas — sinon le prospect se perd par simple calendrier.
       const due = proposedDue ?? inDaysAt9(7);
+      if (avantLeRdv(due)) break;
       if (openTasks.length > 0) {
         await supabase
           .from("tasks")

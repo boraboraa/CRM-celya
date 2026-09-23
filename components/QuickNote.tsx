@@ -7,6 +7,7 @@ import { STATUS_LABEL } from "@/lib/constants";
 import { Icone, LienPourquoiIA } from "@/components/ui";
 import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
+import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
 import type { TimelineEntry } from "@/components/Timeline";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
 
@@ -39,8 +40,14 @@ export function QuickNote({
   prospectId,
   isAdmin = false,
   onOptimistic,
+  rdvAVenir = null,
 }: {
   prospectId: string;
+  /**
+   * Début (ISO) du prochain rendez-vous à venir. Une relance tapée reste
+   * possible ; la note dit seulement qu'un rendez-vous est prévu (024).
+   */
+  rdvAVenir?: string | null;
   /** Admin : « Assistant indisponible » gagne un lien « Pourquoi ? ». */
   isAdmin?: boolean;
   /**
@@ -384,6 +391,13 @@ export function QuickNote({
                   Relance {fmtJourCourt(dateProposee)}
                   {dateProposee.length >= 16 ? ` ${dateProposee.slice(11, 16)}` : ""}
                 </Pastille>
+              )}
+              {/* Une relance tapée à la main reste libre : on informe (024). */}
+              {rdvAVenir && (relancePastille || (dateProposee && !rdvComplet)) && (
+                <span className="flex basis-full items-center gap-1 text-[11px] text-slate-400">
+                  <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
+                  {infoRdvPrevu(rdvAVenir)}
+                </span>
               )}
               {sansRepPastille && (
                 <Pastille onRetirer={() => masquer("sans_reponse")}>

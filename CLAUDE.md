@@ -31,7 +31,9 @@ C'est l'objet de la `021` (table `supervision`, relation **orientée**). Voir
 
 **Au 23 septembre**, la `021` et la `022` sont **appliquées en production**
 (vérifié par Bora). La `023` (une fiche close ne réclame rien) est **appliquée
-depuis le 23/09 à 11h38 UTC**, fichier du commit `4330114` tel quel.
+depuis le 23/09 à 11h38 UTC**, fichier du commit `4330114` tel quel. La
+`024` (un RDV à venir passe TOUJOURS devant) est écrite et recettée, **pas
+encore appliquée** — Bora applique après relecture.
 
 ### État au 25 août 2026
 
@@ -650,9 +652,11 @@ journal (« Relance annulée : rendez-vous posé le 28/09 à 12h », `is_exchang
 faux, signée de qui a posé le RDV). Trigger `meetings_prochaine_action`.
 
 - **Ce qui est posé APRÈS le RDV n'est jamais touché**, par construction — pas
-  de comparaison d'horodatages. « Confirmer la veille » passe devant le RDV :
-  la fiche dit la relance, **puis** le RDV. Mais un RDV **déplacé plus tard**
-  clôture à son tour ce qui tombe désormais avant lui, confirmation comprise.
+  de comparaison d'horodatages. Mais un RDV **déplacé plus tard** clôture à son
+  tour ce qui tombe désormais avant lui. ⚠ La 022 disait aussi qu'une telle
+  relance (« confirmer la veille ») **passait devant** le RDV : c'est **retiré
+  par la 024**, voir plus bas — elle reste une tâche, le RDV reste la prochaine
+  action.
 - **Un RDV passé non débriefé reste LA prochaine action**, affiché « À
   débriefer », jamais en ambre. C'est le seul garde-fou contre une fiche qui
   disparaît quand on oublie de débriefer — **ne pas l'affaiblir**.
@@ -764,6 +768,64 @@ ligne de journal touchés. Recette : `supabase/recettes/023_assembler.sh`,
 quel jour), production revérifiée intacte. **Réversible** : remettre le corps
 022 de `recalc_next_action`, supprimer le trigger d'étape et
 `cron.unschedule('prochaine-action-fiches-closes')`.
+
+### Un rendez-vous à venir passe TOUJOURS devant (migration `024`, 23 septembre — ÉCRITE, PAS APPLIQUÉE)
+
+> **Tant qu'une fiche a un rendez-vous à venir, c'est lui la prochaine action.
+> Toujours.** (décision de Bora, 23/09)
+
+L'exception de la 022 (« une relance posée après le RDV et datée avant lui
+passe devant », le cas « confirmer la veille ») venait d'une **mauvaise
+lecture** : la relance d'Alain docteur n'était pas voulue par Bora, c'est la
+**tâche planifiée de suivi CRM** qui l'avait re-datée toute seule le 21/09.
+**Une règle ne se déduit pas d'une donnée sans savoir QUI l'a écrite** — un
+automate qui écrit dans la base ressemble à un humain qui a décidé.
+
+- **`prochaine_action_de`** : si un RDV compte, c'est lui ; sinon la relance la
+  plus proche. « Compte » = vivant et, sur une fiche **ouverte**, passé compris
+  (il attend son débrief) ; sur une fiche **close**, à venir seulement (023,
+  inchangé). Conséquence assumée : sur une fiche ouverte, un RDV passé non
+  débriefé passe aussi devant une relance **en retard** — la fiche dit
+  « À débriefer », jamais « en retard » au moment de débriefer. Le calcul ne
+  dépend plus de l'heure sur une fiche ouverte (la tâche horaire de la 023 ne
+  concerne toujours que les fiches closes).
+- **Une relance datée avant le RDV reste une TÂCHE** : rien ne la clôt ni ne
+  la déplace, elle remonte dans « À appeler » le jour venu (la zone lit
+  `tasks`, pas `next_action_*`). Elle ne remplace simplement jamais le RDV sur
+  la fiche ni dans la liste. **Sur la fiche, ses commandes restent dans la
+  colonne « Relances »** (`premiereDansLaCarte`) : quand la carte montre le
+  RDV, la première relance n'y serait sinon cochable nulle part.
+- **Le RDV bien visible** : carte PROCHAINE ACTION enrichie (pas de nouvelle
+  carte) — « Lundi 28 septembre à 12h » (`jourLong`), lieu, lien texte
+  « Voir dans l'agenda » (`lienAgenda` → `/agenda?vue=jour&jour=YYYY-MM-DD`,
+  paramètres déjà existants). Liste, colonnes, zone calme : **badge** bleu
+  « RDV lun. 28/09 · 12h » (`libelleRdvListe`, `PROCHAINE_ACTION_RDV` dans
+  `ui.tsx`), neutre une fois passé, jamais ambre — une relance reste un texte.
+  `libelleRdv` et `jourHeureCourt` sont **inchangés** (journal SQL, MCP, tests).
+- **Aucune relance posée AUTOMATIQUEMENT avant un RDV à venir** :
+  `planifier_relance` (MCP) refuse, message exact de `refusRelanceAvantRdv` ;
+  le tri « Accepter » d'une réponse (`app/mail-actions.ts`, date déduite par le
+  modèle) ne crée ni ne re-date rien avant le RDV ; la relève mail
+  (`crm-mail`, absence) ne re-date pas avant le RDV. Déjà sûrs : cadence email
+  (aucune relance si RDV vivant), résultat d'appel (relance seulement si
+  l'humain tape une date). Tous lisent `prochainRdvAVenir` (`lib/crm/agenda.ts`)
+  ou sa recopie Deno. **Un humain garde le droit** de poser une relance avant
+  le RDV, sans blocage ni tap : une ligne « Un rendez-vous est prévu le 28/09 à
+  12h » (`infoRdvPrevu`) sur la carte (groupe « Relancer »), le formulaire
+  « Planifier une relance », les pastilles de la note et les lignes de
+  « À faire » (`TASK_SELECT` embarque `next_action_*` — zéro requête de plus).
+- `deriveNextAction` perd le champ `ensuite` (« Puis RDV le … ») et lit
+  « passé » sur `starts_at`, comme le SQL et la liste : le décalage de la 022
+  pendant un RDV en cours disparaît avec.
+- Les recettes **022 (cas 2) et 023 (cas G4) encodent l'ancienne exception** :
+  historiques, à ne plus rejouer comme non-régression. Recette de la 024 :
+  `supabase/recettes/024_assembler.sh`, **26 OK, 0 faute** le 23/09 ;
+  reprise mesurée : **0 fiche** ne change en production (la relance d'Alain
+  était déjà annulée).
+- **Ordre** : indifférent (aucune colonne). La migration d'abord évite qu'une
+  liste dise « relance » pendant que la fiche dit « RDV ». L'edge function
+  `crm-mail` est modifiée **dans le dépôt** et doit être **redéployée depuis
+  lui** (puis le diff de contrôle), séparément de Vercel.
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 

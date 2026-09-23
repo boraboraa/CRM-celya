@@ -5,6 +5,7 @@ import Link from "next/link";
 import { fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
+import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
@@ -29,6 +30,13 @@ export type TaskWithProspect = {
     contact_name: string | null;
     phone?: string | null;
     email?: string | null;
+    /**
+     * La prochaine action de la fiche (« À faire » seulement) : un rendez-vous
+     * à venir s'y lit, et la ligne le dit (024) — la relance reste à faire,
+     * mais le rendez-vous demeure la prochaine action de la fiche.
+     */
+    next_action_at?: string | null;
+    next_action_kind?: string | null;
   } | null;
   /**
    * La dernière action de la fiche (vue prospect_action_state), quand
@@ -207,6 +215,17 @@ export function TaskRow({
         {task.details && (
           <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{task.details}</p>
         )}
+
+        {/* La fiche a un rendez-vous à venir : c'est lui sa prochaine action
+            (024). La relance se fait quand même — on informe, on ne bloque rien. */}
+        {task.prospects?.next_action_kind === "rendez_vous" &&
+          task.prospects.next_action_at &&
+          new Date(task.prospects.next_action_at).getTime() > Date.now() && (
+            <p className="mt-1 flex items-center gap-1 text-[11px] text-blue-200/90">
+              <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
+              {infoRdvPrevu(task.prospects.next_action_at)}
+            </p>
+          )}
 
         {/* Ce qu'a donné le dernier appel — avant d'en passer un autre. Seul
             « À faire » charge `derniere_action` ; la fiche ne la passe pas. */}

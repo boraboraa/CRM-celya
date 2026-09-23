@@ -526,6 +526,12 @@ export function FormError({ message }: { message?: string }) {
  * `statut` : l'étape de la fiche. Gagnée ou perdue, elle ne réclame jamais de
  * débrief (023) — un rendez-vous qui a commencé n'y est pas dit.
  */
+/** Classes complètes (règle JIT) : le badge d'un rendez-vous, à venir ou passé. */
+const PROCHAINE_ACTION_RDV: Record<"aVenir" | "debrief", string> = {
+  aVenir: "bg-celya-blue/15 text-blue-100 ring-1 ring-blue-400/30",
+  debrief: "bg-white/[0.05] text-slate-200 ring-1 ring-white/10",
+};
+
 export function ProchaineActionTexte({
   at,
   kind,
@@ -559,12 +565,14 @@ export function ProchaineActionTexte({
   }
   if (!at || l.rien) return <span className={`${couleurNeutre} ${className}`}>{sansDate}</span>;
   if (l.estRdv) {
+    // Un BADGE, pas un texte : un rendez-vous se distingue d'une relance d'un
+    // coup d'œil (024). Bleu = état normal ; passé, neutre — jamais ambre.
     return (
       <span
-        className={`inline-flex items-center gap-1 ${
-          l.aDebriefer ? "text-slate-200" : "text-blue-200"
+        className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 ${
+          PROCHAINE_ACTION_RDV[l.aDebriefer ? "debrief" : "aVenir"]
         } ${className}`}
-        title={l.aDebriefer ? "Rendez-vous passé : il attend son débrief" : undefined}
+        title={l.aDebriefer ? "Rendez-vous passé : il attend son débrief" : "Rendez-vous à venir"}
       >
         <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0" />
         {l.texte}

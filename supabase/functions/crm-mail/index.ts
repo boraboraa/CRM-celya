@@ -1228,7 +1228,8 @@ async function matchProspect(
 //  1. classification d'abord (si un fournisseur IA est configuré) — elle
 //     seule sait reconnaître une absence écrite à la main ;
 //  2. absence classée → la relance est DÉCALÉE au lendemain du retour,
-//     jamais annulée, et le statut ne bouge pas ;
+//     jamais annulée, et le statut ne bouge pas — sauf si ce décalage la
+//     ramènerait avant un rendez-vous à venir (024) : on ne touche à rien ;
 //  3. réponse automatique (en-têtes) non classée absence → on ne touche à
 //     rien : un robot ne compte jamais comme une réponse ;
 //  4. vraie réponse (ni auto, ni absence, ni hors-sujet) → la fiche est
@@ -1289,6 +1290,21 @@ async function handleIncomingReply(
 
   if (proposal?.intent === "absence") {
     const due = proposal.dueAtISO ?? new Date(Date.now() + 7 * 86400000).toISOString();
+    // Un rendez-vous à venir est TOUJOURS la prochaine action (migration
+    // 024) : un décalage automatique ne ramène jamais une relance avant lui.
+    // Recopie de `prochainRdvAVenir` (lib/crm/agenda.ts) — Deno n'importe pas
+    // le code Next. L'absence reste lisible sur la carte « Réponses reçues ».
+    const { data: rdv } = await admin
+      .from("meetings")
+      .select("starts_at")
+      .eq("prospect_id", prospectId)
+      .eq("kind", "prospect")
+      .in("status", ["prevu", "confirme", "reporte"])
+      .gt("starts_at", new Date().toISOString())
+      .order("starts_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (rdv && new Date(due).getTime() < new Date(rdv.starts_at as string).getTime()) return;
     const targets = await openNonRdvTasks(admin, prospectId);
     if (targets.length > 0) {
       await admin.from("tasks").update({ due_at: due }).in("id", targets);

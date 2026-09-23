@@ -217,12 +217,12 @@ export default async function ProspectDetailPage({
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   // « Prochaine action » — dérivée sans le moindre appel à un modèle, par la
-  // même règle que la base (migrations 022 et 023, lib/crm/prochaineAction.ts) :
+  // même règle que la base (migrations 022 à 024, lib/crm/prochaineAction.ts) :
   // le rendez-vous VIVANT le plus proche — passé compris, il attend alors son
-  // débrief —, sauf relance posée après lui et tombant avant (« confirmer la
-  // veille »). Sur une fiche gagnée ou perdue, seul un rendez-vous À VENIR
-  // compte : une fiche close ne réclame jamais de débrief. Sans l'étape, la
-  // carte et la base se contrediraient.
+  // débrief — est TOUJOURS la prochaine action (024) ; une relance datée avant
+  // lui reste une tâche, elle ne le remplace pas. Sur une fiche gagnée ou
+  // perdue, seul un rendez-vous À VENIR compte : une fiche close ne réclame
+  // jamais de débrief. Sans l'étape, la carte et la base se contrediraient.
   const lastEvent: LastEvent = timeline[0]
     ? { kind: timeline[0].kind, at: timeline[0].at }
     : null;
@@ -389,6 +389,7 @@ export default async function ProspectDetailPage({
           companyName={prospect.company_name}
           relanceOuverte={relanceOuverte}
           plusRien={plusRien}
+          rdvAVenir={prochainRdv?.starts_at ?? null}
           canEmail={Boolean(prospect.email)}
           lectureSeule={lectureSeule}
         />
@@ -412,6 +413,7 @@ export default async function ProspectDetailPage({
             initialTab={composerPrefill ? "email" : "consigner"}
             initialPrefill={composerPrefill}
             lectureSeule={lectureSeule}
+            rdvAVenir={prochainRdv?.starts_at ?? null}
           />
 
           {/* Modifier la fiche, et la supprimer — les deux écrivent. Rien
@@ -518,6 +520,8 @@ export default async function ProspectDetailPage({
               prospectId={prospect.id}
               openTasks={openTasks}
               lectureSeule={lectureSeule}
+              premiereDansLaCarte={Boolean(nextAction.task)}
+              rdvAVenir={prochainRdv?.starts_at ?? null}
             />
 
             {doneTasks.length > 0 && (

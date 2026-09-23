@@ -19,14 +19,25 @@
  * Migration 023 (section 9) : une fiche gagnée ou perdue ne réclame jamais
  * rien — seuls ses RDV à venir et ses relances ouvertes comptent. Mêmes cas
  * que supabase/recettes/023_corps.sql.
+ *
+ * Migration 024 (sections 2, 8 et 10) : tant qu'une fiche a un rendez-vous
+ * vivant, c'est LUI la prochaine action — TOUJOURS. L'ancienne exception
+ * (« confirmer la veille » passait devant) est retirée ; une relance datée
+ * avant le RDV reste une tâche. Mêmes cas que supabase/recettes/024_corps.sql.
  */
 
 import { deriveNextAction, type OpenTask, type NextMeeting } from "./nextAction.ts";
 import {
   ficheClose,
+  infoRdvPrevu,
+  jourAgenda,
   jourHeureCourt,
+  jourLong,
   libelleRdv,
+  libelleRdvListe,
+  lienAgenda,
   lireProchaineAction,
+  refusRelanceAvantRdv,
   phraseAnnulees,
   plusRienDePrevu,
   rdvClos,
@@ -101,9 +112,9 @@ console.log("\n— 1. rdv_pose_relance_avant_cloturee —");
   verifie("jamais en retard", v.overdue, false);
   const l = lireProchaineAction(RDV_ALAIN.starts_at, "rendez_vous", LE_22);
   verifie(
-    "liste / colonnes : calendrier, texte, pas de retard",
+    "liste / colonnes : calendrier, « RDV lun. 28/09 · 12h », pas de retard",
     [l.icone, l.texte, l.retard],
-    ["calendrier", "RDV le 28/09 à 12h", false]
+    ["calendrier", "RDV lun. 28/09 · 12h", false]
   );
   verifie(
     "l'écran le DIT, sans rien demander",
@@ -121,21 +132,26 @@ console.log("\n— 1. rdv_pose_relance_avant_cloturee —");
   );
 }
 
-// --- 2. Relance posée APRÈS que le RDV existe, avant sa date : intacte -----
-console.log("\n— 2. relance_posee_apres_le_rdv_non_touchee —");
+// --- 2. Relance datée AVANT un RDV à venir : elle reste une tâche (024) ------
+console.log("\n— 2. rdv_a_venir_passe_devant_la_relance —");
 {
-  // « Confirmer la veille » : le trigger ne regarde que les relances qui
-  // existent à la pose du RDV. Elle est la prochaine action, le RDV ensuite.
+  // Le trigger ne clôture que les relances qui existent à la pose du RDV ;
+  // une relance posée ensuite et datée avant lui reste ouverte. Mais c'est le
+  // RDV qui est la prochaine action — TOUJOURS (024). La relance remontera
+  // dans « À appeler » le jour venu, sans jamais remplacer le RDV ici.
   const v = fiche([tache("t4", "2026-09-27T07:00:00Z", "Confirmer le RDV")], [RDV_ALAIN], LE_22);
-  verifie("la relance est la prochaine action", [v.isMeeting, v.task?.id, combien(v)], [false, "t4", 1]);
-  verifie("le RDV vient ensuite", v.ensuite?.id, "m-alain");
-  verifie("pas en retard avant sa date", v.overdue, false);
-  const l = lireProchaineAction("2026-09-27T07:00:00Z", "relance", LE_22);
-  verifie("liste : une relance, pas de calendrier", [l.estRdv, l.retard], [false, false]);
-  // C'est l'état RÉEL d'Alain docteur le 22/09 (relance re-datée le 21/09,
-  // après la pose du RDV le 19/09) : la reprise ne la touche pas.
+  verifie("le RDV est la prochaine action, seul", [v.isMeeting, v.meeting?.id, v.task, combien(v)], [true, "m-alain", null, 1]);
+  verifie("pas en retard", v.overdue, false);
+  // C'est l'état d'Alain docteur le 22/09 (relance re-datée le 21/09 par une
+  // tâche automatique, après la pose du RDV le 19/09) : le RDV, pas la relance.
   const alain = fiche([tache("t1", "2026-09-25T07:00:00Z")], [RDV_ALAIN], LE_22);
-  verifie("Alain docteur (réel) : relance du 25, puis RDV du 28", [alain.task?.id, alain.ensuite?.id], ["t1", "m-alain"]);
+  verifie("Alain docteur : le RDV du 28, pas la relance du 25", [alain.isMeeting, alain.meeting?.id, alain.task], [true, "m-alain", null]);
+  // Même le 25, relance échue : la fiche dit le RDV, jamais « en retard ».
+  const le25 = fiche([tache("t1", "2026-09-25T07:00:00Z")], [RDV_ALAIN], LE_25);
+  verifie("le 25, relance échue : toujours le RDV, pas d'ambre", [le25.isMeeting, le25.overdue], [true, false]);
+  // Relance seule, sans RDV : elle est la prochaine action.
+  const seule = fiche([tache("t8", "2026-09-27T07:00:00Z")], [], LE_22);
+  verifie("relance seule : elle est la prochaine action", [seule.isMeeting, seule.task?.id], [false, "t8"]);
   // Une relance après le RDV : le RDV passe devant.
   const apres = fiche([tache("t2", "2026-10-05T07:00:00Z")], [RDV_ALAIN], LE_22);
   verifie("une relance APRÈS le RDV : le RDV passe devant", [apres.isMeeting, combien(apres)], [true, 1]);
@@ -159,6 +175,15 @@ console.log("\n— 3. rdv_passe_non_debriefe —");
   // débriefé garde la main — rien d'autre ne réclame la fiche.
   const avecSuite = fiche([tache("t5", "2026-10-05T07:00:00Z")], [RDV_ALAIN], LE_30);
   verifie("une relance plus tardive ne le double pas", [avecSuite.isMeeting, avecSuite.aDebriefer], [true, true]);
+  // Une relance EN RETARD datée avant le RDV passé : le RDV non débriefé garde
+  // la main (024) — la fiche dit « À débriefer », la relance reste dans « À
+  // appeler ». Jamais la fiche ne bascule en « en retard » au moment du débrief.
+  const retardAvant = fiche([tache("t5b", "2026-09-25T07:00:00Z")], [RDV_ALAIN], LE_30);
+  verifie(
+    "relance en retard avant un RDV passé : « à débriefer », pas « en retard »",
+    [retardAvant.isMeeting, retardAvant.aDebriefer, retardAvant.overdue, retardAvant.task],
+    [true, true, false, null]
+  );
   // Un RDV REPORTÉ puis passé aussi — c'est le bug de la zone débrief
   // (Garage Boetendael, 02/09, invisible trois semaines).
   const reportePasse: Rdv = { ...RDV_ALAIN, status: "reporte" };
@@ -245,10 +270,10 @@ console.log("\n— 7. rdv_perso_hors_regle —");
 // --- 8. Fiche gagnée ou perdue : on ne touche à rien -------------------------
 console.log("\n— 8. fiche_gagnee_ou_perdue —");
 {
-  // Le trigger ne clôture rien ; si une relance tombe avant, elle reste la
-  // prochaine action (c'est l'humain qui gère une fiche close).
+  // Le trigger ne clôture rien sur une fiche close. Mais le RDV à venir
+  // (installation) est la prochaine action (024) ; la relance reste une tâche.
   const v = fiche([tache("t7", "2026-09-25T07:00:00Z")], [RDV_ALAIN], LE_22, "gagne");
-  verifie("la relance non clôturée reste devant", [v.task?.id, v.ensuite?.id], ["t7", "m-alain"]);
+  verifie("gagne + RDV à venir + relance avant : le RDV", [v.isMeeting, v.meeting?.id, v.task], [true, "m-alain", null]);
 }
 
 // --- 9. Une fiche close ne réclame jamais rien (migration 023) ---------------
@@ -265,7 +290,7 @@ console.log("\n— 9. fiche_close_ne_reclame_rien —");
   const installe = fiche([], [RDV_ALAIN], LE_22, "gagne");
   verifie("gagne + RDV à venir : il s'affiche", [installe.isMeeting, installe.when], [true, "RDV le 28/09 à 12h"]);
   const lInstalle = lireProchaineAction(RDV_ALAIN.starts_at, "rendez_vous", LE_22, "gagne");
-  verifie("…et la liste le dit pareil", [lInstalle.rien, lInstalle.texte], [false, "RDV le 28/09 à 12h"]);
+  verifie("…et la liste le dit pareil", [lInstalle.rien, lInstalle.texte], [false, "RDV lun. 28/09 · 12h"]);
 
   // gagne + RDV passé non débriefé : rien, nulle part.
   const gPasse = fiche([], [RDV_ALAIN], LE_30, "gagne");
@@ -279,7 +304,7 @@ console.log("\n— 9. fiche_close_ne_reclame_rien —");
 
   // gagne + RDV passé + relance planifiée (« rappeler dans 6 mois ») : la relance.
   const suivi = fiche([tache("t10", "2027-03-28T07:00:00Z", "Rappeler dans 6 mois")], [RDV_ALAIN], LE_30, "gagne");
-  verifie("gagne + RDV passé + relance planifiée : la relance", [suivi.task?.id, suivi.isMeeting, suivi.ensuite], ["t10", false, null]);
+  verifie("gagne + RDV passé + relance planifiée : la relance", [suivi.task?.id, suivi.isMeeting], ["t10", false]);
 
   // perdu + relance ouverte EN RETARD : elle s'affiche, en retard — c'est un
   // rappel que l'utilisateur a posé (perdu sert aussi de vivier).
@@ -346,6 +371,27 @@ console.log("\n— bout_en_bout_une_seule_prochaine_action —");
   const honore: Rdv = { ...RDV_ALAIN, status: "honore" };
   const apres = fiche([tache("t9", "2026-10-03T07:00:00Z")], [honore], LE_30);
   verifie("après le débrief : UNE prochaine action, la suite", [combien(apres), apres.task?.id, apres.isMeeting], [1, "t9", false]);
+}
+
+// --- 10. 024 : le RDV bien visible, et aucune relance automatique avant lui --
+console.log("\n— 10. rdv_visible_et_refus —");
+{
+  verifie("liste : « RDV lun. 28/09 · 12h »", libelleRdvListe(RDV_ALAIN.starts_at), "RDV lun. 28/09 · 12h");
+  verifie("liste : les minutes", libelleRdvListe("2026-09-28T12:30:00Z"), "RDV lun. 28/09 · 14h30");
+  verifie("liste : en hiver, UTC+1", libelleRdvListe("2026-12-01T10:00:00Z"), "RDV mar. 01/12 · 11h");
+  verifie("fiche : « Lundi 28 septembre à 12h »", jourLong(RDV_ALAIN.starts_at), "Lundi 28 septembre à 12h");
+  verifie("fiche : minuit de Bruxelles tombe le bon jour", jourLong("2026-10-04T22:00:00Z"), "Lundi 5 octobre à 0h");
+  verifie("agenda : le jour de Bruxelles", jourAgenda("2026-10-04T22:30:00Z"), "2026-10-05");
+  verifie("agenda : le lien", lienAgenda(RDV_ALAIN.starts_at), "/agenda?vue=jour&jour=2026-09-28");
+  verifie("écran : la ligne d'information", infoRdvPrevu(RDV_ALAIN.starts_at), "Un rendez-vous est prévu le 28/09 à 12h");
+  verifie(
+    "MCP : relance avant le RDV → refus, message exact",
+    refusRelanceAvantRdv("2026-09-25T07:00:00Z", RDV_ALAIN.starts_at),
+    "Un rendez-vous est déjà prévu le 28/09 à 12h : c'est lui la prochaine action. Aucune relance posée."
+  );
+  verifie("MCP : relance après le RDV → acceptée", refusRelanceAvantRdv("2026-10-05T07:00:00Z", RDV_ALAIN.starts_at), null);
+  verifie("MCP : au moment même du RDV → acceptée", refusRelanceAvantRdv(RDV_ALAIN.starts_at, RDV_ALAIN.starts_at), null);
+  verifie("MCP : pas de RDV à venir → acceptée", refusRelanceAvantRdv("2026-09-25T07:00:00Z", null), null);
 }
 
 console.log(echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`);

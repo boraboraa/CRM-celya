@@ -15,7 +15,7 @@ import {
   type OpenTask,
 } from "@/lib/crm/nextAction";
 import { openComposer } from "@/lib/crm/composer";
-import { libelleRdv, PLUS_RIEN } from "@/lib/crm/prochaineAction";
+import { infoRdvPrevu, jourLong, lienAgenda, PLUS_RIEN } from "@/lib/crm/prochaineAction";
 import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
 
@@ -47,6 +47,7 @@ export function NextActionCard({
   companyName,
   relanceOuverte,
   plusRien = false,
+  rdvAVenir = null,
   canEmail = false,
   lectureSeule = false,
 }: {
@@ -66,6 +67,12 @@ export function NextActionCard({
    * la carte le DIT — message passif, aucun geste réclamé, aucune date imposée.
    */
   plusRien?: boolean;
+  /**
+   * Début (ISO) du prochain rendez-vous À VENIR de la fiche, s'il y en a un.
+   * Poser une relance reste libre ; la carte dit seulement qu'un rendez-vous
+   * est prévu (024) — une ligne d'information, aucun blocage, aucun tap.
+   */
+  rdvAVenir?: string | null;
   /** La fiche porte une adresse : proposer d'écrire tout de suite. */
   canEmail?: boolean;
   /**
@@ -107,11 +114,11 @@ export function NextActionCard({
           priority: 2,
           prospect_id: prospectId,
         };
-        // `etat.meeting` reste dans la balance : un rendez-vous plus proche
-        // que la relance qu'on vient de poser garde la vedette — c'est
-        // deriveNextAction qui tranche, pas cette carte.
+        // `etat.meeting` reste dans la balance : un rendez-vous garde TOUJOURS
+        // la vedette (024) — c'est deriveNextAction qui tranche, pas cette
+        // carte.
         return {
-          ...deriveNextAction([tache], null, null, etat.meeting ?? etat.ensuite),
+          ...deriveNextAction([tache], null, null, etat.meeting),
           context: etat.context,
         };
       }
@@ -124,13 +131,13 @@ export function NextActionCard({
         ? []
         : [{ ...etat.task, due_at: patch.due_at ?? etat.task.due_at }];
       return {
-        ...deriveNextAction(taches, null, null, etat.ensuite),
+        ...deriveNextAction(taches, null, null, null),
         context: etat.context,
       };
     }
   );
 
-  const { task, meeting, context, when, overdue, isMeeting, aDebriefer, ensuite } = vue;
+  const { task, meeting, context, when, overdue, isMeeting, aDebriefer } = vue;
 
   // Reporter en conservant l'heure (un RDV à 14:00 le reste) — celle de la
   // relance ouverte, même quand la carte montre un rendez-vous à sa place.
@@ -235,12 +242,26 @@ export function NextActionCard({
           <p className="mt-2 font-display text-lg font-semibold leading-snug text-slate-50">
             {meeting.title}
           </p>
-          {when && (
-            <p className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-blue-200">
-              <Icone nom="calendrier" className="h-4 w-4 shrink-0" />
+          {aDebriefer ? (
+            when && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-sm font-medium text-blue-200">
+                <Icone nom="calendrier" className="h-4 w-4 shrink-0" />
+                <span>
+                  {when.charAt(0).toUpperCase()}
+                  {when.slice(1)} ({relative(meeting.starts_at)}).
+                </span>
+              </p>
+            )
+          ) : (
+            // À venir : le jour, la date et l'heure en toutes lettres — c'est
+            // l'information qu'on vient chercher sur la fiche (024).
+            <p className="mt-1.5 flex items-start gap-1.5 text-base font-semibold text-blue-100">
+              <Icone nom="calendrier" className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
               <span>
-                {when.charAt(0).toUpperCase()}
-                {when.slice(1)} ({relative(meeting.starts_at)}).
+                {jourLong(meeting.starts_at)}{" "}
+                <span className="text-sm font-normal text-blue-200/80">
+                  ({relative(meeting.starts_at)})
+                </span>
               </span>
             </p>
           )}
@@ -263,6 +284,15 @@ export function NextActionCard({
               <Icone nom="epingle" /> {meeting.location}
             </p>
           )}
+          {/* Un lien, pas un bouton : l'agenda ouvert sur le jour du RDV. */}
+          <Link
+            href={lienAgenda(meeting.starts_at)}
+            prefetch={false}
+            className="btn-link mt-1.5 text-xs"
+          >
+            <Icone nom="calendrier" className="h-3 w-3" />
+            Voir dans l&apos;agenda
+          </Link>
           <p className="mt-1 text-sm leading-relaxed text-slate-400">{context}</p>
         </>
       ) : task ? (
@@ -279,14 +309,6 @@ export function NextActionCard({
               {/* Majuscule initiale : « relance prévue le … » ouvre la phrase. */}
               {when.charAt(0).toUpperCase()}
               {when.slice(1)} ({relative(task.due_at)}).
-            </p>
-          )}
-          {/* Une relance posée sciemment AVANT le rendez-vous (« confirmer la
-              veille ») : elle d'abord, le RDV ensuite — jamais l'inverse. */}
-          {ensuite && (
-            <p className="mt-1 flex items-center gap-1.5 text-sm text-blue-200">
-              <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0" />
-              Puis {libelleRdv(ensuite.starts_at)}
             </p>
           )}
           {/* Où on en est — dérivé du dernier événement du journal. */}
@@ -372,6 +394,15 @@ export function NextActionCard({
             aria-label="Relancer à une date précise"
             className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60"
           />
+          {/* Poser une relance reste libre, même avant le rendez-vous : on
+              informe, on ne bloque pas (024). Elle remontera dans « À
+              appeler » le jour venu ; la fiche, elle, dira toujours le RDV. */}
+          {rdvAVenir && (
+            <span className="flex basis-full items-center gap-1 px-1 pb-0.5 text-[11px] text-slate-400">
+              <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
+              {infoRdvPrevu(rdvAVenir)}
+            </span>
+          )}
         </span>
 
         {canEmail && (

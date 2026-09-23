@@ -11,7 +11,7 @@
 // Chemins RELATIFS : le test (npm run test:prochaine-action) exécute ce
 // module tel quel sous node, qui ne connaît pas l'alias « @/ ».
 import { fmtDate } from "../constants.ts";
-import { libelleRdv, relancePasseDevant } from "./prochaineAction.ts";
+import { libelleRdv } from "./prochaineAction.ts";
 
 /** Ce qui alimente la chronologie — et donc le contexte de l'action. */
 export type TimelineKind =
@@ -55,11 +55,6 @@ export type NextAction = {
   isMeeting: boolean;
   /** Le rendez-vous est passé et attend son débrief — jamais « en retard ». */
   aDebriefer: boolean;
-  /**
-   * Une relance posée SCIEMMENT avant le rendez-vous (« confirmer la
-   * veille ») passe devant lui : la carte dit la relance, PUIS le RDV.
-   */
-  ensuite: NextMeeting | null;
 };
 
 /** Le prénom, pour une phrase qui sonne juste. */
@@ -104,12 +99,15 @@ function describeContext(last: LastEvent, contact: string | null): string {
 
 /**
  * Assemble le bloc « Prochaine action » — la même règle que
- * `recalc_next_action` (migration 022), lue sur les lignes déjà chargées.
+ * `prochaine_action_de` (migrations 022 à 024), lue sur les lignes déjà
+ * chargées.
  *
  * `openTasks` : les relances ouvertes, triées par échéance croissante. `meeting` : le
- * rendez-vous VIVANT le plus proche (`rdvQuiCompte`) — y compris passé : il
- * attend alors son débrief, et c'est ce que la fiche doit dire, jamais « en
- * retard de relance ».
+ * rendez-vous qui compte (`rdvQuiCompte`, étape de la fiche comprise). S'il y
+ * en a un, c'est LUI la prochaine action, TOUJOURS (024) — à venir, il se dit ;
+ * passé, il attend son débrief, jamais « en retard de relance ». Une relance
+ * datée avant lui reste une tâche (« À appeler » le jour venu) mais ne le
+ * remplace jamais ici.
  */
 export function deriveNextAction(
   openTasks: OpenTask[],
@@ -121,8 +119,11 @@ export function deriveNextAction(
   const task = openTasks[0] ?? null;
   const context = describeContext(lastEvent, contactName);
 
-  if (meeting && !relancePasseDevant(task?.due_at, meeting.starts_at)) {
-    const passe = new Date(meeting.ends_at).getTime() < now;
+  if (meeting) {
+    // « Passé » = a commencé, comme en SQL et dans la liste
+    // (`lireProchaineAction`) : la carte et la liste disent la même chose
+    // pendant le rendez-vous.
+    const passe = new Date(meeting.starts_at).getTime() < now;
     return {
       task: null,
       meeting,
@@ -133,7 +134,6 @@ export function deriveNextAction(
       overdue: false,
       isMeeting: true,
       aDebriefer: passe,
-      ensuite: null,
     };
   }
 
@@ -146,7 +146,6 @@ export function deriveNextAction(
       overdue: false,
       isMeeting: false,
       aDebriefer: false,
-      ensuite: null,
     };
   }
 
@@ -160,6 +159,5 @@ export function deriveNextAction(
     overdue,
     isMeeting: false,
     aDebriefer: false,
-    ensuite: meeting,
   };
 }

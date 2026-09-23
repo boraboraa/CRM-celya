@@ -115,6 +115,29 @@ async function relancesAvant(
   return (data ?? []) as RelanceAnnulee[];
 }
 
+/**
+ * Le prochain rendez-vous À VENIR de la fiche (vivant, commencé plus tard que
+ * maintenant), ou null. C'est lui la prochaine action, toujours (024) : les
+ * chemins AUTOMATIQUES (connecteur MCP, tri des réponses) le lisent pour ne
+ * jamais poser de relance avant lui. Même filtre que `prochaine_action_de`.
+ */
+export async function prochainRdvAVenir(
+  supabase: SupabaseClient,
+  prospectId: string
+): Promise<{ id: string; starts_at: string } | null> {
+  const { data } = await supabase
+    .from("meetings")
+    .select("id, starts_at")
+    .eq("prospect_id", prospectId)
+    .eq("kind", "prospect")
+    .in("status", ["prevu", "confirme", "reporte"])
+    .gt("starts_at", new Date().toISOString())
+    .order("starts_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return (data as { id: string; starts_at: string } | null) ?? null;
+}
+
 /** Parmi les candidates, celles que la base a effectivement clôturées. */
 async function effectivementAnnulees(
   supabase: SupabaseClient,

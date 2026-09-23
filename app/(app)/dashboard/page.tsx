@@ -88,7 +88,7 @@ export default async function TodoPage({
   const perimetre = lirePerimetre(params, viewer);
 
   const TASK_SELECT =
-    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email)";
+    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind)";
 
   // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un

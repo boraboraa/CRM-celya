@@ -52,6 +52,7 @@ export function ProspectJournal({
   initialTab = "consigner",
   initialPrefill,
   lectureSeule = false,
+  rdvAVenir = null,
 }: {
   entries: TimelineEntry[];
   prospectId: string;
@@ -72,6 +73,8 @@ export function ProspectJournal({
    * boîte (`pickAccount` n'emprunte jamais celle du voisin).
    */
   lectureSeule?: boolean;
+  /** Début (ISO) du prochain rendez-vous à venir — ligne d'information (024). */
+  rdvAVenir?: string | null;
 }) {
   const [vue, ajouter] = useOptimistic(
     entries,
@@ -158,6 +161,7 @@ export function ProspectJournal({
             prospectId={prospectId}
             isAdmin={isAdmin}
             onOptimistic={ajouter}
+            rdvAVenir={rdvAVenir}
           />
         ) : prospectEmail ? (
           <EmailComposer

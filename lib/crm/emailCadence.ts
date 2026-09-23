@@ -89,6 +89,25 @@ export async function applyEmailSentCadence(
     };
   }
 
+  // Un rendez-vous VIVANT sur la fiche (à venir, ou passé et pas encore
+  // débriefé) est déjà la prochaine action : la suite se décidera au débrief,
+  // pas dans une relance automatique « si pas de réponse » (migration 022 —
+  // décision de Bora, 22/09 : après un RDV, une relance n'a plus de sens). Un
+  // mail avant un RDV le prépare ou le confirme ; il ne rouvre pas de relance.
+  const { count: rdvVivants } = await supabase
+    .from("meetings")
+    .select("id", { count: "exact", head: true })
+    .eq("prospect_id", prospectId)
+    .eq("kind", "prospect")
+    .in("status", ["prevu", "confirme", "reporte"]);
+  if ((rdvVivants ?? 0) > 0) {
+    return {
+      completedTitle,
+      cancelled: Math.max(0, relances.length - 1),
+      followUpAt: null,
+    };
+  }
+
   const followUpAt = inDaysAt9(EMAIL_FOLLOWUP_DAYS);
   await supabase.from("tasks").insert({
     prospect_id: prospectId,

@@ -8,7 +8,10 @@
  * c'est du code, pas un modèle.
  */
 
-import { fmtDate, fmtDateTime } from "@/lib/constants";
+// Chemins RELATIFS : le test (npm run test:prochaine-action) exécute ce
+// module tel quel sous node, qui ne connaît pas l'alias « @/ ».
+import { fmtDate } from "../constants.ts";
+import { libelleRdv, relancePasseDevant } from "./prochaineAction.ts";
 
 /** Ce qui alimente la chronologie — et donc le contexte de l'action. */
 export type TimelineKind =
@@ -45,11 +48,18 @@ export type NextAction = {
   meeting: NextMeeting | null;
   /** Où on en est : « En attente de réponse de Sébastien ». */
   context: string;
-  /** Quand : « relance prévue le 11 août » / « rendez-vous le 11 août à 14:00 ». */
+  /** Quand : « relance prévue le 11 août » / « RDV le 28/09 à 12h ». */
   when: string | null;
   overdue: boolean;
   /** La prochaine action est un rendez-vous, pas une simple relance. */
   isMeeting: boolean;
+  /** Le rendez-vous est passé et attend son débrief — jamais « en retard ». */
+  aDebriefer: boolean;
+  /**
+   * Une relance posée SCIEMMENT avant le rendez-vous (« confirmer la
+   * veille ») passe devant lui : la carte dit la relance, PUIS le RDV.
+   */
+  ensuite: NextMeeting | null;
 };
 
 /** Le prénom, pour une phrase qui sonne juste. */
@@ -93,32 +103,37 @@ function describeContext(last: LastEvent, contact: string | null): string {
 }
 
 /**
- * Assemble le bloc « Prochaine action ». `openTasks` doit être trié par
- * échéance croissante : la plus proche commande. `meeting` est le prochain
- * rendez-vous d'agenda (à venir, non annulé) : s'il précède la relance — ou
- * qu'aucune relance n'est posée — c'est LUI la prochaine action.
+ * Assemble le bloc « Prochaine action » — la même règle que
+ * `recalc_next_action` (migration 022), lue sur les lignes déjà chargées.
+ *
+ * `openTasks` : les relances ouvertes, triées par échéance croissante. `meeting` : le
+ * rendez-vous VIVANT le plus proche (`rdvQuiCompte`) — y compris passé : il
+ * attend alors son débrief, et c'est ce que la fiche doit dire, jamais « en
+ * retard de relance ».
  */
 export function deriveNextAction(
   openTasks: OpenTask[],
   lastEvent: LastEvent,
   contactName: string | null,
-  meeting: NextMeeting | null = null
+  meeting: NextMeeting | null = null,
+  now: number = Date.now()
 ): NextAction {
   const task = openTasks[0] ?? null;
   const context = describeContext(lastEvent, contactName);
 
-  if (
-    meeting &&
-    (!task ||
-      new Date(meeting.starts_at).getTime() < new Date(task.due_at).getTime())
-  ) {
+  if (meeting && !relancePasseDevant(task?.due_at, meeting.starts_at)) {
+    const passe = new Date(meeting.ends_at).getTime() < now;
     return {
       task: null,
       meeting,
       context,
-      when: `rendez-vous le ${fmtDateTime(meeting.starts_at)}`,
+      when: passe
+        ? `à débriefer — ${libelleRdv(meeting.starts_at)}`
+        : libelleRdv(meeting.starts_at),
       overdue: false,
       isMeeting: true,
+      aDebriefer: passe,
+      ensuite: null,
     };
   }
 
@@ -130,10 +145,12 @@ export function deriveNextAction(
       when: null,
       overdue: false,
       isMeeting: false,
+      aDebriefer: false,
+      ensuite: null,
     };
   }
 
-  const overdue = new Date(task.due_at).getTime() < Date.now();
+  const overdue = new Date(task.due_at).getTime() < now;
 
   return {
     task,
@@ -142,5 +159,7 @@ export function deriveNextAction(
     when: `relance prévue le ${fmtDate(task.due_at)}`,
     overdue,
     isMeeting: false,
+    aDebriefer: false,
+    ensuite: meeting,
   };
 }

@@ -98,7 +98,8 @@ import {
   fmtDate,
   fmtDateTime,
 } from "@/lib/constants";
-import { todayBounds, localInputToISO, isoToLocalInput } from "@/lib/time";
+import { todayBounds, localInputToISO, isoToLocalInput, dateInputToISO } from "@/lib/time";
+import { lireProchaineAction, phraseAnnulees } from "@/lib/crm/prochaineAction";
 import type { ProspectStatus } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -154,6 +155,33 @@ const STATUS_ENUM = STATUS_ORDER as [string, ...string[]];
  * s'appliquer AVANT, sans exception. L'outil `agenda`, qui ne part pas de
  * `prospects`, porte son propre `in` pour la même raison.
  */
+/**
+ * La prochaine action et ce qu'elle désigne (migrations 022 et 023) — pour
+ * que Claude ne dise jamais « en retard » d'une fiche qui attend son
+ * rendez-vous, ni ne propose d'appeler un prospect qu'on voit dans trois
+ * jours, ni ne réclame le débrief d'une fiche gagnée ou perdue (une fiche
+ * close ne réclame jamais rien : `statut` est requis pour le savoir).
+ */
+function prochaineActionPourClaude(at: unknown, kind: unknown, statut: unknown) {
+  const l = lireProchaineAction(
+    at as string | null,
+    kind as string | null,
+    Date.now(),
+    statut as string | null
+  );
+  return {
+    prochaine_action: l.rien ? null : ((at as string | null) ?? null),
+    prochaine_action_type: l.rien
+      ? null
+      : l.estRdv
+        ? l.aDebriefer
+          ? "rendez-vous passé, à débriefer"
+          : "rendez-vous"
+        : "relance",
+    prochaine_action_en_retard: l.retard,
+  };
+}
+
 function perimetreDe(
   viewer: Viewer,
   demande: "moi" | "equipe" | undefined
@@ -361,7 +389,9 @@ function register(server: McpServer) {
       a_relancer: z
         .boolean()
         .optional()
-        .describe("Ne garder que les prospects dont la prochaine action échoit aujourd'hui ou est en retard."),
+        .describe(
+          "Ne garder que les prospects dont la prochaine action échoit aujourd'hui ou est en retard. Une fiche dont la prochaine action est un RENDEZ-VOUS passé y figure aussi : elle n'est pas « en retard », elle attend son débrief (champ « prochaine_action_type »). Jamais une fiche gagnée ou perdue pour un débrief : une fiche close ne réclame rien — seules ses relances et ses rendez-vous à venir comptent."
+        ),
       recherche: z.string().optional().describe("Texte recherché dans société, contact, email ou téléphone."),
       limite: z.number().int().min(1).max(200).optional().describe("Nombre maximum de fiches (défaut 50)."),
       perimetre: z
@@ -384,7 +414,9 @@ function register(server: McpServer) {
         scopeProspects(
           admin
             .from("prospects")
-            .select("id, company_name, contact_name, phone, email, status, next_action_at, owner_id"),
+            .select(
+              "id, company_name, contact_name, phone, email, status, next_action_at, next_action_kind, owner_id"
+            ),
           viewer
         ),
         perimetreDe(viewer, args.perimetre),
@@ -418,8 +450,12 @@ function register(server: McpServer) {
           contact: r.contact_name,
           telephone: r.phone,
           etape: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] ?? r.status,
-          prochaine_action: r.next_action_at,
-        }));
+          ...prochaineActionPourClaude(r.next_action_at, r.next_action_kind, r.status),
+        }))
+        // « À relancer » : une fiche close dont le RDV vient de commencer n'a
+        // plus rien à faire, même si la tâche horaire (023) ne l'a pas encore
+        // recalculée.
+        .filter((r) => !args.a_relancer || r.prochaine_action !== null);
       return json(`${rows.length} prospect(s).`, rows);
     }
   );
@@ -480,7 +516,7 @@ function register(server: McpServer) {
         valeur_ponderee: p.weighted_value,
         etape_verrouillee: p.status_locked,
         etape_motif_auto: p.status_auto_reason,
-        prochaine_action: p.next_action_at,
+        ...prochaineActionPourClaude(p.next_action_at, p.next_action_kind, p.status),
         dernier_contact: p.last_contact_at,
         notes: p.notes,
         journal: (activites.data ?? []).map((a) => ({
@@ -511,7 +547,7 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre).",
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre). Poser un rendez-vous clôture les relances qui tombaient avant lui : c'est le débrief du rendez-vous qui décide de la suite.",
     {
       perimetre: z
         .enum(["moi", "equipe"])
@@ -535,7 +571,11 @@ function register(server: McpServer) {
       const [overdue, today] = await Promise.all([
         filtrerTaches(
           scopeJoinedProspects(
-            admin.from("tasks").select(SELECT).eq("status", "a_faire").lt("due_at", start),
+            admin
+              .from("tasks")
+              .select(SELECT)
+              .eq("status", "a_faire")
+              .lt("due_at", start),
             viewer
           ),
           per,
@@ -543,7 +583,12 @@ function register(server: McpServer) {
         ).order("due_at", { ascending: true }).limit(100),
         filtrerTaches(
           scopeJoinedProspects(
-            admin.from("tasks").select(SELECT).eq("status", "a_faire").gte("due_at", start).lte("due_at", end),
+            admin
+              .from("tasks")
+              .select(SELECT)
+              .eq("status", "a_faire")
+              .gte("due_at", start)
+              .lte("due_at", end),
             viewer
           ),
           per,
@@ -1156,7 +1201,7 @@ function register(server: McpServer) {
   // --- poser_rendez_vous ----------------------------------------------------
   server.tool(
     "poser_rendez_vous",
-    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu.",
+    "Pose un rendez-vous dans l'agenda : créneau daté (jour ET heure OBLIGATOIRES), lieu, durée — et, pour un prospect, trace au journal et étape « Rendez-vous » déduite automatiquement. Si le JOUR ou l'HEURE manque dans la demande de l'utilisateur, POSEZ-LUI LA QUESTION : l'outil refuse (« Il manque le jour » / « Il manque l'heure ») et ne devine jamais. Ne posez JAMAIS une relance générique à la place — le rendez-vous serait perdu. Poser un rendez-vous CLÔTURE les relances ouvertes de la fiche qui tombaient avant lui (tracé au journal) : c'est son débrief qui décidera de la suite. Une relance que vous posez ensuite (ex. confirmer la veille) n'est jamais touchée.",
     {
       id: z.string().optional().describe("Identifiant du prospect."),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1231,6 +1276,8 @@ function register(server: McpServer) {
           `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}) — signalez-le à l'utilisateur.`
         );
       }
+      const annulees = phraseAnnulees(r.annulees);
+      if (annulees) bits.push(annulees);
       return text(bits.join(" "));
     }
   );
@@ -1247,6 +1294,12 @@ function register(server: McpServer) {
         .describe("Nouveau début « YYYY-MM-DDTHH:mm » (heure de Bruxelles). Requis sauf pour annuler."),
       annuler: z.boolean().optional().describe("true : annule le rendez-vous au lieu de le déplacer."),
       motif: z.string().optional().describe("Motif du report ou de l'annulation, versé au journal."),
+      relancer_le: z
+        .string()
+        .optional()
+        .describe(
+          "Avec « annuler: true » seulement, FACULTATIF : la suite — date de relance « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm ». Absente, rien n'est posé : si la fiche n'a plus aucune relance, elle ne remontera plus nulle part — demandez à l'utilisateur s'il a une date en tête plutôt que d'en inventer une."
+        ),
     },
     async (args, extra) => {
       const ctx = await context(extra);
@@ -1254,14 +1307,30 @@ function register(server: McpServer) {
       const { admin, viewer } = ctx;
 
       if (args.annuler) {
+        let suite: { dueAt: string } | null = null;
+        if (args.relancer_le) {
+          const dueAt = dateInputToISO(args.relancer_le);
+          if (!dueAt) {
+            return fail("« relancer_le » invalide — attendu « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm ».");
+          }
+          suite = { dueAt };
+        }
         const r = await cloturerRendezVous(admin, viewer.userId, {
           id: args.id,
           resultat: "annule",
           compteRendu: args.motif,
+          suite,
           isAdmin: viewer.isAdmin,
         });
         if (r.error) return fail(r.error);
-        return text(`✅ Rendez-vous « ${r.title} » annulé.`);
+        return text(
+          `✅ Rendez-vous « ${r.title} » annulé.` +
+            (r.ensuite
+              ? ` Prochaine action de la fiche : « ${r.ensuite.title} » le ${fmtDateTime(r.ensuite.due_at)}.`
+              : r.plusRien
+                ? " ⚠ Plus rien de prévu sur cette fiche : elle ne remontera plus dans « À faire ». Demandez à l'utilisateur s'il veut poser une suite."
+                : "")
+        );
       }
 
       if (!args.date) {
@@ -1281,6 +1350,9 @@ function register(server: McpServer) {
       const bits = [
         `✅ Rendez-vous « ${r.title} » reporté au ${fmtDateTime(r.startsAtISO)}.`,
       ];
+      // Relances qui tombent désormais avant le RDV : clôturées (trigger, 022).
+      const annulees = phraseAnnulees(r.annulees);
+      if (annulees) bits.push(annulees);
       if (r.conflit) {
         bits.push(
           `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`

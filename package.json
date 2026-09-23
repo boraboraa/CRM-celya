@@ -12,7 +12,8 @@
     "test:ia": "node --experimental-strip-types lib/ai/provider.test.ts",
     "test:equipe": "node --experimental-strip-types lib/crm/access.test.ts",
     "test:agenda": "node --experimental-strip-types lib/crm/agendaJour.test.ts",
-    "test:frontiere": "node --experimental-strip-types lib/rsc-frontiere.test.ts"
+    "test:frontiere": "node --experimental-strip-types lib/rsc-frontiere.test.ts",
+    "test:prochaine-action": "node --experimental-strip-types lib/crm/prochaineAction.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

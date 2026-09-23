@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
-import { PageHeader, EmptyState, Icone } from "@/components/ui";
+import { PageHeader, EmptyState, Icone, ProchaineActionTexte } from "@/components/ui";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/crm/lastAction";
 import { relanceEnLecture } from "@/lib/crm/access";
 import { ligneAgendaJour } from "@/lib/crm/agendaJour";
+import { ficheClose } from "@/lib/crm/prochaineAction";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -37,6 +38,7 @@ type WaitingProspect = {
   company_name: string;
   contact_name: string | null;
   next_action_at: string | null;
+  next_action_kind: string | null;
   /** Date du dernier mail envoyé. */
   sent_at: string | null;
 };
@@ -163,7 +165,7 @@ export default async function TodoPage({
     filtrerProspects(
       supabase
         .from("prospects")
-        .select("id, company_name, contact_name, next_action_at")
+        .select("id, company_name, contact_name, next_action_at, next_action_kind")
         .not("status", "in", "(gagne,perdu)"),
       perimetre,
       viewer
@@ -205,7 +207,11 @@ export default async function TodoPage({
           "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status"
         )
         .lt("ends_at", new Date().toISOString())
-        .in("status", ["prevu", "confirme"])
+        // « reporte » AUSSI : un rendez-vous reporté puis passé attend son
+        // débrief comme les autres. Sans lui, tout RDV déplacé une fois
+        // échappait à cette zone pour toujours (Garage Boetendael, 02/09 →
+        // invisible trois semaines). Même liste que `rdv_vivant` (022).
+        .in("status", ["prevu", "confirme", "reporte"])
         .is("debriefed_at", null),
       perimetre,
       viewer
@@ -289,6 +295,7 @@ export default async function TodoPage({
       contact_name: string | null;
       phone: string | null;
       city: string | null;
+      status: string;
     }
   >();
   if (meetingProspectIds.length > 0) {
@@ -296,7 +303,7 @@ export default async function TodoPage({
     // postal — jamais `country`, qui n'est pas fiable (voir lib/crm/maps.ts).
     const { data } = await supabase
       .from("prospects")
-      .select("id, company_name, contact_name, phone, city")
+      .select("id, company_name, contact_name, phone, city, status")
       .in("id", meetingProspectIds);
     for (const p of (data ?? []) as {
       id: string;
@@ -304,23 +311,32 @@ export default async function TodoPage({
       contact_name: string | null;
       phone: string | null;
       city: string | null;
+      status: string;
     }[]) {
       meetingProspects.set(p.id, p);
     }
   }
-  const debriefMeetings: DebriefMeeting[] = aDebriefer.map((m) => ({
-    id: m.id,
-    title: m.title,
-    starts_at: m.starts_at,
-    ends_at: m.ends_at,
-    prospect: m.prospect_id
-      ? {
-          id: m.prospect_id,
-          company_name:
-            meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
-        }
-      : null,
-  }));
+  // Une fiche gagnée ou perdue ne réclame jamais de débrief (migration 023) :
+  // sa fiche ne le dit plus, cette zone non plus — une source d'affichage qui
+  // contredirait la fiche serait pire que pas de filtre du tout. Le statut
+  // vient de la requête groupée ci-dessus ; le RDV perso (sans fiche) reste.
+  const debriefMeetings: DebriefMeeting[] = aDebriefer
+    .filter(
+      (m) => !m.prospect_id || !ficheClose(meetingProspects.get(m.prospect_id)?.status)
+    )
+    .map((m) => ({
+      id: m.id,
+      title: m.title,
+      starts_at: m.starts_at,
+      ends_at: m.ends_at,
+      prospect: m.prospect_id
+        ? {
+            id: m.prospect_id,
+            company_name:
+              meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
+          }
+        : null,
+    }));
 
   // Une fiche qui a répondu vit en zone 3 — ses relances n'encombrent pas la
   // zone 1 le temps du tri. (Les rendez-vous ne passent plus par des tâches
@@ -576,11 +592,19 @@ export default async function TodoPage({
                           {p.contact_name ? ` à ${p.contact_name}` : ""}
                         </p>
                       </div>
-                      <span className="shrink-0 text-xs text-slate-400">
-                        {p.next_action_at
-                          ? `Remonte le ${fmtDate(p.next_action_at)}`
-                          : "Aucune relance posée"}
-                      </span>
+                      {p.next_action_kind === "rendez_vous" ? (
+                        <ProchaineActionTexte
+                          at={p.next_action_at}
+                          kind={p.next_action_kind}
+                          className="shrink-0 text-xs"
+                        />
+                      ) : (
+                        <span className="shrink-0 text-xs text-slate-400">
+                          {p.next_action_at
+                            ? `Remonte le ${fmtDate(p.next_action_at)}`
+                            : "Aucune relance posée"}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -628,17 +652,20 @@ export default async function TodoPage({
       {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
           Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
           du produit, ne pas en ajouter d'autre. ---------- */}
-      {debriefMeetings.length > 0 && (
-        <section className="mt-8">
+      {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
+          débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
+          après le rafraîchissement — un démontage effacerait ce message. */}
+      <section className={debriefMeetings.length > 0 ? "mt-8" : "mt-8 empty:hidden"}>
+        {debriefMeetings.length > 0 && (
           <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
             Rendez-vous à débriefer
             <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
               {debriefMeetings.length}
             </span>
           </h2>
-          <DebriefList meetings={debriefMeetings} />
-        </section>
-      )}
+        )}
+        <DebriefList meetings={debriefMeetings} />
+      </section>
     </>
   );
 }

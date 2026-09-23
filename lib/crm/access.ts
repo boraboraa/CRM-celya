@@ -161,8 +161,9 @@ async function lireMembresActifs(
  *     le cache déjà à l'écran — et les deux chemins divergeraient en silence.
  *
  * TOLÉRANTE À L'ABSENCE DE LA TABLE, pour la même raison que `lirePorteurs` :
- * le code doit tourner contre la base d'AVANT la 021 (un 42P01 vaut « je
- * n'encadre personne »). L'échec est FERMÉ.
+ * le code doit tourner contre la base d'AVANT la 021 (toute erreur — en vrai
+ * `PGRST205`, voir `estTableAbsente` — vaut « je n'encadre personne »).
+ * L'échec est FERMÉ.
  */
 export async function lireEncadres(
   client: SupabaseClient,
@@ -181,6 +182,32 @@ export async function lireEncadres(
   return (data ?? [])
     .map((r) => (r as { commercial_id: string }).commercial_id)
     .filter((id) => actifs.has(id));
+}
+
+/**
+ * La table demandée n'existe pas (encore) en base. Deux codes, et c'est le
+ * PREMIER qu'on reçoit en vrai : mesuré le 22/09 contre la production sans la
+ * 021, PostgREST répond `PGRST205` (« Could not find the table
+ * 'public.supervision' in the schema cache ») avant même d'interroger
+ * Postgres ; `42P01` est ce que Postgres dirait lui-même (SQL direct).
+ */
+export function estTableAbsente(error: { code?: string | null } | null | undefined): boolean {
+  return error?.code === "PGRST205" || error?.code === "42P01";
+}
+
+/**
+ * L'encadrement est-il EN SERVICE ? Faux tant que la migration 021 n'est pas
+ * appliquée : l'écran d'équipe remplace alors ses cases « Encadré par » par
+ * une phrase, au lieu d'offrir un geste qui écrirait dans une table absente.
+ * Toute autre erreur (réseau, droits) vaut « en service » : on ne cache pas
+ * une fonctionnalité sur une panne passagère — l'écriture dira ce qu'il en est.
+ */
+export async function encadrementDisponible(client: SupabaseClient): Promise<boolean> {
+  const { error } = await client
+    .from("supervision")
+    .select("encadrant_id", { head: true, count: "exact" })
+    .limit(1);
+  return !estTableAbsente(error);
 }
 
 /**

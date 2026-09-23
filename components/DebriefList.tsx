@@ -6,16 +6,38 @@ import {
   cloturerRendezVousAction,
   deplacerRendezVousAction,
 } from "@/app/actions";
-import { fmtDateTime, relative } from "@/lib/constants";
+import { fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
 import { Icone } from "@/components/ui";
+import { PLUS_RIEN } from "@/lib/crm/prochaineAction";
 
 export type DebriefMeeting = {
   id: string;
   title: string;
   starts_at: string;
   ends_at: string;
-  prospect: { id: string; company_name: string } | null;
+  /**
+   * Jamais une fiche gagnée ou perdue : une fiche close ne réclame pas de
+   * débrief (023) — le tableau de bord les écarte avant d'arriver ici.
+   */
+  prospect: {
+    id: string;
+    company_name: string;
+  } | null;
 };
+
+/** « Et ensuite ? » — une date locale « YYYY-MM-DD », ou rien de dit. */
+type Suite = string | undefined;
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Date locale décalée de N jours (le navigateur de Bora est à Bruxelles). */
+function shiftedDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 /**
  * « Rendez-vous à débriefer » — la boucle qui manquait : le parcours
@@ -26,6 +48,13 @@ export type DebriefMeeting = {
  * plus un champ de compte rendu d'une ligne, versé au journal de la fiche
  * (attesté quand le rendez-vous a eu lieu). Optimiste : la ligne quitte la
  * zone au clic, et revient d'elle-même si le serveur refuse.
+ *
+ * « Et ensuite ? » (migration 022) : c'est ICI que la prochaine action se pose
+ * — Demain / +3 j / +1 sem / une date. OFFERT, jamais exigé : « Ça s'est
+ * fait » reste à UN tap. On ne paie un tap de plus que quand on a quelque
+ * chose à dire. Ignoré, rien n'est posé : les relances d'avant le rendez-vous
+ * ont été clôturées à sa pose, donc une fiche sans autre relance ne remonte
+ * plus dans « À faire » (elle reste dans la liste, étape inchangée).
  */
 export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
   const [vue, retirer] = useOptimistic(
@@ -37,6 +66,14 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
   /** Ligne dont le report est déplié (choix de la nouvelle date). */
   const [reportId, setReportId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [suites, setSuites] = useState<Record<string, Suite>>({});
+  /**
+   * Fiches laissées sans rien de prévu par un débrief sans suite : on le DIT,
+   * passivement, là où la ligne vient de disparaître — aucun geste réclamé.
+   */
+  const [sansSuite, setSansSuite] = useState<string[]>([]);
+  const choisir = (id: string, v: Suite) =>
+    setSuites((s) => ({ ...s, [id]: s[id] === v ? undefined : v }));
   const [, startTransition] = useTransition();
 
   function cloturer(id: string, resultat: "honore" | "annule") {
@@ -48,8 +85,14 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
         id,
         resultat,
         compteRendu: notes[id]?.trim() || null,
+        suite: suites[id] ?? null,
       });
       if (res?.error) setErreur(res.error);
+      else if (res?.plusRien) {
+        const m = meetings.find((x) => x.id === id);
+        const nom = m?.prospect?.company_name ?? m?.title ?? "Cette fiche";
+        setSansSuite((l) => (l.includes(nom) ? l : [...l, nom]));
+      }
       setEnCours(null);
     });
   }
@@ -71,7 +114,7 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
     });
   }
 
-  if (vue.length === 0 && !erreur) return null;
+  if (vue.length === 0 && !erreur && sansSuite.length === 0) return null;
 
   return (
     <>
@@ -83,6 +126,20 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
           {erreur}
         </p>
       )}
+      {sansSuite.map((nom) => (
+        <p
+          key={nom}
+          role="status"
+          className="mb-2 flex items-center gap-2 rounded-xl bg-white/[0.03] px-4 py-2.5 text-xs text-slate-300 ring-1 ring-white/[0.08]"
+        >
+          <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+          <span>
+            <span className="font-medium text-slate-200">{nom}</span> — {PLUS_RIEN.toLowerCase()}.
+            Elle ne remontera plus dans « À faire ».
+          </span>
+        </p>
+      ))}
+      {vue.length > 0 && (
       <ul className="card animate-rise divide-y divide-white/[0.05]">
         {vue.map((m) => (
           <li
@@ -121,6 +178,44 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
               placeholder="Compte rendu en une ligne (facultatif) — versé au journal de la fiche"
               className="input py-1.5 text-xs"
             />
+
+            {m.prospect && (
+              <div
+                className="flex flex-wrap items-center gap-1"
+                role="group"
+                aria-label="Et ensuite ? (facultatif)"
+              >
+                <span className="pr-0.5 text-[11px] text-slate-500">
+                  Et ensuite&nbsp;? <span className="text-slate-600">(facultatif)</span>
+                </span>
+                {RACCOURCIS_RELANCE.map((r) => {
+                  const v = shiftedDate(r.jours);
+                  const actif = suites[m.id] === v;
+                  return (
+                    <button
+                      key={r.label}
+                      type="button"
+                      aria-pressed={actif}
+                      onClick={() => choisir(m.id, v)}
+                      className={`min-h-[36px] rounded-lg px-2.5 text-[11px] transition ${
+                        actif
+                          ? "bg-celya-blue/20 text-blue-200 ring-1 ring-celya-blue/50"
+                          : "text-slate-400 hover:bg-celya-blue/15 hover:text-blue-200"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  );
+                })}
+                <input
+                  type="date"
+                  value={suites[m.id] ?? ""}
+                  onChange={(e) => choisir(m.id, e.target.value || undefined)}
+                  aria-label="Relancer à une date précise"
+                  className="min-h-[36px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
+                />
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-1.5">
               <button
@@ -164,6 +259,7 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
           </li>
         ))}
       </ul>
+      )}
     </>
   );
 }

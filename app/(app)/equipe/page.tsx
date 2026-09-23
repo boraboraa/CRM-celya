@@ -5,7 +5,11 @@ import { getSession } from "@/lib/auth";
 import { PageHeader, Avatar, Icone, type IconeNom } from "@/components/ui";
 import { CreateUserForm, ResetPasswordForm } from "@/components/TeamForms";
 import { adminUpdateUserAction } from "@/app/actions";
-import { lirePorteurs, lireLiensEncadrement } from "@/lib/crm/access";
+import {
+  lirePorteurs,
+  lireLiensEncadrement,
+  encadrementDisponible,
+} from "@/lib/crm/access";
 import { fmtDate, fmtDateTime, ACTIVITY_LABEL } from "@/lib/constants";
 
 /**
@@ -83,7 +87,7 @@ export default async function TeamPage({
   // `create or replace`) — un geste risqué en production pour une case à
   // cocher. `lirePorteurs` est une lecture de cinq lignes, tolérante à
   // l'absence de la colonne : la page rend donc aussi avant la migration 020.
-  const [overviewRes, recentRes, porteurs, liens] = await Promise.all([
+  const [overviewRes, recentRes, porteurs, liens, encadrementEnService] = await Promise.all([
     supabase.rpc("admin_team_overview", { p_since: since }),
     supabase
       .from("activities")
@@ -94,6 +98,8 @@ export default async function TeamPage({
     lirePorteurs(supabase),
     // Tolérante à l'absence de la table : la page rend aussi avant la 021.
     lireLiensEncadrement(supabase),
+    // …et l'ÉCRITURE aussi : sans la table, pas de cases à cocher.
+    encadrementDisponible(supabase),
   ]);
 
   const rows = (overviewRes.data ?? []) as Row[];
@@ -407,6 +413,16 @@ export default async function TeamPage({
                   <p className="mb-2 text-xs font-medium text-slate-300">
                     Encadré par
                   </p>
+                  {!encadrementEnService ? (
+                    // Migration 021 pas encore appliquée : une phrase, pas des
+                    // cases qui écriraient dans une table absente.
+                    <p className="text-[11px] leading-relaxed text-slate-400">
+                      Pas encore disponible : l&apos;encadrement sera activé
+                      quand la mise à jour de la base (migration 021) aura été
+                      appliquée. Rien à faire d&apos;ici là.
+                    </p>
+                  ) : (
+                  <>
                   <p className="mb-3 text-[11px] leading-relaxed text-slate-400">
                     La personne cochée voit son travail — fiches, appels,
                     relances, agenda — et <strong>ne le modifie pas</strong>.
@@ -467,6 +483,8 @@ export default async function TeamPage({
                       </p>
                     )}
                   </div>
+                  </>
+                  )}
                 </div>
               )}
 

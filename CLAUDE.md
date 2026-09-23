@@ -26,8 +26,12 @@ l'interrupteur « travaille en équipe » — voir le Modèle de sécurité.
 **Au 21 septembre**, la migration `020` est **appliquée en production** (Collins
 et Nathan cochés, Bora et Rémi non). **Quatre étudiants arrivent** : Collins,
 Nathan et Bora doivent voir leur travail, un étudiant ne doit voir que le sien.
-C'est l'objet de la `021` (table `supervision`, relation **orientée**) — écrite
-et recettée, **pas encore appliquée**. Voir « L'encadrement ».
+C'est l'objet de la `021` (table `supervision`, relation **orientée**). Voir
+« L'encadrement ».
+
+**Au 23 septembre**, la `021` et la `022` sont **appliquées en production**
+(vérifié par Bora). La `023` (une fiche close ne réclame rien) est **appliquée
+depuis le 23/09 à 11h38 UTC**, fichier du commit `4330114` tel quel.
 
 ### État au 25 août 2026
 
@@ -294,7 +298,7 @@ absent de sa ligne. Et les **deux zones d'ACTION** du tableau de bord
 périmètre d'équipe : ce sont ses boucles à lui, les lui prendre les ferait
 disparaître de son écran.
 
-### L'encadrement (migration `021`, 21 septembre — ÉCRITE, PAS APPLIQUÉE)
+### L'encadrement (migration `021`, 21 septembre — appliquée, constaté le 23/09)
 
 Quatre étudiants arrivent. Collins, Nathan et Bora doivent voir ce qu'ils font ;
 **un étudiant ne voit QUE ce qu'il a mis lui-même** — ni les fiches de Collins ou
@@ -339,7 +343,7 @@ Côté TypeScript, la règle entre par **`Viewer.visiblesIds`** (l'union : moi +
 co-porteurs si je suis porteur + mes encadrés), que `scopeProspects`,
 `scopeJoinedProspects` et le `in` de l'outil `agenda` consultent déjà — aucun
 outil MCP n'a eu besoin d'être réécrit. **`canEditProspect` NE BOUGE PAS.**
-`lireEncadres` est tolérante à l'absence de la table (42P01 → « je n'encadre
+`lireEncadres` est tolérante à l'absence de la table (`PGRST205` → « je n'encadre
 personne »), donc le code tourne avant comme après la migration.
 
 **Ce que l'encadrant voit de l'AGENDA** : tous les rendez-vous de l'étudiant,
@@ -349,6 +353,16 @@ indépendant, et elle vaut pareil pour un étudiant.
 
 **Réversible** : supprimer les lignes suffit ; retirer `or encadre(...)` des deux
 policies de lecture restaure la 020 à l'identique.
+
+**L'ÉCRITURE est tolérante aussi** (22/09, PR #14). Tant que la 021 n'est pas
+appliquée, `/equipe` remplace les cases « Encadré par » par une phrase
+(« Pas encore disponible… »), via `encadrementDisponible` ; et `set_encadrement`
+ne lève rien sur une table absente, il le journalise. **Le code réel d'une
+table absente est `PGRST205`** (PostgREST, « Could not find the table … in the
+schema cache »), mesuré contre la production — pas `42P01`, que seul le SQL
+direct renvoie. `estTableAbsente` accepte les deux ; les commentaires qui ne
+parlaient que de `42P01` étaient justes par chance, les lectures tolérant
+n'importe quelle erreur.
 
 ### Le périmètre d'affichage — du confort, PAS de la sécurité (31 août)
 
@@ -607,6 +621,149 @@ perso d'autrui est RÉAPPLIQUÉ EN CODE, car sous service_role `auth.uid()` est
 nul et la vue ne masque rien), `poser_rendez_vous` (refuse « Il manque le
 jour » / « Il manque l'heure », ne pose JAMAIS une relance à la place — c'est
 ce qui a perdu le RDV du 31/08), `deplacer_rendez_vous` (report ou annulation).
+
+### Une seule prochaine action — le RDV la prend (migration `022`, 22 septembre — appliquée, constaté le 23/09)
+
+Deux systèmes disaient chacun « la prochaine action » : les relances et
+l'agenda — et **seules les relances écrivaient `next_action_at`** (trigger
+`sync_next_action` sur `tasks`, jamais sur `meetings`). Une fiche vue en
+rendez-vous le 28 réclamait un appel « en retard » le 25, puis, le RDV passé,
+remontait en retard au lieu de demander son débrief.
+
+> **La prochaine action, c'est le prochain rendez-vous de la fiche tant qu'il
+> n'est pas débriefé ; sinon, sa relance la plus proche.**
+
+Cette phrase est en `COMMENT` sur `prospects.next_action_at`. La règle est
+écrite UNE fois, dans **`prochaine_action_de(prospect, étape)`** (SQL, depuis la
+`023`) ; deux écrivains seulement la lisent : **`recalc_next_action(prospect)`**
+(triggers `tasks` et `meetings`, tâche horaire) et le trigger d'étape de la
+`023`. Rien d'autre n'écrit `next_action_at` ni `next_action_kind`
+(`rendez_vous` | `relance`). La règle vit en SQL parce que
+le connecteur MCP écrit en service_role sans passer par les écrans ; seul le
+CHOIX humain (la suite d'un débrief) reste en TypeScript (`cloturerRendezVous`).
+
+**UNE seule mécanique** (décision de Bora, 22/09 : après un rendez-vous, une
+relance n'a plus de sens, tout dépend de ce qu'il a donné) : **poser ou
+déplacer un RDV CLÔTURE les relances ouvertes de la fiche qui tombent avant
+lui**, à cet instant — `annule`, pas reportées — et chacune laisse une note au
+journal (« Relance annulée : rendez-vous posé le 28/09 à 12h », `is_exchange`
+faux, signée de qui a posé le RDV). Trigger `meetings_prochaine_action`.
+
+- **Ce qui est posé APRÈS le RDV n'est jamais touché**, par construction — pas
+  de comparaison d'horodatages. « Confirmer la veille » passe devant le RDV :
+  la fiche dit la relance, **puis** le RDV. Mais un RDV **déplacé plus tard**
+  clôture à son tour ce qui tombe désormais avant lui, confirmation comprise.
+- **Un RDV passé non débriefé reste LA prochaine action**, affiché « À
+  débriefer », jamais en ambre. C'est le seul garde-fou contre une fiche qui
+  disparaît quand on oublie de débriefer — **ne pas l'affaiblir**.
+- **Un RDV clos (honoré / annulé) sans suite laisse la fiche SANS prochaine
+  action** : ses relances d'avant ont été clôturées à la pose. Elle sort de
+  « À faire » et reste dans la liste (« — »), étape inchangée. « Et ensuite ? »
+  (Demain / +3 j / +1 sem / date) est **offert, jamais exigé** — « Ça s'est
+  fait » reste à UN tap. MCP : `deplacer_rendez_vous(annuler, relancer_le)`,
+  qui avertit Claude quand la fiche n'a plus rien.
+- **Garde-fou ZÉRO TAP** : une telle fiche le DIT, passivement — « Plus rien de
+  prévu sur cette fiche » sur la carte PROCHAINE ACTION, « Plus rien de prévu »
+  dans la colonne « Prochaine action » de la liste et sur la carte des
+  colonnes, et une ligne dans la zone débrief juste après le clic (`plusRien`
+  renvoyé par `cloturerRendezVous`, lu en base après le recalcul). Aucune
+  relance créée, aucune date imposée, aucun geste réclamé. **Réservé aux
+  fiches qui ONT EU un rendez-vous clos** (`plusRienDePrevu`) : les ~50 fiches
+  « À appeler » jamais planifiées gardent « — » — elles n'ont pas « plus
+  rien », elles n'ont encore rien eu. La section débrief du tableau de bord
+  reste MONTÉE même vide, sinon le message disparaîtrait avec le dernier RDV
+  débriefé.
+- Un RDV saisi **dans le passé** ne clôture rien ; fiche **Gagné / Perdu** :
+  rien n'est clôturé ni tracé, et depuis la `023` elle ne réclame plus aucun
+  débrief (voir ci-dessous) ; **RDV perso** : hors règle.
+- **La zone « à débriefer » lit aussi `reporte`** : un RDV reporté puis passé
+  n'y remontait JAMAIS (Garage Boetendael, RDV du 02/09, invisible trois
+  semaines).
+- La cadence email ne crée **pas** de relance « si pas de réponse » sur une
+  fiche qui a un RDV vivant : c'est le débrief qui décidera.
+- Écrans : `ProchaineActionTexte` (`components/ui.tsx`) sur la liste, les
+  colonnes et la zone calme ; `deriveNextAction` sur la carte de la fiche ; la
+  pose depuis l'agenda dit quelles relances ont été clôturées
+  (`phraseAnnulees`). Lecture pure dans `lib/crm/prochaineAction.ts`
+  (`npm run test:prochaine-action`).
+- **Reprise** : la migration ne clôture RIEN rétroactivement (la règle vaut à
+  la pose) ; elle recalcule `next_action_*` sur toute la base.
+
+**Ordre** : la migration d'ABORD (le code du lot lit `next_action_kind`), le
+déploiement ensuite. Recette : `supabase/recettes/022_assembler.sh` (baseline →
+migration → assertions → exception finale), **43 OK, 0 faute** le 22/09,
+production revérifiée intacte (empreintes md5 identiques). Appliquée depuis :
+la version en ligne est celle du dépôt, **commentaires internes aux fonctions
+retirés** à l'application (logique identique, relue le 23/09) — les empreintes
+`md5(prosrc)` de `recalc_next_action` et `meetings_prochaine_action` diffèrent
+donc du fichier sans qu'il y ait de dérive.
+
+### Une fiche close ne réclame jamais rien (migration `023`, 23 septembre — appliquée le 23/09 à 11h38 UTC)
+
+La `022` ne regardait pas l'étape : Garage Boetendael, **gagné**, affichait en
+permanence « À débriefer — RDV du 02/09 ».
+
+> **Une fiche `gagne` ou `perdu` ne réclame jamais rien. Elle affiche seulement
+> ce que l'utilisateur a lui-même planifié.**
+
+- Ce que le système RÉCLAME — le débrief d'un RDV passé — **disparaît partout**
+  sur une fiche close : base, carte de la fiche, colonne latérale, liste,
+  colonnes, zone « Rendez-vous à débriefer », connecteur MCP.
+- Ce que l'utilisateur a PLANIFIÉ **reste, exactement comme sur une fiche
+  ouverte** : un RDV à venir (installation, formation, onboarding) et une
+  relance ouverte, **y compris en retard**. `perdu` (12 fiches sur 77) sert
+  aussi de **vivier** — l'enum n'a pas d'étape « à rappeler plus tard » :
+  supprimer ses relances effacerait des rappels volontaires. La zone
+  « À appeler / à rappeler » ne filtre donc RIEN (ZZ Test délivrabilité, perdu,
+  y reste avec sa relance du 15/09).
+- « Passé » = **a commencé** (`starts_at <= now()`), partout, SQL comme TS.
+
+Trois pièces SQL : **`prochaine_action_de`** (la règle, une seule fois — seule
+différence avec la 022 : `and (not close or starts_at > now())` sur les RDV) ;
+un trigger **BEFORE UPDATE OF status** (`prospects_etape_prochaine_action`) —
+avant lui, **rien ne recalculait au changement d'étape**, l'ancienne valeur
+survivait. Il pose `NEW.next_action_*` au lieu d'émettre un `UPDATE` : non
+ré-entrant par construction, et la ligne renvoyée par PostgREST est déjà juste ;
+et une **tâche horaire** pg_cron (`prochaine-action-fiches-closes`, `7 * * * *`,
+`recalc_fiches_closes_echues()`).
+
+⚠ **Pourquoi la tâche horaire — un piège à ne pas redécouvrir.** « A commencé »
+dépend de l'HEURE ; la base ne recalcule qu'à un ÉVÉNEMENT. Un RDV
+d'installation à venir sur une fiche gagnée devient passé **sans qu'aucune
+ligne ne bouge** : sans la tâche, `next_action_*` garderait ce RDV, la liste
+dirait « À débriefer » et une relance posée après lui ne remonterait jamais.
+La tâche ne touche QUE les fiches closes dont la prochaine action est un RDV
+commencé (sur une fiche ouverte, un RDV passé RESTE la prochaine action : rien
+à recalculer). Entre deux passages, l'affichage applique la même règle :
+`lireProchaineAction(at, kind, now, statut)` renvoie `rien` — d'où le `statut`
+passé à `ProchaineActionTexte` dans la liste et les colonnes, et à
+`prochaineActionPourClaude` dans le connecteur. **Toute règle qui dépend de
+l'heure sur une valeur STOCKÉE a besoin d'un réveil, pas seulement de
+triggers.**
+
+Côté code : `ficheClose` et `rdvQuiCompte(meetings, statut, now)`
+(`lib/crm/prochaineAction.ts`) — la carte de la fiche calcule avec l'étape,
+sans quoi **la fiche et la base se contrediraient** ; le tableau de bord écarte
+les fiches closes de la zone débrief (le drapeau `close` de `DebriefList` est
+retiré, devenu mort) ; `lister_prospects(a_relancer)` écarte une fiche close
+dont le RDV vient de commencer. Aucun bouton, aucun filtre, aucun tap ajouté.
+
+**Appliquée le 23/09 à 11h38 UTC** (fichier du commit `4330114` tel quel,
+commentaires compris). Vérifié par Bora juste après : Boetendael sans prochaine
+action, Alain docteur et ZZ Test gardent leurs relances, 16 fiches avec une
+action et 0 incohérence, aucune relance / RDV / note touchés, déclencheur
+d'étape actif, tâche horaire passée seule à 12h07 UTC (réussie, 0 fiche à
+corriger).
+
+**Ordre** (pour mémoire) : indifférent. La `023` n'ajoute aucune colonne ; le code de la PR
+tourne contre la base d'avant (la fiche calcule elle-même, la liste masque le
+débrief d'une fiche close) comme d'après. **Reprise** mesurée : une seule
+fiche change, Garage Boetendael → plus rien ; aucune relance, aucun RDV, aucune
+ligne de journal touchés. Recette : `supabase/recettes/023_assembler.sh`,
+**31 OK, 0 faute** le 23/09 (dates relatives à `now()` : rejouable n'importe
+quel jour), production revérifiée intacte. **Réversible** : remettre le corps
+022 de `recalc_next_action`, supprimer le trigger d'étape et
+`cron.unschedule('prochaine-action-fiches-closes')`.
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
@@ -1544,7 +1701,8 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
-`npm run test:equipe`, `npm run test:agenda`, `npm run test:frontiere` (purs,
+`npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
+`npm run test:frontiere` (purs,
 sans réseau). **`test:frontiere` n'est pas un test de règle mais un test de
 STRUCTURE** — il relit la frontière serveur → client, que ni `tsc` ni
 `next build` ne voient (voir le piège du 21/09). C'est le seul qui protège
@@ -1613,11 +1771,11 @@ est inchangé. Vérifié en base juste après : `reloptions` porte toujours
 réel le remet à 0, et un `outcome` inconnu est refusé (`23514`) — le tout dans
 des transactions annulées.
 
-`021_encadrement.sql` (21 septembre) est **écrite, testée, PAS appliquée** —
-c'est Bora qui applique, puis qui pose les liens depuis `/equipe`. **Additive
+`021_encadrement.sql` (21 septembre) est **appliquée** (constaté le 23/09) —
+Bora l'a appliquée ; les liens se posent depuis `/equipe`. **Additive
 et sans donnée** : la table naît vide, donc `encadre()` est faux pour tout le
 monde et rien ne change tant qu'aucun lien n'est posé. Le code du même lot lit
-la table de façon TOLÉRANTE (`lireEncadres` : un `42P01` vaut « je n'encadre
+la table de façon TOLÉRANTE (`lireEncadres` : un `PGRST205` vaut « je n'encadre
 personne »), il tourne donc contre la base d'avant comme d'après.
 
 **Recette différentielle rejouée en transaction ANNULÉE contre la production**

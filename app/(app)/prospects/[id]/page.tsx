@@ -19,6 +19,14 @@ import { RelancesSection } from "@/components/RelancesSection";
 import { updateProspectAction, deleteProspectAction } from "@/app/actions";
 import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
+import {
+  lireProchaineAction,
+  plusRienDePrevu,
+  rdvClos,
+  PLUS_RIEN_COURT,
+  rdvQuiCompte,
+  rdvVivant,
+} from "@/lib/crm/prochaineAction";
 import { replySubject } from "@/lib/crm/email";
 import type { ComposerPrefill } from "@/lib/crm/composer";
 import {
@@ -208,16 +216,20 @@ export default async function ProspectDetailPage({
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
-  // « Prochaine action » — dérivée sans le moindre appel à un modèle. Le
-  // prochain rendez-vous d'agenda (à venir, non annulé) passe devant la
-  // relance s'il arrive avant elle.
+  // « Prochaine action » — dérivée sans le moindre appel à un modèle, par la
+  // même règle que la base (migrations 022 et 023, lib/crm/prochaineAction.ts) :
+  // le rendez-vous VIVANT le plus proche — passé compris, il attend alors son
+  // débrief —, sauf relance posée après lui et tombant avant (« confirmer la
+  // veille »). Sur une fiche gagnée ou perdue, seul un rendez-vous À VENIR
+  // compte : une fiche close ne réclame jamais de débrief. Sans l'étape, la
+  // carte et la base se contrediraient.
   const lastEvent: LastEvent = timeline[0]
     ? { kind: timeline[0].kind, at: timeline[0].at }
     : null;
+  const rdvCourant = rdvQuiCompte(meetings, status);
   const prochainRdv =
     meetings.find(
-      (m) =>
-        m.status !== "annule" && new Date(m.starts_at).getTime() >= Date.now()
+      (m) => rdvVivant(m.status) && new Date(m.starts_at).getTime() >= Date.now()
     ) ?? null;
   // Le lieu d'un rendez-vous, quand la fiche n'a pas encore d'adresse : le
   // prochain rendez-vous d'abord, sinon le plus récent qui en porte un.
@@ -233,12 +245,25 @@ export default async function ProspectDetailPage({
     relances,
     lastEvent,
     prospect.contact_name,
-    prochainRdv
+    rdvCourant
   );
   // La relance ouverte la plus proche (la liste est triée par échéance), même
   // quand un rendez-vous lui passe devant dans la carte : c'est elle que
   // « Relancer » re-date, jamais une nouvelle.
   const relanceOuverte = relances[0] ?? null;
+  // Le garde-fou zéro tap : un rendez-vous clos sans suite ne laisse pas la
+  // fiche muette — elle dit « Plus rien de prévu sur cette fiche ».
+  const plusRien = plusRienDePrevu({
+    nextActionAt: prospect.next_action_at,
+    status,
+    aEuUnRdvClos: meetings.some((m) => rdvClos(m.status)),
+  });
+  const lectureNext = lireProchaineAction(
+    prospect.next_action_at,
+    prospect.next_action_kind,
+    Date.now(),
+    status
+  );
 
   // « Répondre » depuis une réponse reçue (tableau À faire) : le composeur
   // s'ouvre pré-rempli, destinataire et objet repris du message reçu. Le
@@ -363,6 +388,7 @@ export default async function ProspectDetailPage({
           prospectId={prospect.id}
           companyName={prospect.company_name}
           relanceOuverte={relanceOuverte}
+          plusRien={plusRien}
           canEmail={Boolean(prospect.email)}
           lectureSeule={lectureSeule}
         />
@@ -452,14 +478,19 @@ export default async function ProspectDetailPage({
                   Prochaine action
                 </p>
                 <p
-                  className={`mt-0.5 text-sm font-medium ${
-                    prospect.next_action_at &&
-                    new Date(prospect.next_action_at).getTime() < Date.now()
-                      ? "text-amber-300"
-                      : "text-slate-100"
+                  className={`mt-0.5 flex items-center gap-1.5 text-sm font-medium ${
+                    lectureNext.retard ? "text-amber-300" : "text-slate-100"
                   }`}
                 >
-                  {prospect.next_action_at ? fmtDateTime(prospect.next_action_at) : "—"}
+                  {lectureNext.icone && (
+                    <Icone nom={lectureNext.icone} className="h-3.5 w-3.5 text-blue-300" />
+                  )}
+                  {lectureNext.texte ??
+                    (!lectureNext.rien && prospect.next_action_at
+                      ? fmtDateTime(prospect.next_action_at)
+                      : plusRien
+                        ? PLUS_RIEN_COURT
+                        : "—")}
                 </p>
               </div>
             </div>

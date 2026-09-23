@@ -25,6 +25,7 @@ import { applyAutoStatus } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import type { ProspectStatus } from "@/lib/types";
+import { plusRienDePrevu, type RelanceAnnulee } from "@/lib/crm/prochaineAction";
 
 export type MeetingKind = "prospect" | "perso";
 export type MeetingStatus = "prevu" | "confirme" | "honore" | "annule" | "reporte";
@@ -93,6 +94,42 @@ async function chercheConflit(
   return (data?.[0] as MeetingConflit | undefined) ?? null;
 }
 
+/**
+ * Les relances ouvertes de la fiche qui tombent avant `startsISO` — celles que
+ * le trigger `meetings_prochaine_action` (migration 022) va clôturer. Ce n'est
+ * pas ce code qui les clôture : la règle vit en base, pour qu'elle vaille aussi
+ * pour le connecteur MCP et le SQL direct. On les relève seulement pour le DIRE.
+ */
+async function relancesAvant(
+  supabase: SupabaseClient,
+  prospectId: string,
+  startsISO: string
+): Promise<RelanceAnnulee[]> {
+  const { data } = await supabase
+    .from("tasks")
+    .select("id, title, due_at")
+    .eq("prospect_id", prospectId)
+    .eq("status", "a_faire")
+    .lt("due_at", startsISO)
+    .order("due_at", { ascending: true });
+  return (data ?? []) as RelanceAnnulee[];
+}
+
+/** Parmi les candidates, celles que la base a effectivement clôturées. */
+async function effectivementAnnulees(
+  supabase: SupabaseClient,
+  candidates: RelanceAnnulee[]
+): Promise<RelanceAnnulee[]> {
+  if (candidates.length === 0) return [];
+  const { data } = await supabase
+    .from("tasks")
+    .select("id")
+    .in("id", candidates.map((c) => c.id))
+    .eq("status", "annule");
+  const ids = new Set(((data ?? []) as { id: string }[]).map((r) => r.id));
+  return candidates.filter((c) => ids.has(c.id));
+}
+
 // ---------------------------------------------------------------------------
 // Poser
 // ---------------------------------------------------------------------------
@@ -129,6 +166,12 @@ export type PoserRendezVousResult = {
   conflit?: MeetingConflit | null;
   autoStatus?: ProspectStatus | null;
   autoReason?: string | null;
+  /**
+   * Les relances ouvertes qui tombaient AVANT ce rendez-vous et que sa pose a
+   * clôturées (migration 022, une ligne au journal chacune). Dites, jamais
+   * demandées.
+   */
+  annulees?: RelanceAnnulee[];
 };
 
 export async function poserRendezVous(
@@ -187,6 +230,10 @@ export async function poserRendezVous(
   // peuvent sciemment se toucher, c'est à l'humain de trancher.
   const conflit = await chercheConflit(supabase, userId, startsISO, endsISO);
 
+  // Ce que la pose va clôturer, relevé AVANT l'écriture pour pouvoir le dire.
+  const candidates =
+    kind === "prospect" ? await relancesAvant(supabase, input.prospectId!, startsISO) : [];
+
   const { data: inserted, error } = await supabase
     .from("meetings")
     .insert({
@@ -234,6 +281,10 @@ export async function poserRendezVous(
     await recalcConfidence(supabase, input.prospectId!);
   }
 
+  // Le rendez-vous devient la prochaine action : le trigger a clôturé les
+  // relances qui tombaient avant lui — on le dit.
+  const annulees = await effectivementAnnulees(supabase, candidates);
+
   return {
     id: inserted.id as string,
     title,
@@ -242,6 +293,7 @@ export async function poserRendezVous(
     conflit,
     autoStatus,
     autoReason,
+    annulees,
   };
 }
 
@@ -301,6 +353,8 @@ export type DeplacerRendezVousResult = {
   prospectId?: string | null;
   startsAtISO?: string;
   conflit?: MeetingConflit | null;
+  /** Relances qui tombent désormais avant le RDV, clôturées (trigger, 022). */
+  annulees?: RelanceAnnulee[];
 };
 
 export async function deplacerRendezVous(
@@ -341,6 +395,10 @@ export async function deplacerRendezVous(
     meeting.id
   );
 
+  const candidates = meeting.prospect_id
+    ? await relancesAvant(supabase, meeting.prospect_id, startsISO)
+    : [];
+
   const { error } = await supabase
     .from("meetings")
     .update({ starts_at: startsISO, ends_at: endsISO, status: "reporte" })
@@ -369,6 +427,7 @@ export async function deplacerRendezVous(
     prospectId: meeting.prospect_id,
     startsAtISO: startsISO,
     conflit,
+    annulees: await effectivementAnnulees(supabase, candidates),
   };
 }
 
@@ -380,6 +439,13 @@ export type CloturerRendezVousInput = {
   id: string;
   resultat: "honore" | "annule";
   compteRendu?: string | null;
+  /**
+   * « Et ensuite ? » — FACULTATIF. Une échéance (ISO UTC) : la relance ouverte
+   * la plus proche y est re-datée, à défaut une relance est créée — jamais de
+   * doublon. Absente : rien n'est posé ; la fiche garde ce qu'elle a (voir
+   * CLAUDE.md, « RDV clos sans suite »).
+   */
+  suite?: { dueAt: string } | null;
   /** Voir DeplacerRendezVousInput.isAdmin. */
   isAdmin?: boolean;
 };
@@ -390,6 +456,17 @@ export type CloturerRendezVousResult = {
   title?: string;
   prospectId?: string | null;
   resultat?: "honore" | "annule";
+  /**
+   * La prochaine relance de la fiche après le débrief (celle qu'on vient de
+   * poser, ou celle qui existait) — ou null si la fiche n'en a plus.
+   */
+  ensuite?: { title: string; due_at: string } | null;
+  /**
+   * Plus rien n'est prévu sur la fiche après ce débrief (ni relance, ni autre
+   * RDV vivant ; fiche ni gagnée ni perdue) — lu en base après le recalcul du
+   * trigger. L'écran le DIT, sans rien demander.
+   */
+  plusRien?: boolean;
 };
 
 export async function cloturerRendezVous(
@@ -425,6 +502,13 @@ export async function cloturerRendezVous(
     });
   }
 
+  // La suite — c'est ICI que la prochaine action se pose, si on la dit.
+  // Fiche gagnée / perdue : on ne pose plus rien.
+  let ensuite: { title: string; due_at: string } | null = null;
+  if (meeting.prospect_id) {
+    ensuite = await appliquerSuite(supabase, userId, meeting.prospect_id, input.suite);
+  }
+
   // Un débrief est un événement : l'étape et la confiance suivent (jamais
   // bloquant, jamais par-dessus un verrou).
   if (meeting.prospect_id) {
@@ -432,10 +516,82 @@ export async function cloturerRendezVous(
     await recalcConfidence(supabase, meeting.prospect_id);
   }
 
+  // Le garde-fou zéro tap : la base (recalc_next_action) dit si la fiche a
+  // encore quelque chose de prévu. Rien → l'écran le dira.
+  let plusRien = false;
+  if (meeting.prospect_id) {
+    const { data: apres } = await supabase
+      .from("prospects")
+      .select("next_action_at, status")
+      .eq("id", meeting.prospect_id)
+      .maybeSingle();
+    plusRien = plusRienDePrevu({
+      nextActionAt: (apres?.next_action_at as string | null) ?? null,
+      status: (apres?.status as string | null) ?? null,
+      aEuUnRdvClos: true,
+    });
+  }
+
   return {
     id: meeting.id,
     title: meeting.title,
     prospectId: meeting.prospect_id,
     resultat: input.resultat,
+    ensuite,
+    plusRien,
   };
+}
+
+/**
+ * « Et ensuite ? » après un débrief. Un seul chemin pour l'écran et le
+ * connecteur MCP. Jamais de doublon : on re-date la relance ouverte la plus
+ * proche, à défaut on en crée une ; les autres relances ouvertes de la fiche
+ * sont annulées (même règle que « Relancer »). Renvoie la prochaine relance de
+ * la fiche, ou null.
+ */
+async function appliquerSuite(
+  supabase: SupabaseClient,
+  userId: string,
+  prospectId: string,
+  suite: CloturerRendezVousInput["suite"]
+): Promise<{ title: string; due_at: string } | null> {
+  const { data: prospect } = await supabase
+    .from("prospects")
+    .select("id, company_name, status")
+    .eq("id", prospectId)
+    .maybeSingle();
+  if (!prospect) return null;
+  const close = prospect.status === "gagne" || prospect.status === "perdu";
+
+  const { data: ouvertes } = await supabase
+    .from("tasks")
+    .select("id, title, due_at")
+    .eq("prospect_id", prospectId)
+    .eq("status", "a_faire")
+    .order("due_at", { ascending: true });
+  const toutes = (ouvertes ?? []) as { id: string; title: string; due_at: string }[];
+
+  if (!close && suite?.dueAt) {
+    const cible = toutes[0] ?? null;
+    if (cible) {
+      await supabase.from("tasks").update({ due_at: suite.dueAt }).eq("id", cible.id);
+      const autres = toutes.slice(1).map((t) => t.id);
+      if (autres.length > 0) {
+        await supabase.from("tasks").update({ status: "annule" }).in("id", autres);
+      }
+      return { title: cible.title, due_at: suite.dueAt };
+    }
+    const title = `Relancer ${prospect.company_name}`;
+    await supabase.from("tasks").insert({
+      prospect_id: prospectId,
+      title,
+      due_at: suite.dueAt,
+      priority: 2,
+      assignee_id: userId,
+      created_by: userId,
+    });
+    return { title, due_at: suite.dueAt };
+  }
+
+  return toutes[0] ? { title: toutes[0].title, due_at: toutes[0].due_at } : null;
 }

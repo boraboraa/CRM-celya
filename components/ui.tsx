@@ -22,6 +22,7 @@ import {
   LAST_ACTION_LABEL,
   type LastActionKind,
 } from "@/lib/crm/lastAction";
+import { lireProchaineAction, PLUS_RIEN_COURT } from "@/lib/crm/prochaineAction";
 
 // ---------------------------------------------------------------------------
 // Pictogrammes — un seul jeu, dessiné ici
@@ -510,5 +511,72 @@ export function FormError({ message }: { message?: string }) {
     <p className="rounded-xl bg-rose-500/10 px-3.5 py-2.5 text-sm text-rose-300 ring-1 ring-rose-400/20">
       {message}
     </p>
+  );
+}
+
+/**
+ * La prochaine action d'une fiche, pour une liste, une carte de pipeline ou
+ * une ligne du tableau de bord : `prospects.next_action_at` +
+ * `next_action_kind` (migration 022). Un rendez-vous s'écrit « RDV le 28/09 à
+ * 12h » avec le calendrier, et n'est JAMAIS en retard — passé, il dit « À
+ * débriefer ». Une relance garde sa date relative, en ambre si elle est échue.
+ * `sansDate` : ce qu'on écrit quand il n'y a rien (« — » par défaut).
+ * `plusRien` : la fiche a eu un rendez-vous clos sans suite (voir
+ * `plusRienDePrevu`) — on écrit « Plus rien de prévu », passif, au lieu de « — ».
+ * `statut` : l'étape de la fiche. Gagnée ou perdue, elle ne réclame jamais de
+ * débrief (023) — un rendez-vous qui a commencé n'y est pas dit.
+ */
+export function ProchaineActionTexte({
+  at,
+  kind,
+  statut,
+  sansDate = "—",
+  className = "",
+  couleurNeutre = "",
+  plusRien = false,
+}: {
+  at: string | null | undefined;
+  kind: string | null | undefined;
+  statut?: string | null;
+  sansDate?: string;
+  /** Mise en page seulement — la couleur est celle de l'état. */
+  className?: string;
+  /** Couleur d'une relance À VENIR (le RDV et le retard ont la leur). */
+  couleurNeutre?: string;
+  /** RDV clos sans suite : « Plus rien de prévu » au lieu de « — ». */
+  plusRien?: boolean;
+}) {
+  const l = lireProchaineAction(at, kind, Date.now(), statut);
+  if (l.rien && plusRien) {
+    return (
+      <span
+        className={`italic text-slate-400 ${className}`}
+        title="Rendez-vous débriefé sans suite : cette fiche ne remontera plus dans « À faire »."
+      >
+        {PLUS_RIEN_COURT}
+      </span>
+    );
+  }
+  if (!at || l.rien) return <span className={`${couleurNeutre} ${className}`}>{sansDate}</span>;
+  if (l.estRdv) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 ${
+          l.aDebriefer ? "text-slate-200" : "text-blue-200"
+        } ${className}`}
+        title={l.aDebriefer ? "Rendez-vous passé : il attend son débrief" : undefined}
+      >
+        <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0" />
+        {l.texte}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 ${l.retard ? "text-amber-300" : couleurNeutre} ${className}`}
+    >
+      {l.retard && <Icone nom="alerte" className="h-3 w-3 shrink-0" />}
+      {relative(at)}
+    </span>
   );
 }

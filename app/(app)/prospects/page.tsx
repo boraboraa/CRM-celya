@@ -9,6 +9,7 @@ import {
   ConfidenceBadge,
   LastActionLine,
   Icone,
+  ProchaineActionTexte,
 } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
@@ -33,6 +34,7 @@ import {
   membresProposables,
   type PerimetreViewer,
 } from "@/lib/crm/perimetre";
+import { plusRienDePrevu } from "@/lib/crm/prochaineAction";
 import type { ConfidenceLevel } from "@/lib/types";
 
 
@@ -78,7 +80,7 @@ export default async function ProspectsPage({
     supabase
       .from("prospects")
       .select(
-        "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
+        "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
       ),
     perimetre,
     viewer
@@ -112,7 +114,12 @@ export default async function ProspectsPage({
   // La « dernière action » de chaque fiche (canal + date) vient de la vue
   // prospect_action_state — la RLS s'y applique comme partout. Le périmètre,
   // lui, est restreint en mémoire (la vue ne porte pas owner_id).
-  const [{ data, error }, actionsRes, membresRes] = await Promise.all([
+  //
+  // Les fiches qui ont eu un rendez-vous CLOS : sans prochaine action, elles
+  // disent « Plus rien de prévu » au lieu de « — » (migration 022 — le débrief
+  // sans suite ne doit pas faire disparaître une fiche en silence). Même
+  // lecture parallèle, RLS appliquée ; on ne garde que les fiches affichées.
+  const [{ data, error }, actionsRes, membresRes, rdvClosRes] = await Promise.all([
     query.limit(500),
     supabase
       .from("prospect_action_state")
@@ -125,7 +132,25 @@ export default async function ProspectsPage({
           .eq("is_active", true)
           .order("full_name")
       : Promise.resolve({ data: [] }),
+    supabase
+      .from("meetings_visibles")
+      .select("prospect_id")
+      .eq("kind", "prospect")
+      .in("status", ["honore", "annule"])
+      .not("prospect_id", "is", null)
+      .limit(2000),
   ]);
+  const avecRdvClos = new Set(
+    ((rdvClosRes.data ?? []) as { prospect_id: string | null }[])
+      .map((m) => m.prospect_id)
+      .filter(Boolean) as string[]
+  );
+  const plusRien = (p: { id: string; next_action_at: string | null; status: string }) =>
+    plusRienDePrevu({
+      nextActionAt: p.next_action_at,
+      status: p.status,
+      aEuUnRdvClos: avecRdvClos.has(p.id),
+    });
   const membres = (membresRes.data ?? []) as {
     id: string;
     full_name: string | null;
@@ -154,6 +179,7 @@ export default async function ProspectsPage({
     confidence_reason: string | null;
     confidence_locked: boolean | null;
     next_action_at: string | null;
+    next_action_kind: string | null;
     last_contact_at: string | null;
     /** Déjà demandé par le select ; utile pour savoir ce qu'on a le droit de faire. */
     owner_id: string | null;
@@ -186,6 +212,8 @@ export default async function ProspectsPage({
     confidence_reason: p.confidence_reason,
     confidence_locked: Boolean(p.confidence_locked),
     next_action_at: p.next_action_at,
+    next_action_kind: p.next_action_kind,
+    plus_rien: plusRien(p),
     last_kind: lastActions.get(p.id)?.last_kind ?? null,
     last_at: lastActions.get(p.id)?.last_at ?? null,
     last_outcome: lastActions.get(p.id)?.last_outcome ?? null,
@@ -382,8 +410,6 @@ export default async function ProspectsPage({
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
               {prospects.map((p) => {
-                const overdue =
-                  p.next_action_at && new Date(p.next_action_at).getTime() < Date.now();
                 return (
                   <tr key={p.id} className="transition duration-200 hover:bg-white/[0.04]">
                     <td className="td">
@@ -416,8 +442,13 @@ export default async function ProspectsPage({
                         locked={Boolean(p.confidence_locked)}
                       />
                     </td>
-                    <td className={`td whitespace-nowrap ${overdue ? "text-amber-300" : ""}`}>
-                      {p.next_action_at ? relative(p.next_action_at) : "—"}
+                    <td className="td whitespace-nowrap">
+                      <ProchaineActionTexte
+                        at={p.next_action_at}
+                        kind={p.next_action_kind}
+                        statut={p.status}
+                        plusRien={plusRien(p)}
+                      />
                     </td>
                     <td className="td whitespace-nowrap">
                       <LastActionLine

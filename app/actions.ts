@@ -28,6 +28,8 @@ import {
   cloturerRendezVous,
   type MeetingConflit,
 } from "@/lib/crm/agenda";
+import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
+import { estTableAbsente } from "@/lib/crm/access";
 import { getSession } from "@/lib/auth";
 import {
   importProspectsCore,
@@ -694,11 +696,16 @@ export async function deleteTaskAction(fd: FormData): Promise<ActionState> {
 export type RendezVousState = ActionState & {
   /** Chevauchement détecté — averti, jamais bloquant. */
   conflit?: MeetingConflit | null;
+  /** Relances clôturées par la pose du rendez-vous (migration 022) — dites, pas demandées. */
+  annulees?: RelanceAnnulee[];
 };
 
 function revalidateAgenda(prospectId?: string | null) {
   revalidatePath("/agenda");
   revalidatePath("/dashboard");
+  // La prochaine action d'une fiche suit désormais ses rendez-vous (022) : la
+  // liste et les colonnes la montrent.
+  revalidatePath("/prospects");
   if (prospectId) revalidatePath(`/prospects/${prospectId}`);
 }
 
@@ -727,7 +734,7 @@ export async function poserRendezVousAction(input: {
   if (r.error) return { error: r.error };
 
   revalidateAgenda(input.personnel ? null : input.prospectId);
-  return { conflit: r.conflit ?? null };
+  return { conflit: r.conflit ?? null, annulees: r.annulees ?? [] };
 }
 
 export async function deplacerRendezVousAction(input: {
@@ -750,26 +757,38 @@ export async function deplacerRendezVousAction(input: {
   if (r.error) return { error: r.error };
 
   revalidateAgenda(r.prospectId);
-  return { conflit: r.conflit ?? null };
+  return { conflit: r.conflit ?? null, annulees: r.annulees ?? [] };
 }
 
 export async function cloturerRendezVousAction(input: {
   id: string;
   resultat: "honore" | "annule";
   compteRendu?: string | null;
-}): Promise<ActionState> {
+  /** « Et ensuite ? » — FACULTATIF : « YYYY-MM-DD » (09:00 Bruxelles), ou null. */
+  suite?: string | null;
+}): Promise<ActionState & { plusRien?: boolean }> {
   const session = await getSession();
   if (!session) redirect("/login");
   const supabase = await createClient();
 
+  let suite: { dueAt: string } | null = null;
+  if (input.suite) {
+    const dueAt = dateInputToISO(input.suite);
+    if (!dueAt) return { error: "Date de relance invalide." };
+    suite = { dueAt };
+  }
+
   const r = await cloturerRendezVous(supabase, session.userId, {
-    ...input,
+    id: input.id,
+    resultat: input.resultat,
+    compteRendu: input.compteRendu,
+    suite,
     isAdmin: session.me?.role === "admin",
   });
   if (r.error) return { error: r.error };
 
   revalidateAgenda(r.prospectId);
-  return {};
+  return { plusRien: r.plusRien ?? false };
 }
 
 // =====================================================================
@@ -934,19 +953,27 @@ export async function adminUpdateUserAction(fd: FormData) {
     // `supervision_pas_soi_meme` ; on ne la propose pas, on ne l'envoie pas.
     if (!encadrantId || encadrantId === userId) return;
     const supabase = await createClient();
-    if (str(fd, "encadre") === "1") {
-      await supabase
-        .from("supervision")
-        .upsert(
-          { encadrant_id: encadrantId, commercial_id: userId },
-          { onConflict: "encadrant_id,commercial_id" }
-        );
-    } else {
-      await supabase
-        .from("supervision")
-        .delete()
-        .eq("encadrant_id", encadrantId)
-        .eq("commercial_id", userId);
+    const { error } =
+      str(fd, "encadre") === "1"
+        ? await supabase
+            .from("supervision")
+            .upsert(
+              { encadrant_id: encadrantId, commercial_id: userId },
+              { onConflict: "encadrant_id,commercial_id" }
+            )
+        : await supabase
+            .from("supervision")
+            .delete()
+            .eq("encadrant_id", encadrantId)
+            .eq("commercial_id", userId);
+    // Tolérant comme les lectures : tant que la migration 021 n'est pas
+    // appliquée, l'écran ne propose plus les cases (encadrementDisponible) ;
+    // une requête qui arriverait quand même ne fait rien, et le dit dans les
+    // journaux au lieu de lever une erreur brute.
+    if (estTableAbsente(error)) {
+      console.warn("[equipe] set_encadrement ignoré : table supervision absente (migration 021 non appliquée).");
+    } else if (error) {
+      console.error(`[equipe] set_encadrement : ${error.message}`);
     }
   }
 

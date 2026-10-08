@@ -394,7 +394,8 @@ begin
 end $$;
 
 -- 4.1 L'inscription automatique. AFTER INSERT (et AFTER UPDATE OF phone pour
--- une fiche qui n'a jamais été dans la file : un numéro ajouté après coup).
+-- une fiche qui n'a jamais été dans la file, quand son numéro DEVIENT
+-- appelable : un numéro ajouté ou corrigé après coup).
 -- `pas_avant` = +5 min : le temps que le brief se prépare.
 create or replace function public.appels_ia_inscription_auto()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -408,6 +409,14 @@ begin
       return null;
     end if;
     if tg_op = 'UPDATE' and exists (select 1 from public.appels_ia_file f where f.prospect_id = new.id) then
+      return null;
+    end if;
+    -- Le formulaire « Modifier la fiche » (updateProspectAction) réécrit `phone`
+    -- à CHAQUE enregistrement, même inchangé. Sans ce test, ré-enregistrer une
+    -- fiche déjà appelable avant l'allumage l'inscrirait : un rattrapage
+    -- silencieux. Celles-là passent par `appels_ia_rattrapage`, compté d'abord.
+    if tg_op = 'UPDATE' and (public.appels_ia_numero(old.phone) is not null
+                             or public.appels_ia_numero(new.phone) is null) then
       return null;
     end if;
     if public.appels_ia_refus_inscription(new.id, true, r.inscription_auto_par, r.mode_test) is not null then

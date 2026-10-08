@@ -82,11 +82,15 @@ PY
   cat <<'SQL'
 
 -- === Fin : le rapport, et le ROLLBACK garanti ===
+-- L'empreinte du texte RÉELLEMENT joué (current_query(), sans les blancs de
+-- fin) : elle doit égaler celle que l'assembleur affiche — preuve que la
+-- migration est partie verbatim, sans retouche au copier-coller.
 do $fin$
 begin
-  raise exception 'RECETTE 025 — % OK, % FAUTE(S)%',
+  raise exception 'RECETTE 025 — % OK, % FAUTE(S) — texte joué (md5 %)%',
     coalesce(nullif(current_setting('recette.ok', true), ''), '0'),
     coalesce(nullif(current_setting('recette.ko', true), ''), '0'),
+    md5(rtrim(current_query(), E' \n')),
     current_setting('recette.log', true);
 end $fin$;
 SQL
@@ -97,3 +101,4 @@ if grep -qi 'drop' "$tmp"; then
   exit 1
 fi
 cat "$tmp" > "$out"
+python3 -I -c 'import hashlib, sys; t = open(sys.argv[1], encoding="utf-8").read().rstrip(" \n"); print("025_assembler : md5 attendu du texte joué", hashlib.md5(t.encode("utf-8")).hexdigest(), file=sys.stderr)' "$tmp"

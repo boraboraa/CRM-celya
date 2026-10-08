@@ -1796,7 +1796,10 @@ jour ouvré** que l'essai 2. L'ancien calcul (heures entières) rendait 17h puis
   bouton « Vider la file de test »). Le mode test **naît mis** : tout appel part
   vers le GSM de test, rien n'est écrit sur la fiche.
 - **L'inscription automatique** est un trigger AFTER INSERT (et UPDATE OF phone
-  pour une fiche jamais passée par la file) sur `prospects` : fiche **de l'admin
+  pour une fiche jamais passée par la file, **seulement quand son numéro DEVIENT
+  appelable** — « Modifier la fiche » réécrit `phone` à chaque enregistrement,
+  même inchangé : sans ce test, ré-enregistrer une fiche ancienne l'inscrivait,
+  un rattrapage silencieux trouvé par la recette) sur `prospects` : fiche **de l'admin
   qui a allumé** l'interrupteur (jamais celles de Collins, Nathan, Rémi ou des
   étudiants), « À appeler », numéro belge valide, pas de RDV à venir, pas en
   opposition, jamais passée par un cycle du même mode. `pas_avant` = +5 min, le
@@ -1915,9 +1918,38 @@ minute.
 ### Tests et recette
 
 `npm run test:appels` (règles pures : numéros, calendrier, cycle, classement,
-écriture, gardes, brief, instructions, outils), `npm run test:appels-live` (le
-faux serveur Live : appel complet avec RDV, répondeur, standard, 403
-`outbound_sip_not_enabled`), recette `supabase/recettes/025_assembler.sh`.
+échecs de ligne, écriture, gardes, brief, instructions, outils),
+`npm run test:appels-live` (le faux serveur Live, local : il fait tourner le
+VRAI `menerAppel` — appel complet avec RDV, répondeur, standard, 403
+`outbound_sip_not_enabled`, plus clé refusée, connexion coupée, « Allô ? » puis
+raccroché, outil « constructor », audio dans les deux ordres de clés, échecs de
+ligne avant sonnerie ; horloge figée au mercredi 07/10 10h), et `deno check`
+de l'edge function dans une copie isolée.
+
+**Recette SQL** : `supabase/recettes/025_assembler.sh` (+ `025_corps.sql`),
+différentielle, en transaction ANNULÉE contre la production, **sans aucun
+`drop`** : **145 OK, 0 FAUTE** le 08/10 (numéros : les 31 cas de
+`numeros.cas.json` injectés par l'assembleur ; objets et RLS ; secrets et liste
+blanche ; contraintes ; trigger d'inscription ; rattrapage ; inscription à la
+main ; verrou « un seul appel » et prise par mode ; Rémi et `anon` ne voient ni
+n'écrivent rien ; les lignes d'avant de `prospects`, `tasks`, `meetings`,
+`activities` gardent leur empreinte md5). Production revérifiée intacte après
+chaque passage : zéro objet `appels_ia`, 86 fiches, empreintes inchangées. Le
+rattrapage concernerait **27 fiches** réelles de Bora le jour où il le lance.
+
+⚠ **Piège de transport, à connaître avant `apply_migration`** : dans un appel
+d'outil MCP, les séquences `\uXXXX` sont décodées en caractères. La regex du
+juge du numéro (`\u00a0\u202f`) arrive donc en espaces insécables LITTÉRALES :
+même comportement, mais le `md5(prosrc)` en ligne différera du fichier. La
+recette l'a contourné (`\u005cu00a0`) et prouve que le fichier joué est le bon
+(md5 de la migration jouée = `md5sum` du fichier).
+
+**Un trou existant, hors 025** : `prospects_insert` n'exige que `is_member()`
+— un commercial peut créer une fiche au nom de Bora. Elle n'entre pas dans la
+file, mais par RICOCHET (la garde admin de `appels_ia_campagne_systeme` lève,
+le trigger avale l'erreur) ; une assertion couvre le cas. Un test explicite
+dans le trigger (`auth.uid()` non nul et différent de `inscription_auto_par` →
+rien) le rendrait lisible — non fait, rien n'échoue aujourd'hui.
 
 ---
 

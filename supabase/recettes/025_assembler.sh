@@ -14,6 +14,14 @@
 # confirmation sur ce mot et tombe en délai dépassé. Les tables temporaires de
 # la baseline disparaissent avec le rollback ; l'assembleur refuse de produire
 # un script qui contiendrait ce mot.
+#
+# Le rapport final porte deux empreintes (migration jouée, texte joué), à
+# comparer à celles que l'assembleur affiche sur stderr. Piège mesuré le
+# 08/10 : un agent qui recopie ce script dans un appel d'outil voit ses
+# séquences `\uXXXX` DÉCODÉES en caractères (le `\u00a0\u202f` du juge du
+# numéro arrivait en espaces insécables littérales, 10 caractères de moins) ;
+# `\n` et `\\` passent tels quels. Écrire alors `\u005cu00a0` pour que
+# `\u00a0` arrive littéralement — l'empreinte de la migration le vérifie.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out="${1:-/dev/stdout}"
@@ -82,15 +90,23 @@ PY
   cat <<'SQL'
 
 -- === Fin : le rapport, et le ROLLBACK garanti ===
--- L'empreinte du texte RÉELLEMENT joué (current_query(), sans les blancs de
--- fin) : elle doit égaler celle que l'assembleur affiche — preuve que la
--- migration est partie verbatim, sans retouche au copier-coller.
+-- Les empreintes de ce qui a RÉELLEMENT été joué (current_query()) : la
+-- migration seule, et le texte entier jusqu'au terminateur de ce bloc (le MCP
+-- Supabase ajoute ses propres commentaires après). Elles doivent égaler celles
+-- que l'assembleur affiche : preuve que la migration est partie verbatim.
 do $fin$
+declare
+  q text := current_query();
+  fin text := 'end ' || chr(36) || 'fin' || chr(36) || ';';
+  debut_mig text := E'-- === Migration 025, verbatim ===\n';
+  i int := strpos(q, debut_mig) + length(debut_mig);
+  j int := strpos(q, E'\n-- === Assertions ===');
 begin
-  raise exception 'RECETTE 025 — % OK, % FAUTE(S) — texte joué (md5 %)%',
+  raise exception 'RECETTE 025 — % OK, % FAUTE(S) [migration jouée : md5 % ; texte joué : md5 %]%',
     coalesce(nullif(current_setting('recette.ok', true), ''), '0'),
     coalesce(nullif(current_setting('recette.ko', true), ''), '0'),
-    md5(rtrim(current_query(), E' \n')),
+    md5(substr(q, i, j - i)),
+    md5(left(q, strpos(q, fin) + length(fin) - 1)),
     current_setting('recette.log', true);
 end $fin$;
 SQL
@@ -101,4 +117,10 @@ if grep -qi 'drop' "$tmp"; then
   exit 1
 fi
 cat "$tmp" > "$out"
-python3 -I -c 'import hashlib, sys; t = open(sys.argv[1], encoding="utf-8").read().rstrip(" \n"); print("025_assembler : md5 attendu du texte joué", hashlib.md5(t.encode("utf-8")).hexdigest(), file=sys.stderr)' "$tmp"
+python3 -I - "$tmp" supabase/migrations/025_appels_ia.sql <<'PY' >&2
+import hashlib, sys
+texte = open(sys.argv[1], encoding="utf-8").read().rstrip(" \n")
+migration = open(sys.argv[2], encoding="utf-8").read()
+md5 = lambda s: hashlib.md5(s.encode("utf-8")).hexdigest()
+print("025_assembler : md5 attendus — migration", md5(migration), "; texte joué", md5(texte))
+PY

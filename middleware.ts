@@ -5,7 +5,14 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 // /login, /auth : parcours d'authentification de l'app.
 // /mcp, /sse, /message : serveur MCP (auth par jeton Bearer, pas par cookie).
 // /api/oauth, /.well-known : serveur d'autorisation OAuth du connecteur MCP.
+// /api/appels-ia/{tick,outils,fin} : le moteur d'appels de Janet, appelé par
+// pg_cron (secret du Vault) et par l'edge function annexe (signature HMAC) —
+// jamais par un navigateur. /api/appels-ia/suivi et /etat restent derrière la
+// session : ce sont les écrans de l'admin qui les sondent.
 const PUBLIC_PATHS = [
+  "/api/appels-ia/tick",
+  "/api/appels-ia/outils",
+  "/api/appels-ia/fin",
   "/login",
   "/auth",
   "/mcp",
@@ -71,6 +78,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|mcp|sse|message|api/oauth|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|mcp|sse|message|api/oauth|api/appels-ia/tick|api/appels-ia/outils|api/appels-ia/fin|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

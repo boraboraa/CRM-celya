@@ -13,7 +13,9 @@
     "test:equipe": "node --experimental-strip-types lib/crm/access.test.ts",
     "test:agenda": "node --experimental-strip-types lib/crm/agendaJour.test.ts",
     "test:frontiere": "node --experimental-strip-types lib/rsc-frontiere.test.ts",
-    "test:prochaine-action": "node --experimental-strip-types lib/crm/prochaineAction.test.ts"
+    "test:prochaine-action": "node --experimental-strip-types lib/crm/prochaineAction.test.ts",
+    "test:appels": "node --experimental-strip-types lib/appelsIa/regles.test.ts && node --experimental-strip-types lib/appelsIa/cycle.test.ts && node --experimental-strip-types lib/appelsIa/classement.test.ts && node --experimental-strip-types lib/appelsIa/ecriture.test.ts && node --experimental-strip-types lib/appelsIa/instructions.test.ts",
+    "test:appels-live": "node --experimental-strip-types lib/appelsIa/faux-live.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -30,9 +32,11 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.2",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "ws": "^8.18.0"
   }
 }

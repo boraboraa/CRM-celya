@@ -924,7 +924,9 @@ rien sur l'état du compte (ni 500, ni « compte en attente »).
 
 `/dashboard` (**À faire**) · `/agenda` (depuis le 31 août — voir « L'agenda »)
 · `/prospects` (+ `/prospects/[id]`, `/prospects/nouveau`,
-`/prospects/import`) · `/equipe` (admin) ·
+`/prospects/import`) · `/equipe` (admin) · `/appels-ia` (admin, octobre 2026 —
+les appels de Janet, voir « Appels IA » ; lien du menu après « Équipe », admin
+seul) ·
 et en périphérie : `/compte` (liens vers `/reglages-email` et `/emails`, et —
 admin seulement — la section « **Assistant IA** » : le bouton qui dit pourquoi
 l'IA ne marche pas, ancre `#assistant-ia`) · `/acces-refuse`. `/taches` redirige vers `/dashboard`,
@@ -1519,6 +1521,11 @@ de doublon au lieu de créer (forçable par `forcer: true`).
 Depuis le 1er septembre, `creer_prospect` accepte `adresse` (adresse ou lien
 Maps, stocké tel quel), `obtenir_prospect` la renvoie, et le `lieu` de
 `poser_rendez_vous` **hérite de l'adresse de la fiche** s'il est laissé vide.
+Depuis octobre 2026 (appels IA, **admin seul, vérifié en code**) :
+`ecrire_brief_appel`, `mettre_en_campagne` (simulation d'abord) et
+`etat_appels`, et un `brief` facultatif sur `creer_prospect` et
+`importer_prospects` (source « Claude », jamais réécrite par l'IA). Migration
+`025` absente : chacun répond qu'elle n'est pas appliquée, sans rien écrire.
 
 Trois précautions dictées par la règle des faits (4 août) :
 

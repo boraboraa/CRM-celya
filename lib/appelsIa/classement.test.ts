@@ -15,6 +15,7 @@ import {
   type FaitsAppel,
   type Tour,
 } from "../../supabase/functions/_shared/appels/classement.ts";
+import { coteTransport } from "../../supabase/functions/_shared/appels/transport.ts";
 import { verifie, bilan } from "./verifie.ts";
 
 const P = (texte: string): Tour => ({ qui: "prospect", texte });
@@ -137,5 +138,23 @@ verifie(
   c({ finAppelJanet: "repondeur", tours: [P("Allô ?"), J("Bonjour, je suis Janet…"), P("Oui ?")] }),
   "repondu_humain"
 );
+
+// À qui la faute, quand le transport échoue avant toute sonnerie.
+const t = (code: string | null, message: string) => coteTransport({ code, message });
+verifie("transport : 403 forbidden → nous", t(null, "SIP 403 Forbidden"), "nous");
+verifie("transport : identifiants refusés → nous", t("auth_failed", "Authentication failed"), "nous");
+verifie("transport : 407 proxy auth → nous", t(null, "407 Proxy Authentication Required"), "nous");
+verifie("transport : numéro appelant refusé → nous", t("invalid_caller_id", "caller id rejected"), "nous");
+verifie("transport : SIP sortant non activé → nous", t("outbound_sip_not_enabled", ""), "nous");
+verifie("transport : crédit épuisé → nous", t(null, "Insufficient balance"), "nous");
+verifie("transport : occupé → eux", t("busy", "User busy"), "eux");
+verifie("transport : 486 → eux", t(null, "486 Busy Here"), "eux");
+verifie("transport : numéro inexistant → eux", t("not_found", "Number not found"), "eux");
+verifie("transport : non attribué → eux", t(null, "unallocated number"), "eux");
+verifie("transport : refusé par l'appelé → eux", t("call_rejected", "Declined"), "eux");
+verifie("transport : « forbidden » passe devant « rejected »", t("rejected", "403 Forbidden"), "nous");
+verifie("transport : message inconnu → inconnu", t(null, "échec du transport"), "inconnu");
+verifie("transport : rien → inconnu", coteTransport(null), "inconnu");
+verifie("transport : « Service Unavailable » (480/503 chez eux) → eux", t(null, "Temporarily Unavailable"), "eux");
 
 bilan("Classement");

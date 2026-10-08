@@ -218,6 +218,9 @@ create table public.appels_ia (
   duree_s          integer,
   facture_s        integer,
   age_worker_s     integer,
+  -- Le jeton de fin : posé par Next AVANT d'écrire la fin (une seule écriture,
+  -- même si l'annexe renvoie son rapport). Plus de 5 min : écrivain mort, repris.
+  fin_prise_at     timestamptz,
   -- 'nous' : panne de notre côté (l'essai ne compte pas, la ligne repart) ;
   -- 'neutre' : fin illisible (rien n'est écrit au journal, rien n'est deviné).
   erreur_cote      text check (erreur_cote in ('nous', 'neutre')),

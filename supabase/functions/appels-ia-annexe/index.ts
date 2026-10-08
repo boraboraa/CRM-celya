@@ -82,36 +82,53 @@ async function posterSigne(url: string, corps: string, interne: string, delaiMs:
   });
 }
 
-/** Rend le rapport à Next — deux essais, puis, à défaut, la trace minimale en base. */
+/**
+ * Rend le rapport à Next — deux essais, puis, à défaut, la trace minimale en
+ * base. Ne lève JAMAIS : une promesse rejetée dans `waitUntil` tue le worker, et
+ * avec lui toute trace de l'appel. Un second essai après un délai dépassé est
+ * sans risque : Next prend un jeton de fin avant d'écrire (une seule écriture).
+ */
 async function rendre(rapport: RapportAppel, interne: string, urlApp: string) {
   const corps = JSON.stringify(rapport);
-  for (let i = 0; i < 2; i++) {
-    try {
-      const r = await posterSigne(`${urlApp}/api/appels-ia/fin`, corps, interne, 25_000);
-      if (r.ok) return;
-      log("fin refusée par Next", r.status, (await r.text()).slice(0, 200));
-    } catch (e) {
-      log("fin : Next injoignable", String(e));
+  if (interne && urlApp) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const r = await posterSigne(`${urlApp}/api/appels-ia/fin`, corps, interne, 25_000);
+        if (r.ok) return;
+        log("fin refusée par Next", r.status, (await r.text().catch(() => "")).slice(0, 200));
+        // 4xx : Next a lu et refusé (signature, rapport illisible) — inutile d'insister.
+        if (r.status >= 400 && r.status < 500) break;
+      } catch (e) {
+        log("fin : Next injoignable", String(e));
+      }
+      if (i === 0) await new Promise((res) => setTimeout(res, 3_000));
     }
-    await new Promise((res) => setTimeout(res, 3_000));
+  } else {
+    log("fin : secret interne ou URL de l'app inconnus, trace minimale en base");
   }
   // Next n'a pas pu écrire la fin : on libère la ligne, en échec NEUTRE — rien
   // n'est deviné, la ligne de file repartira (tick de Next, filet).
-  await supabase
-    .from("appels_ia")
-    .update({
-      statut: "echec",
-      erreur_cote: "neutre",
-      erreur_code: "fin_injoignable",
-      erreur_message: "Next n'a pas pu écrire la fin de l'appel.",
-      session_id: rapport.sessionId,
-      transcription: rapport.tours,
-      evenements: rapport.evenements,
-      outils: rapport.outils,
-      fin_at: rapport.finA,
-    })
-    .eq("id", rapport.appelId)
-    .in("statut", ["reserve", "composition", "sonnerie", "en_ligne"]);
+  try {
+    const { error } = await supabase
+      .from("appels_ia")
+      .update({
+        statut: "echec",
+        erreur_cote: "neutre",
+        erreur_code: "fin_injoignable",
+        erreur_message: "Next n'a pas pu écrire la fin de l'appel.",
+        session_id: rapport.sessionId,
+        transcription: rapport.tours,
+        evenements: rapport.evenements,
+        outils: rapport.outils,
+        fin_at: rapport.finA,
+      })
+      .eq("id", rapport.appelId)
+      .in("statut", ["reserve", "composition", "sonnerie", "en_ligne"]);
+    if (error) log("trace minimale refusée", error.message);
+  } catch (e) {
+    // Dernier filet : le tick de Next (appel actif depuis plus de 15 min → neutre).
+    log("trace minimale impossible", String(e));
+  }
 }
 
 async function mener(appel: { id: string; numero_compose: string; session_prete: Record<string, unknown> | null }, plafondMurS: number, ageS: number) {
@@ -191,16 +208,20 @@ async function mener(appel: { id: string; numero_compose: string; session_prete:
   } catch (e) {
     rapport = rapportSansAppel(appel.id, "annexe", String((e as Error)?.message ?? e).slice(0, 200));
   }
-  log("fin", appel.id, rapport.raisonFermeture ?? rapport.erreur?.message ?? "", `${rapport.tours.length} répliques`);
-  if (!interne || !urlApp) {
-    try {
-      interne = interne || (await secret("secret_interne"));
-      urlApp = urlApp || (await reglages()).url_app;
-    } catch (e) {
-      log("impossible de relire secret / réglages pour rendre la fin", String(e));
+  try {
+    log("fin", appel.id, rapport.raisonFermeture ?? rapport.erreur?.message ?? "", `${rapport.tours.length} répliques`);
+    if (!interne || !urlApp) {
+      try {
+        interne = interne || (await secret("secret_interne"));
+        urlApp = urlApp || (await reglages()).url_app;
+      } catch (e) {
+        log("impossible de relire secret / réglages pour rendre la fin", String(e));
+      }
     }
+    await rendre(rapport, interne, urlApp);
+  } catch (e) {
+    log("rendre a levé", String(e));
   }
-  await rendre(rapport, interne, urlApp);
 }
 
 Deno.serve(async (req) => {

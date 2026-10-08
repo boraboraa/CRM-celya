@@ -5,7 +5,24 @@ contexte acquis : ne le redemande pas.
 
 ---
 
-## État au 19 septembre 2026
+## État au 8 octobre 2026
+
+Relu en base le 08/10 : **neuf comptes actifs** — Bora (admin, 52 fiches), Rémi
+(25), Nathan (8), Collins (1), les **quatre étudiants** (0 fiche chacun) et le
+compte de recette `recette-epuration@celya.test`, **toujours actif, toujours à
+supprimer**. Total : 86 fiches · 198 activités · 63 relances · 245 emails ·
+15 rendez-vous. La table `supervision` est **vide** : aucun lien d'encadrement
+n'est encore posé, donc les étudiants ne sont vus que de Bora.
+
+Les migrations `021` à **`024`** sont appliquées (la `024` le 23/09,
+`20260923141041`). La **`025`** (les appels IA de Janet, voir « Appels IA ») est
+écrite et recettée, **pas appliquée** — Bora applique après relecture, dans
+l'ordre migration → edge function `appels-ia-annexe` → Vercel.
+
+L'organisation Supabase « celya » est en **plan Pro** (constaté le 08/10) — la
+ligne « plan gratuit » de ce fichier était fausse, corrigée dans Coordonnées.
+
+### État au 19 septembre 2026
 
 L'équipe est **à cinq comptes actifs**, vérifié en base : Bora (admin, 52
 fiches), **Rémi Perez** (`640f3e05…`, commercial, 25 fiches — et non 13 comme
@@ -32,8 +49,8 @@ C'est l'objet de la `021` (table `supervision`, relation **orientée**). Voir
 **Au 23 septembre**, la `021` et la `022` sont **appliquées en production**
 (vérifié par Bora). La `023` (une fiche close ne réclame rien) est **appliquée
 depuis le 23/09 à 11h38 UTC**, fichier du commit `4330114` tel quel. La
-`024` (un RDV à venir passe TOUJOURS devant) est écrite et recettée, **pas
-encore appliquée** — Bora applique après relecture.
+`024` (un RDV à venir passe TOUJOURS devant) était alors écrite et recettée
+(appliquée le jour même, voir l'état au 8 octobre).
 
 ### État au 25 août 2026
 
@@ -64,7 +81,11 @@ En septembre 2026, des étudiants rejoignent l'équipe et doivent avoir leur
 propre accès — **un commercial ne voit que ses prospects assignés**. C'est
 l'exigence non négociable qui a dicté l'architecture.
 
-Contrainte posée par Bora : **zéro euro de coût récurrent**.
+Contrainte posée par Bora au départ : **zéro euro de coût récurrent**. Elle
+tient pour tout le CRM **sauf les appels IA** (octobre 2026) : Janet coûte à la
+minute (GPT-Live chez OpenAI, la ligne chez Telnyx) et le numéro Telnyx est un
+abonnement qui court même interrupteur coupé. L'interrupteur général de
+`/appels-ia` coupe tout ce qui se paie à la minute. Voir « Appels IA ».
 
 Ce CRM correspond à la ligne « Smart CRM » du catalogue Celya. Il est donc à la
 fois outil interne et produit potentiellement revendable — le code est écrit
@@ -76,10 +97,10 @@ pour Bora, sans dépendance à un projet tiers sous licence contraignante.
 
 | Élément | Valeur |
 |---|---|
-| Projet Supabase | `wyqgbihwkfvzxlzoxvvf` (eu-west-1, plan gratuit, PG 17) |
+| Projet Supabase | `wyqgbihwkfvzxlzoxvvf` (eu-west-1, PG 17) |
 | URL API | `https://wyqgbihwkfvzxlzoxvvf.supabase.co` |
-| Org Supabase | `pnabxknxmyhbasturuyy` — **2 projets actifs sur 2**, plafond atteint |
-| Edge functions | `crm-admin` (`verify_jwt: true`) · `crm-mail` (`verify_jwt: false` — auth interne : JWT vérifié pour save/send, secret Vault pour la relève cron) |
+| Org Supabase | `pnabxknxmyhbasturuyy` (« celya ») — **plan Pro** (constaté le 08/10 ; ce fichier disait « gratuit, 2 projets sur 2 », c'était faux). Elle porte aussi le projet du produit `piufpzeicmvgtieybgra`, **à lire seulement** depuis ce dépôt |
+| Edge functions | `crm-admin` (`verify_jwt: true`) · `crm-mail` (`verify_jwt: false` — auth interne : JWT vérifié pour save/send, secret Vault pour la relève cron) · `appels-ia-annexe` (`verify_jwt: false` — signature HMAC de Next ; **écrite, pas déployée**, voir « Appels IA ») |
 | Compte admin | `dogrulbora@gmail.com` |
 | Équipe Vercel | `bora` (`team_pPDHLPxzzBYl4oq0J1cnZiUX`) |
 | URL de production | `https://celya-accounting-app.vercel.app` |
@@ -116,10 +137,16 @@ Tout repose sur la **RLS Postgres**, pas sur le code applicatif. Même si une
 page oublie un filtre, la base refuse. C'est le choix structurant du projet ;
 ne le contourne jamais en passant par le service_role côté serveur Next.
 
-**Unique exception sanctionnée : le connecteur MCP** (voir « Connecteur MCP »
-plus bas). Il agit en `service_role` — c'est structurellement nécessaire — et
-le serveur MCP n'ouvre que les tables CRM. Aucune autre partie du code Next ne
-doit toucher au `service_role`.
+**Deux exceptions sanctionnées, et pas une de plus.** La première : **le
+connecteur MCP** (voir « Connecteur MCP » plus bas). Il agit en `service_role` —
+c'est structurellement nécessaire — et le serveur MCP n'ouvre que les tables
+CRM. La seconde (octobre 2026) : **le moteur des appels IA** (`lib/appelsIa/`,
+routes `/api/appels-ia/tick|outils|fin`, et les actions admin qui le
+déclenchent) — un appel se poursuit sans session utilisateur (tick pg_cron,
+annexe Deno), et il écrit sur la fiche **au nom de son propriétaire**. Il
+n'agit que sur la fiche de l'appel désigné par un identifiant **signé** (HMAC),
+jamais sur un id venu du modèle ou d'un formulaire. Aucune autre partie du code
+Next ne doit toucher au `service_role`.
 
 Jusqu'au 25 août, l'exception était encapsulée par un garde-fou grossier : le
 jeton OAuth n'était délivré qu'à l'**admin**. C'était nécessaire, parce que les
@@ -411,6 +438,7 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
 | `mcp_oauth_clients` / `mcp_oauth_codes` / `mcp_oauth_tokens` | état du serveur OAuth du connecteur MCP (migration `008`) — **RLS fermée sans policy** comme `email_accounts`, seul le `service_role` y accède. Ne pas « corriger » l'absence de policy. |
+| `appels_ia_reglages` · `appels_ia_campagnes` · `appels_ia_file` · `appels_ia` · `appels_ia_opposition` · `appels_ia_briefs` · `appels_ia_scripts` | les appels IA de Janet (migration `025`, **pas appliquée**) : réglages (ligne unique), campagnes, file d'appel (une ligne vivante par fiche), un appel par ligne (un seul en cours, index unique partiel), opposition par numéro composé, brief d'appel par fiche, quatre scripts. **Admin seul** : une policy `is_admin()` par table, rien pour `anon`. Les secrets (clé OpenAI, identifiants SIP) sont au **Vault**, jamais dans ces tables. Voir « Appels IA » |
 
 Triggers utiles : une activité met à jour `prospects.last_contact_at` ; une
 tâche recalcule `prospects.next_action_at` (la plus proche échéance ouverte).
@@ -1605,6 +1633,274 @@ suivre l'OAuth (se connecter avec le compte admin).
 
 ---
 
+## Appels IA — Janet appelle depuis le CRM (migration `025`, octobre 2026 — ÉCRITE, PAS APPLIQUÉE)
+
+Janet, l'IA vocale de Celya, fait la prospection téléphonique **de l'admin** :
+elle appelle les fiches une par une, se présente comme une IA dans sa première
+phrase, qualifie, et pose la démonstration dans l'agenda. Ce qu'elle obtient
+atterrit sur la fiche **comme si son propriétaire l'avait fait** : même journal
+(`saveExchangeCore`), même étape par les faits (jamais « Perdu », jamais de
+verrou), même agenda (`poserRendezVous`), même confiance. **Admin seul**, de bout
+en bout : chaque table `appels_ia*` n'a qu'une policy, `is_admin()` ; chaque
+outil MCP vérifie l'admin en code.
+
+**Le moteur : GPT-Live sortant (`gpt-live-1`, voix `gleam`) via un trunk SIP
+Telnyx.** C'est OpenAI qui compose. La forme vient de la doc OpenAI lue le 07/10
+et de la réceptionniste du produit (`openai-live-incoming`, lue sans la modifier) :
+
+```
+Next (décide)                 edge function appels-ia-annexe (tient l'appel)      OpenAI
+  tick pg_cron chaque minute ─▶ POST signé HMAC {appel_id} ─▶ POST /v1/live/sessions (session + transport SIP)
+  composerSuivant : gardes,      lit ses secrets au Vault      wss …/live/sessions/{id}/attach (aussitôt)
+  prise en base, instructions    relaie chaque outil ─────────▶ /api/appels-ia/outils (HMAC) ─▶ fiche, agenda
+                                 raccroche (machine, silence,   POST …/hangup
+  /api/appels-ia/fin (HMAC) ◀──── rapport de faits, en fin d'appel
+  classe, écrit, cycle, et lance l'appel suivant à la chaîne
+```
+
+### Où vit l'annexe, et pourquoi (décision de la phase 1, validée le 08/10)
+
+La connexion annexe doit rester ouverte toute la durée de l'appel ; il n'existe
+**ni webhook de fin d'appel sortant, ni API pour relire un appel après coup, ni
+outils MCP en délégation GPT-Live** (doc du 07/10) : sans annexe, rien. Elle vit
+dans une **edge function du CRM** : l'organisation Supabase « celya » est en
+**plan Pro** (le prompt de départ la croyait gratuite, à 150 s) — le worker vit
+**400 s**, d'où un **plafond de 330 s par appel**, comme la réceptionniste. Le
+plus long des 107 appels sortants de juillet a duré 219 s.
+
+⚠ **La limite porte sur le WORKER, pas sur l'appel** (doc Supabase) : un worker
+réutilisé n'a plus que ce qui lui reste. L'annexe note la naissance de son
+worker, plafonne l'appel à ce qui reste (moins 45 s pour rendre la fin), et
+refuse (`503 worker_vieux`) s'il reste moins de 4 min : Next efface la
+réservation et repousse la ligne, **sans essai ni panne**. L'âge du worker est
+gardé sur chaque appel (`age_worker_s`) pour qu'on mesure. Si les appels longs
+se font couper, le repli est une plateforme sans mur (Durable Object Cloudflare,
+Lambda), pas une edge function.
+
+**Toute la règle reste en TypeScript côté Next, en un exemplaire** : l'annexe
+rapporte des FAITS (`RapportAppel` : événements, répliques, outils, raison de
+fermeture) et ne décide que du raccroché. Ce qu'elle partage avec Next vit dans
+`supabase/functions/_shared/appels/` (classement, rapport, signature, cœur de
+l'annexe), TypeScript portable sans API Deno ni Node, importé par chemin relatif
+des deux côtés **et** par les tests node — jamais une seconde copie à la main
+comme dans `crm-mail`.
+
+### Ce que la doc OpenAI et la réceptionniste ont appris — à ne pas redécouvrir
+
+- **Chaque `POST /v1/live/sessions` compose un nouvel appel** (aucune
+  déduplication) : une création ne se rejoue JAMAIS. Un réveil d'annexe sans
+  réponse claire n'est pas rejoué non plus : le filet tranche.
+- `type: "live"` n'existe qu'à l'`/accept` d'un appel ENTRANT ; le schéma de
+  création ne l'a pas. La création répond `200` ou `201`, sans statut d'appel.
+- Le SIP sortant s'active pour l'**organisation** OpenAI (`403
+  outbound_sip_not_enabled` sinon), pas pour le projet.
+- `transport.ringing` / `transport.answered` / `transport.failed` : ce dernier ne
+  porte **aucun code SIP**. Pas d'événement de raccroché : la fin, c'est
+  `session.closed` (`remote_hangup`, `close_requested`, `connection_lost`…).
+- Les transcriptions arrivent mot à mot (`.delta`), sans fin de tour : 900 ms de
+  silence ferment une réplique (même règle que la réceptionniste).
+- L'annexe reçoit TOUT l'audio des deux voix (~64 Ko/s par sens) : il est
+  compté, jamais décodé (filtre sur le début du message, avant `JSON.parse`).
+- `session.instructions.append` (`delegation_id: null`) est le canal PROUVÉ pour
+  faire parler la voix hors délégation : c'est lui qui dit « conclus » 45 s avant
+  le plafond.
+- ⚠ **Le raccroché de session ne coupait pas la ligne** chez la réceptionniste
+  (entrant, 11/09) : elle raccroche aussi l'appel SIP par `/realtime/calls/{id}/
+  hangup`, avec un id que seul un webhook entrant lui donne. En sortant, pas
+  d'équivalent connu — **à vérifier au premier appel de test** : le GSM doit
+  raccrocher dans les 2 s qui suivent l'au revoir de Janet.
+- Telnyx : aucune doc pour un appel sortant passé par OpenAI ; OPUS n'existe
+  qu'en TLS ; Telnyx veut l'identifiant SIP dans `Contact` ou `X-Telnyx-Username`
+  et OpenAI ne permet aucun en-tête SIP — **à vérifier au premier appel**.
+
+### Le classement — repris de l'ancien sortant du produit, corrigé
+
+Source : `_shared/disposition.ts` (`elevenlabs-webhook`) et `heartbeat`, lus le
+07/10. Module : `supabase/functions/_shared/appels/classement.ts`. Ordre (la
+première règle gagne) :
+
+| Classement | Reconnu par | Sur la fiche | Suite du cycle |
+|---|---|---|---|
+| `occupe_echec` | `transport.failed` APRÈS sonnerie | `sans_reponse` | nouvel essai |
+| `sans_reponse` | pas de décroché ; ou décroché, moins de 8 s sans un mot | `sans_reponse` | nouvel essai |
+| `repondu_humain` | Janet a AGI (RDV, opposition), ou ≥ 2 répliques humaines dont une APRÈS une phrase de Janet | ordre des preuves (ci-dessous) | **cycle terminé** |
+| `repondeur` | messagerie (motif FORT de l'accueil, ou `fin_appel` de Janet, ou indice faible sans échange) ; 8 s ou plus de silence ; un seul « Allô ? » | `sans_reponse`, pas un échange | nouvel essai ; stop à 2 machines à 2 heures différentes, jamais d'humain |
+| `standard_ivr` | menu (« tapez 1 », « druk op 2 », « press 1 »…) ou serveur vocal | `barrage` **sans échange** | **stop immédiat** |
+
+Les corrections, validées le 08/10 : **deux répliques humaines** ; les motifs de
+machine se cherchent **dans l'accueil seulement** (les deux premières répliques
+du prospect) ; motifs **FORTS** (décident seuls et font raccrocher l'annexe en
+direct) et **FAIBLES** (« ne quittez pas », « merci de patienter », « vous êtes
+bien chez… » sont aussi des phrases humaines : ils ne décident que faute de tout
+échange) ; « after the tone », « druk op » + chiffre, « toets 1 », « kies 1 » ;
+le texte est **normalisé sans accents** avant comparaison — le `\b` de
+JavaScript ne reconnaissait pas « à », si bien que « bienvenue à … » et « vous
+êtes bien à … » ne matchaient JAMAIS dans l'ancien code.
+
+**`standard_ivr` → `barrage` SANS échange** (`is_exchange` faux) : dans le CRM,
+« Barrage » est un humain qui filtre et compte comme un échange réel ; une
+machine ferait sinon passer la fiche en « Contacté ». **`repondeur` reste
+`repondeur` dans `appels_ia`** (seule la fiche dit « Pas de réponse ») : c'est lui
+qui alimente la règle des deux machines.
+
+**L'ordre des preuves** (`lib/appelsIa/resultat.ts`) : ce que Janet a FAIT (RDV
+posé → intéressé ; opposition → refus), puis personne au bout du fil, puis ce
+qu'elle DÉCLARE (`noter_resultat`), à défaut « à rappeler ». Le sujet de
+l'entrée (la dernière action de la carte) est le résumé de Janet, **sans
+préfixe** « Appel IA · ». Le nom du contact n'est écrit sur la fiche que si
+Janet a eu le **décideur**, jamais une secrétaire.
+
+### Le cycle — compté en minutes (`lib/appelsIa/cycle.ts`)
+
+Fenêtre du lundi au vendredi, **9h30–17h30**, **jours fériés belges exclus**
+(Pâques calculé). 3 essais au plus. Essai 2 dans le créneau 16h–17h, au moins
+3 h après la fin de l'essai 1 ; essai 3 dans le créneau 17h–17h30, **un autre
+jour ouvré** que l'essai 2. L'ancien calcul (heures entières) rendait 17h puis
+17h avec une fenêtre 9h30–17h30, et des minutes hors fenêtre.
+
+| Essai 1 | Essai 2 | Essai 3 | 3 × sans réponse |
+|---|---|---|---|
+| mer. 07/10 10h00 | mer. 07/10 16h00 | jeu. 08/10 17h00 | relance ven. 09/10 9h |
+| mer. 07/10 15h00 | jeu. 08/10 16h00 | ven. 09/10 17h00 | relance lun. 12/10 9h |
+| ven. 09/10 16h30 | lun. 12/10 16h00 | mar. 13/10 17h00 | relance mer. 14/10 9h |
+
+- **Fin de cycle → une relance pour le propriétaire**, le lendemain ouvré à 9h :
+  « Janet : 3 essais sans réponse. À vous de voir », « Janet : standard
+  automatique, à contacter autrement », « Janet : deux répondeurs (10h, 16h), à
+  contacter autrement ».
+- **Un humain : le cycle s'arrête, Janet ne rappelle jamais d'elle-même.**
+  « Rappelez-moi », intéressé sans RDV, barrage : une relance à la date donnée
+  par le prospect (`rappeler_le`), sinon le lendemain ouvré à 9h. **Rien après
+  un refus**, rien quand un RDV est à venir (024).
+- **Jamais de relance par-dessus une relance humaine** : si la fiche a déjà une
+  relance ouverte, Janet n'en pose pas et n'en re-date aucune (leçon de la 024 :
+  un automate qui réécrit une date ressemble à un humain qui a décidé).
+- **Le cycle s'arrête si la fiche a bougé** depuis le premier essai : un échange
+  ou une note d'un humain, un mail reçu, un RDV posé hors Janet, l'étape changée
+  à la main (`lib/appelsIa/garde.ts`).
+- **Aucune relance orpheline** : un nouvel essai n'est programmé que si la
+  campagne est active ou en pause.
+
+### Ce que la base garantit (migration `025`)
+
+- **Un seul appel en cours** : index unique partiel sur `appels_ia`. Un 23505 à
+  la prise arrête la boucle, ce n'est pas une erreur.
+- **Une seule ligne vivante de file par fiche** : index unique partiel.
+- **Le mode test se fige** à la mise en file (`appels_ia_file.mode_test`) et à
+  la prise (`appels_ia_prendre` ne prend que les lignes du mode en cours) :
+  couper le mode test ne transforme pas une file de test en vrais appels (un
+  bouton « Vider la file de test »). Le mode test **naît mis** : tout appel part
+  vers le GSM de test, rien n'est écrit sur la fiche.
+- **L'inscription automatique** est un trigger AFTER INSERT (et UPDATE OF phone
+  pour une fiche jamais passée par la file) sur `prospects` : fiche **de l'admin
+  qui a allumé** l'interrupteur (jamais celles de Collins, Nathan, Rémi ou des
+  étudiants), « À appeler », numéro belge valide, pas de RDV à venir, pas en
+  opposition, jamais passée par un cycle du même mode. `pas_avant` = +5 min, le
+  temps que le brief se prépare. Le trigger **n'échoue jamais l'insertion d'une
+  fiche** : il avale sa propre erreur (`raise warning`). Pas de rattrapage
+  silencieux : le bouton annonce d'abord combien (`appels_ia_rattrapage(false)`).
+- **Le juge du numéro** (`appels_ia_numero`) : format national accepté (les 27
+  fiches de Bora sont en « 081 22 33 44 »), jamais 090x / 070 / 077 / 078, un
+  **fixe liégeois en 04 (8 chiffres) est valide**. Recopié en TypeScript
+  (`lib/appelsIa/numeros.ts`) : **un seul jeu de cas**, `numeros.cas.json`, joué
+  par le test TS ET par la recette SQL.
+- **L'opposition porte le numéro COMPOSÉ** (`appels_ia.numero_compose`, posé
+  avant de composer), pas le numéro actuel de la fiche ; un dernier contrôle se
+  fait à l'écriture du résultat (illisible → fermé : le cycle s'arrête).
+- **Les secrets** (clé OpenAI, identifiant et mot de passe SIP) dans le Vault,
+  posés par l'admin (`appels_ia_poser_secret`, liste blanche), relus par le seul
+  service_role — **l'annexe**. Next ne les voit jamais. Le numéro appelant et
+  l'URL du trunk sont des réglages : **sans numéro appelant, le moteur refuse de
+  composer** et le dit.
+
+### Ce que le moteur garantit (`lib/appelsIa/`)
+
+- **Une panne de notre côté ne brûle pas la file** (création refusée, annexe
+  injoignable, jamais sonné) : rien sur la fiche, l'essai ne compte pas, la
+  ligne repart 10 min plus tard. Pause immédiate si la cause ne se répare pas
+  seule (clé refusée, `outbound_sip_not_enabled`, configuration refusée) ; sinon
+  à la deuxième panne d'affilée. L'écran dit la cause en français
+  (`lib/appelsIa/causes.ts`).
+- **Une fin d'appel illisible n'est jamais devinée en « pas de réponse »** :
+  échec NEUTRE, rien au journal, la ligne repart sans compter d'essai.
+- **Chaque appel réseau a son délai** (`AbortSignal`), **chaque ligne du tick a
+  son try/catch**, **les lectures échouent fermées** (réglages, opposition,
+  fiche illisibles → on ne compose pas).
+- **Le nom d'outil se cherche avec `Object.hasOwn`** (sinon « constructor »
+  passe). Les outils (`creneaux`, `rdv`, `opposition`, `noter_resultat`,
+  `fin_appel`) agissent sur la fiche de l'appel désigné par l'id SIGNÉ de
+  l'annexe, jamais sur un id venu du modèle. **Pas de RDV dans le passé**, ni à
+  moins de 2 h, ni hors des jours ouvrés ; les créneaux se lisent dans l'agenda
+  du **propriétaire** de la fiche (une fiche de collègue ajoutée à la main
+  s'écrit à son nom, son RDV va dans son agenda).
+- **À la chaîne** : dès qu'un appel est écrit, le suivant part (`after()` de la
+  route de fin) ; le tick reste le filet (réservation jamais prise > 2 min :
+  panne ; appel sans fin > 15 min : neutre ; ligne « en cours » orpheline).
+- Les **plafonds** (heure et jour) restent sous les limites du compte Telnyx
+  (contrainte en base) et comptent aussi les appels de test.
+
+### Le brief d'appel et les scripts
+
+Un **brief par fiche** (`appels_ia_briefs`) : ce que fait l'entreprise, qui
+demander, ce qu'on sait, l'accroche, la solution, les questions, et « ce que
+Janet a appris aux appels précédents » (une ligne datée par appel, DÉTERMINISTE,
+tirée de `noter_resultat`). **Chaque information porte sa source et sa date**
+(fiche, site, IA, Claude, saisie, Janet). L'IA le prépare à l'inscription depuis
+la fiche et **le site de la fiche** (6 s et 300 Ko au plus, hôte public
+seulement) — **ni scraping Google ni clé Places** : Maps arrive par Claude ou par
+Bora. **L'IA ne réécrit jamais ce que Claude ou Bora ont écrit** (fusion
+« compléter »). IA indisponible : le brief se réduit à la fiche, Janet appelle
+quand même. Pas de validation : la dernière version sert.
+
+**Quatre scripts** (garage, restaurant, cabinet, autre ; `appels_ia_scripts`),
+choisis par `secteurDe(prospects.sector)` (texte libre ; inconnu → « autre »).
+**Les règles intouchables vivent dans le code** (`lib/appelsIa/instructions.ts`)
+et passent AVANT le script et le brief, puis les referment : IA annoncée dans la
+**première phrase** (AI Act, art. 50), jamais de prix, jamais de nom de client,
+rien de la liste noire (emailing, appels sortants pour le client, WhatsApp,
+synchronisation d'agenda), « ne m'appelez plus » respecté sur-le-champ (outil
+`opposition`), jamais de message laissé sur un répondeur. Un script vide ou
+hostile ne peut pas les retirer — c'est testé. Aux essais 2 et 3, Janet sait ce
+qui s'est passé avant, sans prétendre avoir laissé un message (l'ancien sortant
+affirmait « personne n'a pu décrocher » même après un répondeur).
+
+### Les écrans et le connecteur
+
+- **`/appels-ia`** (admin) : interrupteur général (né coupé), mode test (né mis),
+  état du moteur et sa raison, pause et sa cause, « Appel de test vers mon
+  GSM », inscription automatique et rattrapage annoncé, fenêtre, plafonds et
+  limites du compte, durée et sonnerie, numéro appelant, GSM de test, trunk,
+  secrets (écriture seule), les quatre scripts, campagnes, file, appels,
+  opposition.
+- **Tableau de bord** : une seule colonne « Appels », admin seul, à droite (en
+  tête sur GSM) — l'appel en cours et la file, appelés / joints / RDV du jour,
+  le fil des derniers appels (un point de couleur, une ligne), un lien.
+- **Fiche** : « Appeler avec Janet » (suivi : toutes les 6 s pendant 5 min,
+  puis toutes les 20 s, arrêt à 50 min) et le bloc « Brief d'appel ».
+- **Listes et colonnes** : une étiquette « Janet » ; **agenda** et zone
+  « Aujourd'hui » : « posé par Janet ». Lues dans `appels_ia` (admin seul) —
+  ni `prospect_action_state` ni `meetings` n'ont bougé.
+- **MCP** (admin seul, vérifié en code) : `brief` optionnel sur `creer_prospect`
+  et `importer_prospects` ; `ecrire_brief_appel` ; `mettre_en_campagne`
+  (simulation d'abord) ; `etat_appels`.
+
+### Le coût — ce n'est plus « zéro euro »
+
+GPT-Live : **0,05 $ la minute** de session (au tour près, silences compris ; la
+sonnerie n'est pas documentée), plus les jetons du modèle de délégation. Telnyx :
+la minute vers fixes et mobiles belges, et l'**abonnement du numéro**, qui court
+même interrupteur coupé. L'interrupteur général coupe tout ce qui se paie à la
+minute.
+
+### Tests et recette
+
+`npm run test:appels` (règles pures : numéros, calendrier, cycle, classement,
+écriture, gardes, brief, instructions, outils), `npm run test:appels-live` (le
+faux serveur Live : appel complet avec RDV, répondeur, standard, 403
+`outbound_sip_not_enabled`), recette `supabase/recettes/025_assembler.sh`.
+
+---
+
 ## Vitesse et fluidité (7 août)
 
 Le CRM était lent, et surtout *mou* : chaque geste attendait le serveur avant
@@ -1764,8 +2060,12 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
+`npm run test:appels`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
-sans réseau). **`test:frontiere` n'est pas un test de règle mais un test de
+sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
+sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,
+`deno check` dans une copie isolée (le `package.json` du dépôt fait chercher à
+Deno des types npm absents) : voir « Appels IA ». **`test:frontiere` n'est pas un test de règle mais un test de
 STRUCTURE** — il relit la frontière serveur → client, que ni `tsc` ni
 `next build` ne voient (voir le piège du 21/09). C'est le seul qui protège
 d'une panne à 100 % des pages. **`npm run lint` n'est PAS configuré** : le script existe, mais le
@@ -1943,6 +2243,10 @@ remise « à évaluer » de la confiance sur vraie réponse.
 Edge functions : déployées via le MCP Supabase —
 `crm-admin` avec `verify_jwt: true`, `crm-mail` avec `verify_jwt: false`
 (le cron pg_net n'a pas de JWT ; l'authentification est faite dans le corps).
+`appels-ia-annexe` (octobre 2026, **pas déployée**) : `verify_jwt: false`, la
+requête est signée HMAC par Next ; elle importe `../_shared/appels/*` — le
+déploiement doit donc embarquer **ces fichiers-là aussi**, et le diff de contrôle
+porter sur chacun d'eux, pas seulement sur `index.ts`.
 
 ---
 
@@ -2425,6 +2729,42 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
    Zoho : IMAP exige Zoho Mail Lite (~1 €/mois) si l'offre gratuite ne le
    propose plus — à vérifier au moment de connecter.
 8. Supprimer le bucket Storage `documents`, vide mais toujours présent.
+
+   **8bis. Mettre Janet en ligne** (appels IA, voir la section). Le code est
+   sur la branche `claude/gifted-fermi-qdyyc4`, **rien n'est appliqué ni
+   déployé**. Dans cet ordre, et c'est Bora qui le fait :
+   1. **La migration `025`** (MCP Supabase, `apply_migration`). Additive : sept
+      tables neuves, des fonctions, un secret Vault interne, une tâche pg_cron
+      qui **ne fait rien** tant que l'interrupteur est coupé, qu'aucun appel
+      n'est en cours et qu'aucun brief n'attend. Le trigger d'inscription
+      automatique est inerte tant que l'inscription automatique est coupée
+      (elle naît coupée). Vérifier après coup : `appels_ia_reglages` à une
+      ligne, `actif = false`, `mode_test = true`.
+   2. **L'edge function `appels-ia-annexe`**, **depuis le dépôt**
+      (`supabase/functions/appels-ia-annexe/` + `_shared/appels/`),
+      `verify_jwt: false`, puis le **diff de contrôle** (`get_edge_function`
+      contre les fichiers du dépôt, doit être vide).
+   3. **Vercel** : la fusion sur `main` redéploie.
+   4. **Ce qui ne dépend que de Bora**, avant le premier appel : le numéro
+      Telnyx (un 0480 mobile présenté comme appelant est-il admis par l'IBPT
+      — sinon un fixe), la configuration du trunk Telnyx (identifiant SIP,
+      TLS, codec), **l'activation du SIP sortant pour l'organisation OpenAI**
+      (sans elle : `403 outbound_sip_not_enabled`, l'écran le dit et met le
+      moteur en pause), et l'**avis juridique** (prospection téléphonique
+      automatisée de professionnels, liste d'opposition, AI Act art. 50).
+   5. Dans `/appels-ia` : poser les trois secrets (clé OpenAI, identifiant et
+      mot de passe SIP — écriture seule, jamais affichés), le **numéro
+      appelant** (vide = le moteur refuse de composer et le dit) et le **GSM de
+      test**.
+   6. **Le premier appel, c'est Bora qui le lance, en mode test, vers son
+      GSM** (« Appel de test vers mon GSM »). À vérifier pendant cet appel : la
+      première phrase annonce l'IA ; **le GSM raccroche dans les 2 s** qui
+      suivent l'au revoir de Janet (le raccroché de session coupe-t-il la ligne
+      SIP en sortant ? inconnu) ; Telnyx accepte l'authentification sans
+      en-tête `X-Telnyx-Username` ; le numéro présenté est le bon ; l'âge du
+      worker (`appels_ia.age_worker_s`) et la durée facturée sont notés.
+   7. Seulement ensuite : couper le mode test, allumer l'interrupteur, et
+      monter en volume progressivement (plafonds bas la première semaine).
 9. Activer la protection contre les mots de passe compromis (tableau de bord
    Supabase → Authentication).
 (La région des fonctions est réglée et vérifiée — voir « Vitesse et fluidité ».)

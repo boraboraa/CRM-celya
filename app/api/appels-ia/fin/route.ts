@@ -35,6 +35,9 @@ export async function POST(req: Request) {
   }
   if (!rapport) return NextResponse.json({ ok: false, raison: "rapport" }, { status: 400 });
   const issue = await ecrireFin(admin, rapport);
+  // Rien d'écrit (base illisible) : un 503 fait renvoyer l'annexe, puis poser
+  // sa trace minimale — jamais un 200 qui laisserait l'appel « en cours ».
+  if (issue.reessayer) return NextResponse.json({ recu: true, ecrit: false, message: issue.message }, { status: 503 });
   if (issue.chainer) {
     after(async () => {
       try {

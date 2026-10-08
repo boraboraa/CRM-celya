@@ -39,7 +39,8 @@ type AppelLu = {
   created_at: string;
 };
 
-export type IssueFin = { ok: boolean; chainer: boolean; message: string };
+/** `reessayer` : rien n'a été écrit et l'annexe doit renvoyer (ou poser sa trace minimale). */
+export type IssueFin = { ok: boolean; chainer: boolean; message: string; reessayer?: boolean };
 
 async function contexte(admin: SupabaseClient, appel: AppelLu, rapport: RapportAppel): Promise<ContexteFin> {
   const [file, fiche, anterieurs, opposition, recents, rdvPose] = await Promise.all([
@@ -143,12 +144,28 @@ export async function ecrireFin(admin: SupabaseClient, rapport: RapportAppel): P
     .select("id, statut, essai, mode_test, file_id, prospect_id, proprietaire_id, numero_compose, meeting_id, created_at")
     .eq("id", rapport.appelId)
     .maybeSingle();
-  if (error) return { ok: false, chainer: false, message: `Appel illisible : ${error.message}` };
+  if (error) return { ok: false, chainer: false, reessayer: true, message: `Appel illisible : ${error.message}` };
   if (!data) return { ok: false, chainer: false, message: "Appel inconnu." };
   const appel = data as AppelLu;
   if (!(STATUTS_ACTIFS as readonly string[]).includes(appel.statut)) {
     return { ok: true, chainer: false, message: "Fin déjà écrite." };
   }
+
+  // Le JETON de fin : une seule écriture, même si l'annexe renvoie le rapport
+  // (son premier envoi a dépassé son délai alors que Next écrivait encore).
+  // Sans lui, deux fins concurrentes écriraient deux fois au journal. Un jeton
+  // de plus de 5 minutes est celui d'un écrivain mort : il se reprend.
+  const perime = new Date(Date.now() - 5 * 60_000).toISOString();
+  const { data: jeton, error: errJeton } = await admin
+    .from("appels_ia")
+    .update({ fin_prise_at: new Date().toISOString() })
+    .eq("id", appel.id)
+    .in("statut", [...STATUTS_ACTIFS])
+    .or(`fin_prise_at.is.null,fin_prise_at.lt.${perime}`)
+    .select("id")
+    .maybeSingle();
+  if (errJeton) return { ok: false, chainer: false, reessayer: true, message: `Jeton de fin illisible : ${errJeton.message}` };
+  if (!jeton) return { ok: true, chainer: false, message: "Fin déjà en cours d'écriture." };
 
   let plan: PlanFin | null = null;
   let activiteId: string | null = null;

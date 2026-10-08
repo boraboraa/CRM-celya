@@ -23,7 +23,11 @@
  *   · le lieu se présente en BOUTON Maps, jamais en texte à recopier — et rien
  *     du tout quand il est absent ; `ville` ne sert qu'à désambiguïser une
  *     adresse sans code postal, jamais `country` (voir lib/crm/maps.ts) ;
- *   · l'heure est celle de BRUXELLES, la base stockant en UTC.
+ *   · l'heure est celle de BRUXELLES, la base stockant en UTC ;
+ *   · « posé par Janet » ne se DÉDUIT de rien ici : c'est la page qui passe
+ *     l'ensemble des rendez-vous posés par l'IA vocale (`rdvPosesParJanet`,
+ *     admin seul — vide pour tout autre compte). Sans lui, la ligne ne dit
+ *     rien, jamais « posé par Janet » par défaut.
  */
 
 /** Une ligne de `meetings_visibles`, réduite à ce que la zone affiche. */
@@ -61,6 +65,8 @@ export type LigneAgendaJour = {
   lieu: string | null;
   /** La ville de la fiche, pour compléter une adresse sans code postal. */
   ville: string | null;
+  /** Rendez-vous posé par Janet, l'IA vocale, pendant un appel. */
+  poseParJanet: boolean;
 };
 
 /** Heure de Bruxelles, « 11:00 ». */
@@ -74,7 +80,9 @@ export function heureBruxelles(iso: string): string {
 
 export function ligneAgendaJour(
   m: RendezVousDuJour,
-  fiches: ReadonlyMap<string, FicheDuRendezVous>
+  fiches: ReadonlyMap<string, FicheDuRendezVous>,
+  /** Les rendez-vous posés par Janet (`rdvPosesParJanet`) — absent = aucun. */
+  posesParJanet: ReadonlySet<string> = new Set()
 ): LigneAgendaJour {
   // Un `prospect_id` qui ne retrouve pas sa fiche se comporte comme un
   // rendez-vous perso : la requête groupée peut très bien n'avoir rien rendu
@@ -91,5 +99,6 @@ export function ligneAgendaJour(
     telHref: fiche?.phone ? `tel:${fiche.phone.replace(/\s/g, "")}` : null,
     lieu: m.location || null,
     ville: fiche?.city || null,
+    poseParJanet: posesParJanet.has(m.id),
   };
 }

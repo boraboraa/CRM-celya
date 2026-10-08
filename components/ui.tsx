@@ -588,3 +588,37 @@ export function ProchaineActionTexte({
     </span>
   );
 }
+
+/**
+ * « Janet » — l'étiquette de ce que l'IA vocale a touché : une fiche qu'un
+ * appel RÉEL a atteinte (liste, colonnes), un rendez-vous qu'elle a posé
+ * (« posé par Janet », agenda et zone « Aujourd'hui »).
+ *
+ * NEUTRE, toujours : elle dit QUI est passé par là, jamais OÙ en est la fiche.
+ * Ni couleur d'étape, ni couleur de résultat — l'ardoise des pastilles
+ * secondaires, et l'étincelle de l'IA. Admin seul : ce sont les pages qui ne
+ * la rendent que pour lui (les lectures sont vides pour les autres).
+ */
+export function EtiquetteJanet({
+  texte = "Janet",
+  titre = "Janet, l'IA vocale, a appelé cette fiche",
+  compact = false,
+}: {
+  texte?: string;
+  /** L'infobulle — ce que l'étiquette veut dire, en clair. */
+  titre?: string;
+  /** Version resserrée (cartes des colonnes, cartes de l'agenda). */
+  compact?: boolean;
+}) {
+  return (
+    <span
+      title={titre}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/[0.05] font-medium text-slate-300 ring-1 ring-white/10 ${
+        compact ? "px-1.5 py-px text-[10px]" : "px-2 py-0.5 text-[11px]"
+      }`}
+    >
+      <Icone nom="etincelle" className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+      {texte}
+    </span>
+  );
+}

@@ -148,6 +148,13 @@ export type ImportResult = {
   reasons: string[];
   /** Nombre de fiches qui *seraient* créées — renseigné en simulation. */
   pending?: number;
+  /**
+   * Avec `rendreIds` seulement : l'identifiant créé pour CHAQUE ligne reçue,
+   * au même index — null pour une ligne ignorée (société manquante, doublon),
+   * en simulation, ou si la fiche rendue ne correspond pas à la ligne envoyée.
+   * Le connecteur MCP s'en sert pour écrire le brief d'appel de chaque fiche.
+   */
+  ids?: (string | null)[];
   error?: string;
 };
 
@@ -229,7 +236,17 @@ export async function importProspectsCore(
   userId: string,
   rows: ImportRow[],
   ownerId: string | null,
-  opts: { dryRun?: boolean } = {}
+  opts: {
+    dryRun?: boolean;
+    /**
+     * Rendre l'id créé pour chaque ligne (`ImportResult.ids`). Demande à
+     * PostgREST de renvoyer les lignes insérées, donc de pouvoir les RELIRE :
+     * réservé au connecteur MCP (service_role). Sous une session, une fiche
+     * importée au nom d'un autre ne serait pas relisible et l'insertion
+     * entière échouerait — d'où une option, et non un comportement par défaut.
+     */
+    rendreIds?: boolean;
+  } = {}
 ): Promise<ImportResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { inserted: 0, skipped: 0, reasons: [], error: "Aucune ligne à importer." };
@@ -258,6 +275,8 @@ export async function importProspectsCore(
   const reasons: string[] = [];
   let skipped = 0;
   const payload: Record<string, unknown>[] = [];
+  /** Pour chaque ligne du payload, son index dans `rows`. */
+  const origines: number[] = [];
 
   rows.forEach((row, index) => {
     const ligne = index + 2; // +1 en-tête, +1 pour compter à partir de 1
@@ -294,30 +313,50 @@ export async function importProspectsCore(
       owner_id: ownerId === "none" || ownerId === null ? userId : ownerId,
       created_by: userId,
     });
+    origines.push(index);
   });
+
+  const ids: (string | null)[] | undefined = opts.rendreIds ? rows.map(() => null) : undefined;
 
   // Simulation : on renvoie ce qui serait fait, sans écrire.
   if (opts.dryRun) {
-    return { inserted: 0, skipped, reasons, pending: payload.length };
+    return { inserted: 0, skipped, reasons, pending: payload.length, ...(ids ? { ids } : {}) };
   }
 
   let inserted = 0;
   for (let i = 0; i < payload.length; i += 200) {
     const chunk = payload.slice(i, i + 200);
-    const { error, count } = await supabase
-      .from("prospects")
-      .insert(chunk, { count: "exact" });
+    let error: { message: string } | null = null;
+    if (ids) {
+      const r = await supabase.from("prospects").insert(chunk).select("id, company_name, email");
+      error = r.error;
+      const rendues = (r.data ?? []) as { id: string; company_name: string; email: string | null }[];
+      // PostgREST rend les lignes dans l'ordre d'insertion ; on le vérifie
+      // quand même, ligne par ligne : un id mal apparié écrirait le brief
+      // d'une fiche sur une autre. Au moindre doute, null.
+      rendues.forEach((f, j) => {
+        const envoye = chunk[j];
+        if (envoye && f.company_name === envoye.company_name && (f.email ?? null) === (envoye.email ?? null)) {
+          ids[origines[i + j]] = f.id;
+        }
+      });
+      if (!error) inserted += rendues.length;
+    } else {
+      const r = await supabase.from("prospects").insert(chunk, { count: "exact" });
+      error = r.error;
+      if (!error) inserted += r.count ?? chunk.length;
+    }
 
     if (error) {
       return {
         inserted,
         skipped,
         reasons,
+        ...(ids ? { ids } : {}),
         error: `Import interrompu après ${inserted} fiche(s) : ${error.message}`,
       };
     }
-    inserted += count ?? chunk.length;
   }
 
-  return { inserted, skipped, reasons };
+  return { inserted, skipped, reasons, ...(ids ? { ids } : {}) };
 }

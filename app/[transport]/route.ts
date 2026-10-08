@@ -2,9 +2,14 @@
  * Serveur MCP « Celya CRM » — connecteur personnalisé de Claude.
  *
  * Périmètre STRICTEMENT limité au CRM : ces outils ne touchent QUE les tables
- * prospects, activities, tasks, emails et meetings (l'agenda). Aucune exécution
- * SQL libre, aucun accès aux tables comptables du même projet Supabase. C'est
- * la raison d'être de ce connecteur face au connecteur Supabase brut.
+ * prospects, activities, tasks, emails et meetings (l'agenda) — et, pour
+ * l'ADMINISTRATEUR SEUL, les tables des appels de Janet (migration 025) :
+ * appels_ia_briefs, appels_ia_campagnes, appels_ia_file, appels_ia et
+ * appels_ia_reglages, par les fonctions de la 025 quand elles existent
+ * (appels_ia_inscrire, appels_ia_refus_inscription, appels_ia_campagne_systeme).
+ * Aucune exécution SQL libre, aucun accès aux tables comptables du même projet
+ * Supabase. C'est la raison d'être de ce connecteur face au connecteur
+ * Supabase brut.
  *
  * Chaque outil est une enveloppe fine au-dessus du cœur partagé (lib/crm) : un
  * prospect créé ici est indiscernable d'un prospect créé à la main (même dédup,
@@ -42,6 +47,16 @@
  * ne part pas de `prospects` n'est borné par RIEN. `agenda` porte son propre
  * `in`. Tout nouvel outil qui lit une table par un autre chemin doit porter le
  * sien, explicitement.
+ *
+ * LES APPELS DE JANET (migration 025, octobre 2026) — ADMIN SEUL, VÉRIFIÉ ICI.
+ * Un champ et trois outils : `brief` (facultatif) sur `creer_prospect` et
+ * `importer_prospects`, `ecrire_brief_appel`, `mettre_en_campagne` (simulation
+ * d'abord) et `etat_appels`. En base, chaque table `appels_ia*` n'a qu'une
+ * policy, `is_admin()` — mais sous service_role AUCUNE policy ne s'applique :
+ * la première chose que fait chacun de ces chemins est `viewer.isAdmin`, et un
+ * non-admin qui passe un `brief` est refusé AVANT toute création (rien ne naît
+ * à moitié). C'est le seul garde-fou ; il ne s'enlève pas « pour simplifier ».
+ * Migration absente (`PGRST205`) : chaque outil le dit, aucun ne plante.
  */
 
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
@@ -57,6 +72,7 @@ import {
   scopeProspects,
   scopeJoinedProspects,
   NOT_EDITABLE,
+  estTableAbsente,
   type Viewer,
 } from "@/lib/crm/access";
 import {
@@ -107,6 +123,25 @@ import {
 } from "@/lib/crm/prochaineAction";
 import type { ProspectStatus } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { lireReglages, MigrationAbsente, type ReglagesAppels } from "@/lib/appelsIa/acces";
+import { lireEtatAppels } from "@/lib/appelsIa/lectures";
+import { campagneSysteme, inscrire } from "@/lib/appelsIa/inscription";
+import {
+  briefEnTexte,
+  depuisSaisie,
+  estVide,
+  fusionner,
+  normaliserContenu,
+  type ContenuBrief,
+  type SaisieBrief,
+} from "@/lib/appelsIa/brief";
+import { ajouterJours, instantBruxelles, jourFr, partiesBruxelles } from "@/lib/appelsIa/calendrier";
+import {
+  CLASSEMENT_LABEL,
+  OUTCOME_LABEL_APPEL,
+  STATUT_APPEL_LABEL,
+  STATUT_FILE_LABEL,
+} from "@/lib/appelsIa/libelles";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -381,6 +416,112 @@ async function sendViaMailFunction(
 }
 
 // ---------------------------------------------------------------------------
+// Les appels de Janet (migration 025) — ADMIN SEUL.
+// ---------------------------------------------------------------------------
+
+/** Le refus, mot pour mot, de tout chemin « appels IA » à un non-admin. */
+const REFUS_ADMIN = "Outil réservé à l'administrateur.";
+/** Une seule formulation, celle du moteur (lib/appelsIa/acces.ts). */
+const MIGRATION_025_ABSENTE = new MigrationAbsente().message;
+
+/**
+ * La migration 025 est-elle là ? Le message à rendre si elle manque, sinon
+ * null. Seule l'ABSENCE de la table (`PGRST205`) est dite ainsi : une autre
+ * erreur (réseau) laisse l'outil continuer, et sa propre lecture le dira.
+ */
+async function migration025Absente(admin: SupabaseClient): Promise<string | null> {
+  const { error } = await admin.from("appels_ia_reglages").select("id").eq("id", 1).maybeSingle();
+  return estTableAbsente(error) ? MIGRATION_025_ABSENTE : null;
+}
+
+/** Le brief d'appel, tel que Claude le fournit — à plat, sans source ni date. */
+const BRIEF_CHAMPS = {
+  activite: z.string().optional().describe("Ce que fait l'entreprise, en une phrase."),
+  qui_demander: z
+    .string()
+    .optional()
+    .describe("Qui demander au téléphone : le rôle (gérant, chef d'atelier, patron…) et le nom s'il est connu."),
+  ce_qu_on_sait: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Les faits VÉRIFIÉS, un par ligne : horaires, avis Google, services, réservation en ligne, nombre d'employés… Rien d'inventé."
+    ),
+  accroche: z
+    .string()
+    .optional()
+    .describe("La première phrase d'intérêt, liée à leur activité — dite APRÈS la présentation obligatoire de Janet."),
+  solution: z
+    .string()
+    .optional()
+    .describe("Comment la réceptionniste téléphonique de Celya les aiderait, concrètement."),
+  questions: z.array(z.string()).optional().describe("Les questions de découverte à poser (trois ou quatre)."),
+};
+const BRIEF_APPEL = z.object(BRIEF_CHAMPS);
+
+/**
+ * Écrit le brief d'appel d'une fiche : chaque champ fourni devient une
+ * information signée « Claude », datée du jour, fusionnée avec l'existant
+ * (lib/appelsIa/brief.ts) — « completer » ne remplit que les vides,
+ * « remplacer » réécrit les champs fournis et garde les autres. Le brief passe
+ * « prêt » : l'IA de préparation ne repasse plus dessus.
+ *
+ * L'appelant a VÉRIFIÉ l'admin : ce helper ne le refait pas.
+ */
+async function ecrireBriefAppel(
+  admin: SupabaseClient,
+  prospectId: string,
+  saisie: SaisieBrief,
+  mode: "completer" | "remplacer",
+  parId: string
+): Promise<{ contenu: ContenuBrief; change: boolean } | { error: string }> {
+  const jour = partiesBruxelles(new Date()).ymd;
+  const propose = depuisSaisie(saisie, "claude", jour);
+  if (estVide(propose)) return { error: "Brief vide : aucun champ renseigné, rien n'a été écrit." };
+  const { data, error } = await admin
+    .from("appels_ia_briefs")
+    .select("contenu")
+    .eq("prospect_id", prospectId)
+    .maybeSingle();
+  if (estTableAbsente(error)) return { error: MIGRATION_025_ABSENTE };
+  if (error) return { error: `Brief illisible : ${error.message}` };
+  const existant = normaliserContenu((data as { contenu?: unknown } | null)?.contenu, jour);
+  const contenu = fusionner(existant, propose, mode);
+  const change = JSON.stringify(contenu) !== JSON.stringify(existant);
+  if (!change) return { contenu, change };
+  const { error: e } = await admin
+    .from("appels_ia_briefs")
+    .upsert({ prospect_id: prospectId, contenu, etat: "pret", maj_par: parId }, { onConflict: "prospect_id" });
+  if (estTableAbsente(e)) return { error: MIGRATION_025_ABSENTE };
+  if (e) return { error: `Brief non écrit : ${e.message}` };
+  return { contenu, change };
+}
+
+/** Ce que Claude doit savoir de l'état du moteur avant de promettre un appel. */
+function moteurPourClaude(r: ReglagesAppels): string[] {
+  const l: string[] = [];
+  if (r.mode_test) {
+    l.push(
+      "⚠ MODE TEST : les appels partent vers le GSM de test de l'administrateur, et rien n'est écrit sur les fiches. Une fiche inscrite maintenant reste en mode test (figé à l'inscription)."
+    );
+  }
+  if (!r.actif) l.push("L'interrupteur général est coupé : les fiches attendront qu'il soit allumé (écran Appels IA).");
+  if (r.pause_cause) l.push(`Moteur en pause : ${r.pause_cause}`);
+  return l;
+}
+
+/**
+ * Les fins de cycle qui demandent un HUMAIN : Janet s'est arrêtée et a passé
+ * la main (lib/appelsIa/cycle.ts, garde.ts). Les autres fins — RDV posé,
+ * refus, opposition, fiche close, campagne terminée, retirée à la main — n'ont
+ * rien à reprendre.
+ */
+const FIN_A_REPRENDRE =
+  /standard automatique|deux réponses de machine|3 essais sans joindre|^décroché : (rappeler|interesse|barrage)|plus de numéro/;
+
+const libelleAppel = (table: Record<string, string>, v: string | null) => (v ? (table[v] ?? v) : null);
+
+// ---------------------------------------------------------------------------
 // Enregistrement des outils.
 // ---------------------------------------------------------------------------
 
@@ -635,7 +776,7 @@ function register(server: McpServer) {
   // --- creer_prospect -------------------------------------------------------
   server.tool(
     "creer_prospect",
-    "Crée un prospect via la même logique que l'interface : détection de doublon (téléphone / email / société), normalisation du téléphone au format belge « +32 », étape « À appeler » par défaut. Si un doublon est détecté, renvoie un avertissement au lieu de créer — passez « forcer: true » pour créer malgré tout.",
+    "Crée un prospect via la même logique que l'interface : détection de doublon (téléphone / email / société), normalisation du téléphone au format belge « +32 », étape « À appeler » par défaut. Si un doublon est détecté, renvoie un avertissement au lieu de créer — passez « forcer: true » pour créer malgré tout. « brief » (facultatif, RÉSERVÉ À L'ADMINISTRATEUR) : le brief d'appel que Janet, l'IA vocale de Celya, lira avant d'appeler la fiche — passé par un autre compte, RIEN n'est créé. Avec l'inscription automatique allumée, une fiche « À appeler » de l'administrateur entre seule dans la file de Janet : ne l'inscrivez pas en plus.",
     {
       societe: z.string().describe("Nom de la société (obligatoire)."),
       contact: z.string().optional().describe("Nom du contact principal."),
@@ -662,11 +803,23 @@ function register(server: McpServer) {
         .describe("Probabilité de conclure, en % (0–100). Laisser vide si inconnue — ne la devinez pas."),
       notes: z.string().optional(),
       forcer: z.boolean().optional().describe("Créer même si un doublon est détecté."),
+      brief: BRIEF_APPEL.optional().describe(
+        "RÉSERVÉ À L'ADMINISTRATEUR. Le brief d'appel de Janet pour cette fiche (faits vérifiés seulement) : écrit après la création, signé « Claude » et daté du jour."
+      ),
     },
     async (args, extra) => {
       const ctx = await context(extra);
       if ("error" in ctx) return fail(ctx.error);
       const { admin, viewer } = ctx;
+
+      // Le brief d'appel est réservé à l'administrateur — refusé AVANT toute
+      // création : une fiche ne naît pas à moitié parce qu'un champ était
+      // interdit. Sous service_role, ce test est le seul garde-fou.
+      if (args.brief && !viewer.isAdmin) {
+        return fail(
+          "Le « brief » (brief d'appel de Janet) est réservé à l'administrateur : rien n'a été créé. Repassez sans « brief »."
+        );
+      }
 
       const result = await createProspectCore(
         admin,
@@ -714,17 +867,30 @@ function register(server: McpServer) {
         );
       }
 
+      // Le brief d'appel, APRÈS la création (il lui faut l'id). L'inscription
+      // automatique, si elle est allumée, s'est déjà faite en base (trigger de
+      // la 025) : on ne l'inscrit pas d'ici.
+      let briefEcrit: string | null = null;
+      if (args.brief) {
+        const b = await ecrireBriefAppel(admin, result.id!, args.brief, "remplacer", viewer.userId);
+        briefEcrit = "error" in b ? `⚠ NON écrit : ${b.error}` : "écrit (source Claude, daté du jour) — Janet le lira avant d'appeler";
+      }
+
       const { data } = await admin
         .from("prospects")
         .select("id, company_name, phone, status")
         .eq("id", result.id!)
         .single();
-      return json("✅ Prospect créé.", {
-        id: data?.id,
-        societe: data?.company_name,
-        telephone: data?.phone,
-        etape: STATUS_LABEL[(data?.status ?? "a_appeler") as keyof typeof STATUS_LABEL],
-      });
+      return json(
+        briefEcrit?.startsWith("⚠") ? `✅ Prospect créé. ⚠ Brief d'appel non écrit.` : "✅ Prospect créé.",
+        {
+          id: data?.id,
+          societe: data?.company_name,
+          telephone: data?.phone,
+          etape: STATUS_LABEL[(data?.status ?? "a_appeler") as keyof typeof STATUS_LABEL],
+          ...(briefEcrit ? { brief_appel: briefEcrit } : {}),
+        }
+      );
     }
   );
 
@@ -1515,7 +1681,7 @@ function register(server: McpServer) {
   // --- importer_prospects ---------------------------------------------------
   server.tool(
     "importer_prospects",
-    "Crée des prospects en lot, avec dédup ligne par ligne (email). Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION — le résumé de ce qui serait créé / ignoré — sans rien écrire. Repassez avec « confirmer: true » pour exécuter réellement l'import.",
+    "Crée des prospects en lot, avec dédup ligne par ligne (email). Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION — le résumé de ce qui serait créé / ignoré — sans rien écrire. Repassez avec « confirmer: true » pour exécuter réellement l'import. « brief » par ligne (facultatif, RÉSERVÉ À L'ADMINISTRATEUR) : le brief d'appel que Janet, l'IA vocale de Celya, lira avant d'appeler la fiche — si un autre compte en passe un, RIEN n'est importé.",
     {
       prospects: z
         .array(
@@ -1531,6 +1697,9 @@ function register(server: McpServer) {
             source: z.string().optional(),
             value_estimate: z.string().optional(),
             notes: z.string().optional(),
+            brief: BRIEF_APPEL.optional().describe(
+              "RÉSERVÉ À L'ADMINISTRATEUR. Le brief d'appel de Janet pour cette fiche (faits vérifiés seulement)."
+            ),
           })
         )
         .describe("Lignes à importer (société obligatoire par ligne)."),
@@ -1541,27 +1710,492 @@ function register(server: McpServer) {
       if ("error" in ctx) return fail(ctx.error);
       const { admin, viewer } = ctx;
 
+      // Le brief d'appel est réservé à l'administrateur — refusé AVANT tout,
+      // simulation comprise : un import ne part pas à moitié.
+      const nbBriefs = args.prospects.filter((p) => p.brief).length;
+      if (nbBriefs > 0 && !viewer.isAdmin) {
+        return fail(
+          "Le « brief » (brief d'appel de Janet) est réservé à l'administrateur : rien n'a été importé. Repassez sans « brief »."
+        );
+      }
+      const lignes = args.prospects.map(({ brief: _brief, ...ligne }) => ligne);
+
       // `null` en propriétaire versait TOUT l'import dans le vivier — donc
       // visible par tous les commerciaux. Les fiches importées appartiennent
       // à qui les importe, comme celles créées une par une.
       const result = await importProspectsCore(
         admin,
         viewer.userId,
-        args.prospects,
+        lignes,
         viewer.userId,
-        { dryRun: !args.confirmer }
+        // Les ids créés, ligne par ligne : il les faut pour écrire les briefs.
+        { dryRun: !args.confirmer, rendreIds: nbBriefs > 0 }
       );
       if (result.error) return fail(`Erreur : ${result.error}`);
+      const absente = nbBriefs > 0 ? await migration025Absente(admin) : null;
 
       if (!args.confirmer) {
         return json(
-          `SIMULATION (rien écrit). ${result.pending} fiche(s) seraient créées, ${result.skipped} ignorée(s). Repassez avec « confirmer: true » pour exécuter.`,
-          { a_creer: result.pending, ignores: result.skipped, details: result.reasons }
+          `SIMULATION (rien écrit). ${result.pending} fiche(s) seraient créées, ${result.skipped} ignorée(s).${
+            nbBriefs ? ` ${nbBriefs} brief(s) d'appel seraient écrits.${absente ? ` ⚠ ${absente} Les briefs ne pourraient pas être écrits.` : ""}` : ""
+          } Repassez avec « confirmer: true » pour exécuter.`,
+          {
+            a_creer: result.pending,
+            ignores: result.skipped,
+            details: result.reasons,
+            ...(nbBriefs ? { briefs_d_appel: nbBriefs } : {}),
+          }
         );
       }
+
+      // Les briefs, fiche par fiche, par paquets de dix.
+      const briefs = { ecrits: 0, non_ecrits: [] as string[] };
+      if (nbBriefs > 0) {
+        const aEcrire = args.prospects
+          .map((p, i) => ({ p, i, id: result.ids?.[i] ?? null }))
+          .filter((x) => x.p.brief);
+        for (let k = 0; k < aEcrire.length; k += 10) {
+          await Promise.all(
+            aEcrire.slice(k, k + 10).map(async ({ p, i, id }) => {
+              const nom = p.company_name?.trim() || `ligne ${i + 1}`;
+              if (!id) {
+                briefs.non_ecrits.push(`${nom} : fiche non créée (ignorée) ou introuvable après l'import — brief non écrit.`);
+                return;
+              }
+              if (absente) {
+                briefs.non_ecrits.push(`${nom} : ${absente}`);
+                return;
+              }
+              const b = await ecrireBriefAppel(admin, id, p.brief!, "remplacer", viewer.userId);
+              if ("error" in b) briefs.non_ecrits.push(`${nom} : ${b.error}`);
+              else briefs.ecrits++;
+            })
+          );
+        }
+      }
       return json(
-        `✅ Import terminé : ${result.inserted} créée(s), ${result.skipped} ignorée(s).`,
-        { crees: result.inserted, ignores: result.skipped, details: result.reasons }
+        `✅ Import terminé : ${result.inserted} créée(s), ${result.skipped} ignorée(s).${
+          nbBriefs ? ` Briefs d'appel : ${briefs.ecrits} écrit(s)${briefs.non_ecrits.length ? `, ${briefs.non_ecrits.length} non écrit(s) — voir le détail` : ""}.` : ""
+        }`,
+        {
+          crees: result.inserted,
+          ignores: result.skipped,
+          details: result.reasons,
+          ...(nbBriefs ? { briefs_d_appel: briefs } : {}),
+        }
+      );
+    }
+  );
+
+  // --- ecrire_brief_appel ---------------------------------------------------
+  server.tool(
+    "ecrire_brief_appel",
+    "RÉSERVÉ À L'ADMINISTRATEUR. Écrit le brief d'appel d'une fiche (par identifiant ou par nom) : ce que Janet, l'IA vocale de Celya, lira avant de l'appeler — ce que fait l'entreprise, qui demander, ce qu'on sait (horaires, avis, services, ce qu'on a vu sur Google Maps ou le site), l'accroche, la solution à proposer, les questions à poser. Chaque information est signée « Claude » et datée du jour. Mode « completer » (défaut) : ne remplit que les champs encore vides, sans toucher à ce que Bora, Claude ou l'IA ont déjà écrit ; « remplacer » : chaque champ FOURNI remplace l'ancien, les autres sont gardés. N'écrivez que des faits vérifiés : rien d'inventé, jamais de prix, jamais le nom d'un client de Celya.",
+    {
+      id: z.string().optional().describe("Identifiant du prospect."),
+      nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
+      ...BRIEF_CHAMPS,
+      mode: z
+        .enum(["completer", "remplacer"])
+        .optional()
+        .describe("« completer » (défaut) : seulement les champs vides. « remplacer » : les champs fournis remplacent les anciens."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      // Sous service_role, la policy `is_admin()` de appels_ia_briefs ne
+      // s'applique pas : ce test est le seul garde-fou.
+      if (!viewer.isAdmin) return fail(REFUS_ADMIN);
+      const absente = await migration025Absente(admin);
+      if (absente) return fail(absente);
+
+      // Une fiche hors portefeuille se comporte comme une fiche inexistante.
+      const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
+      if ("error" in resolved) return fail(resolved.error);
+      const refus = await refusSiPasProprietaire(admin, viewer, resolved);
+      if (refus) return fail(refus);
+
+      const mode = args.mode ?? "completer";
+      const r = await ecrireBriefAppel(
+        admin,
+        resolved.id,
+        {
+          activite: args.activite,
+          qui_demander: args.qui_demander,
+          ce_qu_on_sait: args.ce_qu_on_sait,
+          accroche: args.accroche,
+          solution: args.solution,
+          questions: args.questions,
+        },
+        mode,
+        viewer.userId
+      );
+      if ("error" in r) return fail(r.error);
+      const entete = !r.change
+        ? `Rien n'a changé sur le brief de ${resolved.company_name} : ces champs étaient déjà remplis. Passez mode « remplacer » pour les réécrire.`
+        : mode === "remplacer"
+          ? `✅ Brief d'appel de ${resolved.company_name} mis à jour (les champs fournis remplacent les anciens). Janet s'en servira au prochain appel.`
+          : `✅ Brief d'appel de ${resolved.company_name} complété (seuls les champs vides ont été remplis). Janet s'en servira au prochain appel.`;
+      return text(`${entete}\n\nLe brief tel que Janet le lira :\n${briefEnTexte(r.contenu, [])}`);
+    }
+  );
+
+  // --- mettre_en_campagne ---------------------------------------------------
+  server.tool(
+    "mettre_en_campagne",
+    "RÉSERVÉ À L'ADMINISTRATEUR. Met des fiches dans la file d'appels de Janet, l'IA vocale de Celya, qui les appellera une par une dans la fenêtre d'appel (du lundi au vendredi, 3 essais au plus). SIMULATION D'ABORD : sans « confirmer: true », rien n'est inscrit — l'outil dit, fiche par fiche, si elle entrerait dans la file ou pourquoi pas (gagnée ou perdue, pas de numéro belge appelable, numéro en opposition, rendez-vous déjà prévu, déjà dans la file). Montrez la simulation à l'utilisateur, et ne repassez avec « confirmer: true » que s'il valide. « campagne » : le nom EXACT d'une campagne (créée si elle n'existe pas) ; absent, la campagne « Appels depuis une fiche ». Le mode test est rappelé s'il est mis.",
+    {
+      prospects: z
+        .array(
+          z.object({
+            id: z.string().optional().describe("Identifiant du prospect."),
+            nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
+          })
+        )
+        .min(1)
+        .max(100)
+        .describe("Les fiches à inscrire (100 au plus)."),
+      campagne: z.string().max(120).optional().describe("Nom exact de la campagne. Absent : « Appels depuis une fiche »."),
+      confirmer: z.boolean().optional().describe("false/absent → simulation ; true → inscription réelle."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      // Sous service_role, ni la policy `is_admin()` ni le contrôle de
+      // `appels_ia_inscrire` (qui relit le rôle de `p_par`) ne remplacent ce
+      // test : il refuse AVANT toute lecture.
+      if (!viewer.isAdmin) return fail(REFUS_ADMIN);
+      let reglages: ReglagesAppels;
+      try {
+        reglages = await lireReglages(admin);
+      } catch (e) {
+        return fail(e instanceof MigrationAbsente ? e.message : `Réglages des appels illisibles : ${(e as Error)?.message ?? e}`);
+      }
+
+      // La campagne nommée : retrouvée par son nom exact, jamais une campagne
+      // système (celles-ci ne se visent pas par leur nom).
+      const nomCampagne = args.campagne?.trim().slice(0, 120) || null;
+      let campagne: { id: string; nom: string; statut: string } | null = null;
+      if (nomCampagne) {
+        const { data, error } = await admin
+          .from("appels_ia_campagnes")
+          .select("id, nom, statut")
+          .is("systeme", null)
+          .eq("nom", nomCampagne)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (error) return fail(estTableAbsente(error) ? MIGRATION_025_ABSENTE : `Campagnes illisibles : ${error.message}`);
+        campagne = ((data ?? []) as { id: string; nom: string; statut: string }[])[0] ?? null;
+        if (campagne?.statut === "terminee") {
+          return fail(`La campagne « ${nomCampagne} » est terminée : plus rien n'y entre. Donnez un autre nom pour en créer une nouvelle.`);
+        }
+      }
+      const libelleCampagne = nomCampagne
+        ? `« ${nomCampagne} »${campagne ? (campagne.statut === "pause" ? " (en pause : les fiches y attendront)" : "") : " (nouvelle, créée à l'inscription)"}`
+        : "« Appels depuis une fiche »";
+
+      // Les fiches, et pourquoi chacune entrerait — ou non. La règle vit EN
+      // BASE (appels_ia_refus_inscription, la même que l'inscription réelle) :
+      // la simulation ne la recopie pas.
+      type Ligne = { demande: string; id?: string; societe?: string; refus?: string };
+      const resolues = await Promise.all(
+        args.prospects.map(async (p): Promise<Ligne> => {
+          const demande = p.id ?? p.nom ?? "(ni id ni nom)";
+          const r = await resolveProspect(admin, viewer, p);
+          return "error" in r ? { demande, refus: r.error } : { demande, id: r.id, societe: r.company_name };
+        })
+      );
+      const vus = new Set<string>();
+      const lignes = resolues.map((l) => {
+        if (!l.id) return l;
+        if (vus.has(l.id)) return { ...l, refus: "Deux fois dans la demande." };
+        vus.add(l.id);
+        return l;
+      });
+      const verifiees = await Promise.all(
+        lignes.map(async (l): Promise<Ligne> => {
+          if (l.refus || !l.id) return l;
+          const { data, error } = await admin.rpc("appels_ia_refus_inscription", {
+            p_prospect: l.id,
+            p_auto: false,
+            p_admin: viewer.userId,
+            p_mode_test: reglages.mode_test,
+          });
+          if (error) return { ...l, refus: `Vérification impossible : ${error.message}` };
+          return typeof data === "string" && data ? { ...l, refus: data } : l;
+        })
+      );
+      const refusees = (ls: Ligne[]) => ls.filter((l) => l.refus).map((l) => ({ fiche: l.societe ?? l.demande, raison: l.refus! }));
+      const moteur = moteurPourClaude(reglages);
+
+      if (args.confirmer !== true) {
+        const entreraient = verifiees.filter((l) => !l.refus);
+        return json(
+          [
+            `SIMULATION — rien n'a été inscrit. ${entreraient.length} fiche(s) entreraient dans la file de Janet (campagne ${libelleCampagne}), ${verifiees.length - entreraient.length} refusée(s). Montrez-le à l'utilisateur, puis repassez avec « confirmer: true » s'il valide.`,
+            ...moteur,
+          ].join("\n"),
+          {
+            entreraient: entreraient.map((l) => ({ id: l.id, fiche: l.societe })),
+            refusees: refusees(verifiees),
+          }
+        );
+      }
+
+      // Rien à inscrire : on ne crée pas une campagne vide.
+      const candidates = verifiees.filter((l) => !l.refus && l.id);
+      if (candidates.length === 0) {
+        return json(["Aucune fiche n'est entrée dans la file.", ...moteur].join("\n"), { entrees: [], refusees: refusees(verifiees) });
+      }
+
+      let campagneId: string;
+      if (nomCampagne) {
+        if (campagne) campagneId = campagne.id;
+        else {
+          const { data, error } = await admin
+            .from("appels_ia_campagnes")
+            .insert({ nom: nomCampagne, cree_par: viewer.userId })
+            .select("id")
+            .single();
+          if (error || !data) return fail(`Campagne « ${nomCampagne} » non créée : ${error?.message ?? "sans détail"}. Rien n'a été inscrit.`);
+          campagneId = (data as { id: string }).id;
+        }
+      } else {
+        try {
+          campagneId = await campagneSysteme(admin, "fiche", viewer.userId);
+        } catch (e) {
+          return fail(`${(e as Error)?.message ?? e}. Rien n'a été inscrit.`);
+        }
+      }
+
+      // L'inscription réelle : la base revérifie tout (la fiche a pu bouger
+      // depuis la simulation) et sa réponse fait foi.
+      const finales: Ligne[] = verifiees.filter((l) => l.refus);
+      const entrees: { id: string; fiche: string | undefined }[] = [];
+      for (const l of candidates) {
+        const refus = await inscrire(admin, { prospectId: l.id!, campagneId, origine: "mcp", parId: viewer.userId });
+        if (refus) finales.push({ ...l, refus });
+        else entrees.push({ id: l.id!, fiche: l.societe });
+      }
+      return json(
+        [
+          `✅ ${entrees.length} fiche(s) inscrite(s) dans la file de Janet (campagne ${libelleCampagne}), ${finales.length} refusée(s). Janet les appellera dans la fenêtre d'appel, une par une.`,
+          ...moteur,
+        ].join("\n"),
+        { entrees, refusees: refusees(finales) }
+      );
+    }
+  );
+
+  // --- etat_appels ----------------------------------------------------------
+  server.tool(
+    "etat_appels",
+    "RÉSERVÉ À L'ADMINISTRATEUR. Lecture seule. L'état des appels de Janet, l'IA vocale de Celya : le moteur (interrupteur, mode test, pause, et pourquoi il ne compose pas en ce moment), l'appel en cours, la file (combien de fiches, et les prochaines), les résultats du jour ou de la semaine (appels passés, décrochés, répondeurs, standards, rendez-vous posés, par résultat), les derniers appels, et les fiches À REPRENDRE par un humain sur les 7 derniers jours (standard automatique, répondeurs à répétition, 3 essais sans réponse, « à rappeler », « intéressé » sans rendez-vous, numéro à corriger).",
+    {
+      periode: z
+        .enum(["jour", "semaine"])
+        .optional()
+        .describe("« jour » (défaut) : depuis minuit. « semaine » : depuis lundi. Heure de Bruxelles."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      // Sous service_role, les policies `is_admin()` des tables appels_ia* ne
+      // s'appliquent pas : ce test est le seul garde-fou.
+      if (!viewer.isAdmin) return fail(REFUS_ADMIN);
+      const absente = await migration025Absente(admin);
+      if (absente) return fail(absente);
+
+      const etat = await lireEtatAppels(admin, { derniers: 10 });
+      if (!etat.disponible || !etat.reglages) return fail("État des appels illisible pour l'instant — réessayez.");
+      const r = etat.reglages;
+
+      const periode = args.periode ?? "jour";
+      const maintenant = new Date();
+      const auj = partiesBruxelles(maintenant);
+      const debut =
+        periode === "jour" ? instantBruxelles(auj.ymd, 0) : instantBruxelles(ajouterJours(auj.ymd, 1 - auj.jourSemaine), 0);
+      const depuis7j = new Date(maintenant.getTime() - 7 * 86400_000).toISOString();
+
+      const [duPeriode, finsDeCycle, decroches] = await Promise.all([
+        admin
+          .from("appels_ia")
+          .select(
+            "id, prospect_id, statut, essai, mode_test, classement, resultat, resume, created_at, meeting_id, session_id, erreur_cote, erreur_message, prospects(company_name)"
+          )
+          .gte("created_at", debut.toISOString())
+          .order("created_at", { ascending: false })
+          .limit(500),
+        admin
+          .from("appels_ia_file")
+          .select("prospect_id, statut, fin_motif, fin_at, derniere_note, prospects(company_name, status)")
+          .in("statut", ["termine", "arrete"])
+          .eq("mode_test", false)
+          .gte("fin_at", depuis7j)
+          .order("fin_at", { ascending: false })
+          .limit(200),
+        admin
+          .from("appels_ia")
+          .select("prospect_id, resultat, resume, created_at, prospects(company_name, status)")
+          .eq("mode_test", false)
+          .eq("statut", "termine")
+          .in("resultat", ["rappeler", "interesse"])
+          .is("meeting_id", null)
+          .gte("created_at", depuis7j)
+          .order("created_at", { ascending: false })
+          .limit(200),
+      ]);
+      for (const res of [duPeriode, finsDeCycle, decroches]) {
+        if (res.error) return fail(`Lecture des appels impossible : ${res.error.message}`);
+      }
+
+      type Societe = { company_name: string; status?: string } | null;
+      type AppelLu = {
+        id: string;
+        prospect_id: string | null;
+        statut: string;
+        essai: number;
+        mode_test: boolean;
+        classement: string | null;
+        resultat: string | null;
+        resume: string | null;
+        created_at: string;
+        meeting_id: string | null;
+        session_id: string | null;
+        erreur_cote: string | null;
+        erreur_message: string | null;
+        prospects: Societe;
+      };
+      const appels = (duPeriode.data ?? []) as unknown as AppelLu[];
+      // « Passé » = une session existe : un appel refusé à la création n'a pas sonné.
+      const reels = appels.filter((a) => a.session_id && !a.mode_test);
+      const combien = (f: (a: AppelLu) => boolean) => reels.filter(f).length;
+      const parResultat: Record<string, number> = {};
+      for (const a of reels) {
+        const l = libelleAppel(OUTCOME_LABEL_APPEL, a.resultat);
+        if (l) parResultat[l] = (parResultat[l] ?? 0) + 1;
+      }
+
+      // Les fiches à reprendre : la fin de cycle qui passe la main, puis les
+      // décrochés « à rappeler » / « intéressé » sans rendez-vous. Une fiche
+      // n'y figure qu'une fois, sous sa raison la plus récente ; jamais une
+      // fiche close, une fiche revenue dans la file, ni une fiche qui a depuis
+      // un rendez-vous à venir.
+      type Reprise = { prospect_id: string; fiche: string | null; pourquoi: string; note: string | null; depuis: string };
+      const aReprendre = new Map<string, Reprise>();
+      const close = (s: Societe) => s?.status === "gagne" || s?.status === "perdu";
+      for (const f of (finsDeCycle.data ?? []) as unknown as {
+        prospect_id: string;
+        fin_motif: string | null;
+        fin_at: string | null;
+        derniere_note: string | null;
+        prospects: Societe;
+      }[]) {
+        if (!f.fin_motif || !FIN_A_REPRENDRE.test(f.fin_motif) || close(f.prospects) || aReprendre.has(f.prospect_id)) continue;
+        aReprendre.set(f.prospect_id, {
+          prospect_id: f.prospect_id,
+          fiche: f.prospects?.company_name ?? null,
+          pourquoi: f.fin_motif,
+          note: f.derniere_note,
+          depuis: f.fin_at ?? "",
+        });
+      }
+      for (const a of (decroches.data ?? []) as unknown as {
+        prospect_id: string | null;
+        resultat: string | null;
+        resume: string | null;
+        created_at: string;
+        prospects: Societe;
+      }[]) {
+        if (!a.prospect_id || close(a.prospects) || aReprendre.has(a.prospect_id)) continue;
+        aReprendre.set(a.prospect_id, {
+          prospect_id: a.prospect_id,
+          fiche: a.prospects?.company_name ?? null,
+          pourquoi: `Janet : ${libelleAppel(OUTCOME_LABEL_APPEL, a.resultat)?.toLowerCase()}, sans rendez-vous`,
+          note: a.resume,
+          depuis: a.created_at,
+        });
+      }
+      const ids = [...aReprendre.keys()];
+      if (ids.length) {
+        const [rdv, vivantes] = await Promise.all([
+          admin
+            .from("meetings")
+            .select("prospect_id")
+            .in("prospect_id", ids)
+            .eq("kind", "prospect")
+            .in("status", ["prevu", "confirme", "reporte"])
+            .gt("starts_at", maintenant.toISOString()),
+          admin.from("appels_ia_file").select("prospect_id").in("prospect_id", ids).in("statut", ["en_attente", "en_cours"]),
+        ]);
+        for (const x of [...((rdv.data ?? []) as { prospect_id: string }[]), ...((vivantes.data ?? []) as { prospect_id: string }[])]) {
+          aReprendre.delete(x.prospect_id);
+        }
+      }
+
+      const enCours = etat.enCours;
+      return json(
+        ["État des appels de Janet.", ...moteurPourClaude(r)].join("\n"),
+        {
+          moteur: {
+            interrupteur: r.actif ? "allumé" : "coupé",
+            mode_test: r.mode_test,
+            pause: r.pause_cause,
+            inscription_automatique: r.inscription_auto,
+            fenetre: `${r.fenetre_debut.slice(0, 5)}–${r.fenetre_fin.slice(0, 5)}, du lundi au vendredi (jours fériés exclus)`,
+            pourquoi_il_ne_compose_pas: etat.refus,
+          },
+          appel_en_cours: enCours
+            ? {
+                fiche: enCours.societe,
+                prospect_id: enCours.prospect_id,
+                statut: libelleAppel(STATUT_APPEL_LABEL, enCours.statut),
+                essai: enCours.essai,
+                test: enCours.mode_test,
+                depuis: enCours.created_at,
+              }
+            : null,
+          file: {
+            en_attente_ou_en_cours: etat.file.total,
+            prochaines: etat.file.prochaines.map((l) => ({
+              fiche: l.societe,
+              prospect_id: l.prospect_id,
+              statut: libelleAppel(STATUT_FILE_LABEL, l.statut),
+              pas_avant: l.pas_avant,
+              essais_faits: l.essais,
+              campagne: l.campagne,
+              test: l.mode_test,
+            })),
+          },
+          resultats: {
+            periode: periode === "jour" ? `aujourd'hui, ${jourFr(maintenant)}` : `cette semaine, depuis le ${jourFr(debut)}`,
+            appels_passes: reels.length,
+            appels_de_test: appels.filter((a) => a.session_id && a.mode_test).length,
+            decroches: combien((a) => a.classement === "repondu_humain"),
+            repondeurs: combien((a) => a.classement === "repondeur"),
+            standards: combien((a) => a.classement === "standard_ivr"),
+            pas_decroche_ou_occupe: combien((a) => a.classement === "sans_reponse" || a.classement === "occupe_echec"),
+            rendez_vous_poses: combien((a) => Boolean(a.meeting_id)),
+            par_resultat: parResultat,
+            pannes: appels.filter((a) => a.erreur_cote === "nous" || a.erreur_cote === "neutre").length,
+          },
+          derniers_appels: appels.slice(0, 10).map((a) => ({
+            fiche: a.prospects?.company_name ?? (a.prospect_id ? null : "Appel de test"),
+            prospect_id: a.prospect_id,
+            quand: a.created_at,
+            essai: a.essai,
+            test: a.mode_test,
+            statut: libelleAppel(STATUT_APPEL_LABEL, a.statut),
+            classement: libelleAppel(CLASSEMENT_LABEL, a.classement),
+            resultat: libelleAppel(OUTCOME_LABEL_APPEL, a.resultat),
+            resume: a.resume,
+            panne: a.erreur_cote ? a.erreur_message : null,
+          })),
+          a_reprendre: [...aReprendre.values()],
+        }
       );
     }
   );

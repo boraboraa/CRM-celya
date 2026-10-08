@@ -33,6 +33,8 @@ export type AgendaMeeting = {
   /** Initiale du propriétaire — mode équipe seulement (null = à moi). */
   ownerInitial: string | null;
   prospect: AgendaProspect | null;
+  /** Posé par Janet, l'IA vocale, pendant un appel (admin seul). */
+  parJanet?: boolean;
 };
 
 const H_DEBUT = 7;
@@ -560,6 +562,17 @@ export function AgendaGrid({
                             </span>
                           )}
                           {local.slice(11, 16)}{" "}
+                          {/* Carte trop courte pour une ligne de plus : l'étincelle
+                              seule, le texte en infobulle. */}
+                          {m.parJanet && height < 44 && (
+                            <span title="Posé par Janet">
+                              <Icone
+                                nom="etincelle"
+                                className="mr-0.5 inline-block h-3 w-3 align-[-1px] text-slate-300"
+                              />
+                              <span className="sr-only">posé par Janet,</span>
+                            </span>
+                          )}
                           {m.status === "honore" && (
                             <Icone
                               nom="coche"
@@ -578,8 +591,22 @@ export function AgendaGrid({
                             m.title
                           )}
                         </p>
-                        {height >= 44 && (m.prospect?.phone || m.location) && (
+                        {height >= 44 &&
+                          (m.parJanet || m.prospect?.phone || m.location) && (
                           <p className="truncate text-[10px] text-slate-300/90">
+                            {/* En TÊTE de la ligne : une carte d'une heure n'a
+                                pas la place d'une ligne de plus, et la fin de
+                                celle-ci peut être tronquée. */}
+                            {m.parJanet && (
+                              <span title="Rendez-vous posé par Janet pendant un appel">
+                                <Icone
+                                  nom="etincelle"
+                                  className="mr-0.5 inline-block h-2.5 w-2.5 align-[-1px]"
+                                />
+                                posé par Janet
+                                {m.prospect?.phone || m.location ? " · " : ""}
+                              </span>
+                            )}
                             {m.prospect?.phone && (
                               <a
                                 href={`tel:${m.prospect.phone.replace(/\s/g, "")}`}

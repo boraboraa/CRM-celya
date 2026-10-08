@@ -17,6 +17,7 @@ import {
 } from "@/lib/crm/perimetre";
 import { localInputToISO, isoToLocalInput } from "@/lib/time";
 import { initials } from "@/lib/constants";
+import { rdvPosesParJanet } from "@/lib/appelsIa/lectures";
 
 type Search = {
   vue?: string;
@@ -79,7 +80,10 @@ export default async function AgendaPage({
   const rangeStart = localInputToISO(`${jours[0]}T00:00`)!;
   const rangeEnd = localInputToISO(`${jours[jours.length - 1]}T23:59`)!;
 
-  const [meetingsRes, prospectsRes, membresRes] = await Promise.all([
+  const [[meetingsRes, posesParJanet], prospectsRes, membresRes] = await Promise.all([
+    // Les rendez-vous de la période, puis — pour l'admin — ceux que Janet a
+    // posés (« posé par Janet »). La seconde lecture a besoin des identifiants
+    // de la première ; elle part dès qu'ils sont là, sans attendre les autres.
     filtrerProspects(
       supabase
         .from("meetings_visibles")
@@ -92,7 +96,19 @@ export default async function AgendaPage({
       viewer
     )
       .order("starts_at", { ascending: true })
-      .limit(300),
+      .limit(300)
+      .then(
+        async (res) =>
+          [
+            res,
+            viewer.isAdmin && res.data?.length
+              ? await rdvPosesParJanet(
+                  supabase,
+                  (res.data as { id: string }[]).map((m) => m.id)
+                )
+              : new Set<string>(),
+          ] as const
+      ),
     // Les fiches proposées à la création (autocomplétion).
     //
     // ⚠ BORNÉE AU PROPRIÉTAIRE, et pas seulement par la RLS. Cette liste
@@ -169,6 +185,8 @@ export default async function AgendaPage({
             "?"
           ),
       prospect: m.prospect_id ? (parProspect.get(m.prospect_id) ?? null) : null,
+      // Posé par Janet pendant un appel — admin seul (vide pour les autres).
+      parJanet: posesParJanet.has(m.id),
     };
   });
 

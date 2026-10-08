@@ -191,6 +191,49 @@ verifie(
   [null, null, null, null, null]
 );
 
+// --- « Posé par Janet » : jamais deviné, toujours DONNÉ par la page ---------
+console.log("\n— posé par Janet —");
+
+// Sans l'ensemble (compte non admin, migration 025 absente) : rien n'est dit.
+verifie("sans ensemble : jamais « posé par Janet » par défaut", chezLui.poseParJanet, false);
+verifie("le rendez-vous perso non plus", ephec.poseParJanet, false);
+
+const JANET = new Set(["m-1"]);
+const parJanet = ligneAgendaJour(
+  {
+    id: "m-1",
+    prospect_id: "p-1",
+    title: "RDV Garage Boetendael",
+    starts_at: "2026-09-21T08:00:00Z",
+    ends_at: "2026-09-21T09:00:00Z",
+    location: "Rue Xavier de Bue 12",
+  },
+  FICHES,
+  JANET
+);
+verifie("posé par Janet : la ligne le dit", parJanet.poseParJanet, true);
+verifie(
+  "… et le reste de la ligne ne change pas",
+  [parJanet.lienFiche, parJanet.contact, parJanet.telHref, parJanet.lieu],
+  [chezLui.lienFiche, chezLui.contact, chezLui.telHref, chezLui.lieu]
+);
+verifie(
+  "un autre rendez-vous du même jour n'en hérite pas",
+  ligneAgendaJour(
+    {
+      id: "m-3",
+      prospect_id: null,
+      title: "Rdv perso",
+      starts_at: "2026-09-21T10:00:00Z",
+      ends_at: "2026-09-21T11:00:00Z",
+      location: null,
+    },
+    AUCUNE,
+    JANET
+  ).poseParJanet,
+  false
+);
+
 console.log(
   echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`
 );

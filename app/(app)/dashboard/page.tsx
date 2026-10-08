@@ -2,7 +2,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
-import { PageHeader, EmptyState, Icone, ProchaineActionTexte } from "@/components/ui";
+import {
+  PageHeader,
+  EmptyState,
+  Icone,
+  ProchaineActionTexte,
+  EtiquetteJanet,
+} from "@/components/ui";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
@@ -10,6 +16,8 @@ import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { DebriefList, type DebriefMeeting } from "@/components/DebriefList";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
+import { AvecColonneAppels } from "@/components/appelsIa/AvecColonneAppels";
+import { lireEtatAppels, rdvPosesParJanet } from "@/lib/appelsIa/lectures";
 import { fmtDate, relative } from "@/lib/constants";
 import {
   LAST_ACTION_SELECT,
@@ -107,6 +115,7 @@ export default async function TodoPage({
     membresRes,
     meetingsTodayRes,
     debriefRes,
+    etatAppels,
   ] = await Promise.all([
     // En retard — les plus anciennes d'abord.
     filtrerTaches(
@@ -218,6 +227,12 @@ export default async function TodoPage({
     )
       .order("ends_at", { ascending: false })
       .limit(20),
+
+    // La colonne « Appels » (Janet) — ADMIN SEUL, et lue avec le reste : elle
+    // ne retarde pas la page. Tolérante : migration 025 absente → indisponible,
+    // et la mise en page reste celle d'avant. Rien n'est demandé pour un
+    // commercial (la RLS ne lui rendrait rien de toute façon).
+    viewer.isAdmin ? lireEtatAppels(supabase) : Promise.resolve(null),
   ]);
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
@@ -298,23 +313,34 @@ export default async function TodoPage({
       status: string;
     }
   >();
-  if (meetingProspectIds.length > 0) {
+  // Les fiches des rendez-vous, et — pour l'admin — ceux que Janet a posés
+  // (« posé par Janet »). Les deux lectures dépendent des rendez-vous du jour,
+  // elles partent donc ensemble, juste après.
+  const [fichesRdvRes, posesParJanet] = await Promise.all([
     // `city` complète l'adresse du rendez-vous quand elle n'a pas de code
     // postal — jamais `country`, qui n'est pas fiable (voir lib/crm/maps.ts).
-    const { data } = await supabase
-      .from("prospects")
-      .select("id, company_name, contact_name, phone, city, status")
-      .in("id", meetingProspectIds);
-    for (const p of (data ?? []) as {
-      id: string;
-      company_name: string;
-      contact_name: string | null;
-      phone: string | null;
-      city: string | null;
-      status: string;
-    }[]) {
-      meetingProspects.set(p.id, p);
-    }
+    meetingProspectIds.length > 0
+      ? supabase
+          .from("prospects")
+          .select("id, company_name, contact_name, phone, city, status")
+          .in("id", meetingProspectIds)
+      : Promise.resolve({ data: [] }),
+    viewer.isAdmin && meetingsToday.length > 0
+      ? rdvPosesParJanet(
+          supabase,
+          meetingsToday.map((m) => m.id)
+        )
+      : Promise.resolve(new Set<string>()),
+  ]);
+  for (const p of (fichesRdvRes.data ?? []) as {
+    id: string;
+    company_name: string;
+    contact_name: string | null;
+    phone: string | null;
+    city: string | null;
+    status: string;
+  }[]) {
+    meetingProspects.set(p.id, p);
   }
   // Une fiche gagnée ou perdue ne réclame jamais de débrief (migration 023) :
   // sa fiche ne le dit plus, cette zone non plus — une source d'affichage qui
@@ -419,253 +445,264 @@ export default async function TodoPage({
         }
       />
 
-      {/* Le périmètre — admin, ou porteur de l'interrupteur d'équipe. Le
-          composant ne rend rien pour les autres, ni pour un porteur seul. */}
-      {peutElargir(viewer) && (
-        <div className="mb-5">
-          <PerimetreSwitcher
-            role={session?.me?.role ?? "commercial"}
-            viewerId={viewer.userId}
-            perimetre={perimetre}
-            membres={membresProposables(membres, viewer)}
-          peutElargir={peutElargir(viewer)}
-            basePath="/dashboard"
-            searchParams={params}
-          />
-        </div>
-      )}
+      {/* La colonne « Appels » de Janet — admin seul. Sans elle (commercial,
+          migration 025 absente), le contenu est rendu tel quel. */}
+      <AvecColonneAppels etat={etatAppels}>
+        {/* Le périmètre — admin, ou porteur de l'interrupteur d'équipe. Le
+            composant ne rend rien pour les autres, ni pour un porteur seul. */}
+        {peutElargir(viewer) && (
+          <div className="mb-5">
+            <PerimetreSwitcher
+              role={session?.me?.role ?? "commercial"}
+              viewerId={viewer.userId}
+              perimetre={perimetre}
+              membres={membresProposables(membres, viewer)}
+              peutElargir={peutElargir(viewer)}
+              basePath="/dashboard"
+              searchParams={params}
+            />
+          </div>
+        )}
 
-      {/* ---------- 0. Aujourd'hui — l'agenda du jour, avant les relances ---------- */}
-      {meetingsToday.length > 0 && (
-        <section className="mb-8">
-          <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Aujourd&apos;hui
-            <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] text-blue-300">
-              {meetingsToday.length}
-            </span>
-            <span className="ml-auto text-[11px] font-normal normal-case tracking-normal">
-              <Link
-                href="/agenda"
-                className="text-slate-500 hover:text-slate-300"
-              >
-                Voir l&apos;agenda
-              </Link>
-            </span>
-          </h2>
-          <ul className="card animate-rise divide-y divide-white/[0.05]">
-            {meetingsToday.map((m) => {
-              // Toute la dérivation vit dans lib/crm/agendaJour.ts — pur, donc
-              // testable, y compris la branche « rendez-vous perso, sans fiche
-              // ni lieu » que ce bloc n'avait jamais rencontrée.
-              const l = ligneAgendaJour(m, meetingProspects);
-              return (
-                <li
-                  key={l.id}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
-                >
-                  <span className="w-24 shrink-0 text-sm font-semibold tabular-nums text-blue-300">
-                    {l.creneau}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-100">
-                      {l.lienFiche ? (
-                        <Link
-                          href={l.lienFiche}
-                          prefetch={false}
-                          className="underline-offset-2 hover:text-celya-blue hover:underline"
-                        >
-                          {l.titre}
-                        </Link>
-                      ) : (
-                        l.titre
-                      )}
-                    </p>
-                    <p className="flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
-                      {l.contact && <span>{l.contact}</span>}
-                      {l.telHref && (
-                        <a
-                          href={l.telHref}
-                          className="text-celya-blue hover:underline"
-                        >
-                          {l.telephone}
-                        </a>
-                      )}
-                      {/* L'adresse en clientèle : un bouton, pas un texte à
-                          recopier dans Maps. */}
-                      {l.lieu && (
-                        <BoutonsMaps
-                          valeur={l.lieu}
-                          ville={l.ville ?? undefined}
-                          compact
-                        />
-                      )}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
-      {nothingAtAll ? (
-        <EmptyState
-          title="Rien à faire aujourd'hui"
-          hint="Posez une relance ou un rendez-vous sur une fiche prospect : il remontera ici à sa date."
-          href="/prospects"
-          cta="Voir les prospects"
-        />
-      ) : (
-        <div className="space-y-8">
-          {/* ---------- 1. À appeler / à rappeler ---------- */}
-          <section>
+        {/* ---------- 0. Aujourd'hui — l'agenda du jour, avant les relances ---------- */}
+        {meetingsToday.length > 0 && (
+          <section className="mb-8">
             <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              À appeler / à rappeler
-              <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] text-slate-400">
-                {overdue.length + today.length}
+              Aujourd&apos;hui
+              <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] text-blue-300">
+                {meetingsToday.length}
+              </span>
+              <span className="ml-auto text-[11px] font-normal normal-case tracking-normal">
+                <Link
+                  href="/agenda"
+                  className="text-slate-500 hover:text-slate-300"
+                >
+                  Voir l&apos;agenda
+                </Link>
               </span>
             </h2>
-
-            {overdue.length + today.length === 0 ? (
-              <div className="card px-5 py-6 text-center text-sm text-slate-500">
-                Rien à appeler aujourd&apos;hui.
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <TaskSection
-                  title="En retard"
-                  tone="late"
-                  tasks={overdue}
-                  lecture={relancesLues}
-                />
-                <TaskSection
-                  title="Aujourd'hui"
-                  tasks={today}
-                  lecture={relancesLues}
-                />
-              </div>
-            )}
+            <ul className="card animate-rise divide-y divide-white/[0.05]">
+              {meetingsToday.map((m) => {
+                // Toute la dérivation vit dans lib/crm/agendaJour.ts — pur, donc
+                // testable, y compris la branche « rendez-vous perso, sans fiche
+                // ni lieu » que ce bloc n'avait jamais rencontrée.
+                const l = ligneAgendaJour(m, meetingProspects, posesParJanet);
+                return (
+                  <li
+                    key={l.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
+                  >
+                    <span className="w-24 shrink-0 text-sm font-semibold tabular-nums text-blue-300">
+                      {l.creneau}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-100">
+                        {l.lienFiche ? (
+                          <Link
+                            href={l.lienFiche}
+                            prefetch={false}
+                            className="underline-offset-2 hover:text-celya-blue hover:underline"
+                          >
+                            {l.titre}
+                          </Link>
+                        ) : (
+                          l.titre
+                        )}
+                      </p>
+                      <p className="flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
+                        {l.contact && <span>{l.contact}</span>}
+                        {l.telHref && (
+                          <a
+                            href={l.telHref}
+                            className="text-celya-blue hover:underline"
+                          >
+                            {l.telephone}
+                          </a>
+                        )}
+                        {l.poseParJanet && (
+                          <EtiquetteJanet
+                            compact
+                            texte="posé par Janet"
+                            titre="Rendez-vous posé par Janet pendant un appel"
+                          />
+                        )}
+                        {/* L'adresse en clientèle : un bouton, pas un texte à
+                            recopier dans Maps. */}
+                        {l.lieu && (
+                          <BoutonsMaps
+                            valeur={l.lieu}
+                            ville={l.ville ?? undefined}
+                            compact
+                          />
+                        )}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </section>
+        )}
 
-          {/* ---------- 2. En attente de réponse — zone CALME ---------- */}
-          <section>
-            <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              En attente de réponse
-              {waiting.length > 0 && (
-                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] text-slate-300">
-                  {waiting.length}
-                </span>
-              )}
-            </h2>
-
-            {waiting.length === 0 ? (
-              <div className="card px-5 py-5 text-center text-sm text-slate-500">
-                Aucun mail en attente de réponse.
-              </div>
-            ) : (
-              <>
-                <p className="mb-2 text-[11px] text-slate-500">
-                  Le mail est parti — rien à faire pour l&apos;instant. Sans
-                  réponse, chaque fiche remonte dans « À appeler / à rappeler »
-                  à la date indiquée.
-                </p>
-                <ul className="card animate-rise divide-y divide-white/[0.05]">
-                  {waiting.map((p) => (
-                    <li
-                      key={p.id}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
-                    >
-                      <Icone
-                        nom="enveloppe"
-                        className="h-3.5 w-3.5 text-slate-400"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          href={`/prospects/${p.id}`}
-                          prefetch={false}
-                          className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-blue hover:underline"
-                        >
-                          {p.company_name}
-                        </Link>
-                        <p className="text-xs text-slate-400">
-                          Mail envoyé{p.sent_at ? ` ${relative(p.sent_at)}` : ""}
-                          {p.contact_name ? ` à ${p.contact_name}` : ""}
-                        </p>
-                      </div>
-                      {p.next_action_kind === "rendez_vous" ? (
-                        <ProchaineActionTexte
-                          at={p.next_action_at}
-                          kind={p.next_action_kind}
-                          className="shrink-0 text-xs"
-                        />
-                      ) : (
-                        <span className="shrink-0 text-xs text-slate-400">
-                          {p.next_action_at
-                            ? `Remonte le ${fmtDate(p.next_action_at)}`
-                            : "Aucune relance posée"}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-        </div>
-      )}
-
-      {/* Nouvelle relance libre (avec ou sans prospect) */}
-      <NouvelleRelanceLibre assigneeId={session?.userId ?? "none"} />
-
-      {/* ---------- 3. Réponses reçues — agir maintenant ---------- */}
-      <section className="mt-8">
-        <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-          Réponses reçues
-          {replies.length > 0 && (
-            <span className="rounded-full bg-celya-blue/15 px-2 py-0.5 text-[11px] text-blue-300">
-              {replies.length}
-            </span>
-          )}
-          {session?.me?.role === "admin" && (
-            <span className="ml-auto text-[11px] font-normal normal-case tracking-normal">
-              <Link href="/emails" className="text-slate-500 hover:text-slate-300">
-                Non rattachés
-              </Link>
-            </span>
-          )}
-        </h2>
-
-        {replies.length === 0 ? (
-          <div className="card px-5 py-6 text-center text-sm text-slate-500">
-            Aucune réponse en attente. Les réponses aux emails remontent ici
-            automatiquement (relève toutes les 5 minutes).
-          </div>
+        {nothingAtAll ? (
+          <EmptyState
+            title="Rien à faire aujourd'hui"
+            hint="Posez une relance ou un rendez-vous sur une fiche prospect : il remontera ici à sa date."
+            href="/prospects"
+            cta="Voir les prospects"
+          />
         ) : (
-          <ul className="card animate-rise divide-y divide-white/[0.05]">
-            {replies.map((e) => (
-              <ReplyCard key={e.id} email={e} />
-            ))}
-          </ul>
-        )}
-      </section>
+          <div className="space-y-8">
+            {/* ---------- 1. À appeler / à rappeler ---------- */}
+            <section>
+              <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+                À appeler / à rappeler
+                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] text-slate-400">
+                  {overdue.length + today.length}
+                </span>
+              </h2>
 
-      {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
-          Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
-          du produit, ne pas en ajouter d'autre. ---------- */}
-      {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
-          débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
-          après le rafraîchissement — un démontage effacerait ce message. */}
-      <section className={debriefMeetings.length > 0 ? "mt-8" : "mt-8 empty:hidden"}>
-        {debriefMeetings.length > 0 && (
-          <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Rendez-vous à débriefer
-            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
-              {debriefMeetings.length}
-            </span>
-          </h2>
+              {overdue.length + today.length === 0 ? (
+                <div className="card px-5 py-6 text-center text-sm text-slate-500">
+                  Rien à appeler aujourd&apos;hui.
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <TaskSection
+                    title="En retard"
+                    tone="late"
+                    tasks={overdue}
+                    lecture={relancesLues}
+                  />
+                  <TaskSection
+                    title="Aujourd'hui"
+                    tasks={today}
+                    lecture={relancesLues}
+                  />
+                </div>
+              )}
+            </section>
+
+            {/* ---------- 2. En attente de réponse — zone CALME ---------- */}
+            <section>
+              <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+                En attente de réponse
+                {waiting.length > 0 && (
+                  <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] text-slate-300">
+                    {waiting.length}
+                  </span>
+                )}
+              </h2>
+
+              {waiting.length === 0 ? (
+                <div className="card px-5 py-5 text-center text-sm text-slate-500">
+                  Aucun mail en attente de réponse.
+                </div>
+              ) : (
+                <>
+                  <p className="mb-2 text-[11px] text-slate-500">
+                    Le mail est parti — rien à faire pour l&apos;instant. Sans
+                    réponse, chaque fiche remonte dans « À appeler / à rappeler »
+                    à la date indiquée.
+                  </p>
+                  <ul className="card animate-rise divide-y divide-white/[0.05]">
+                    {waiting.map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3"
+                      >
+                        <Icone
+                          nom="enveloppe"
+                          className="h-3.5 w-3.5 text-slate-400"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <Link
+                            href={`/prospects/${p.id}`}
+                            prefetch={false}
+                            className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-blue hover:underline"
+                          >
+                            {p.company_name}
+                          </Link>
+                          <p className="text-xs text-slate-400">
+                            Mail envoyé{p.sent_at ? ` ${relative(p.sent_at)}` : ""}
+                            {p.contact_name ? ` à ${p.contact_name}` : ""}
+                          </p>
+                        </div>
+                        {p.next_action_kind === "rendez_vous" ? (
+                          <ProchaineActionTexte
+                            at={p.next_action_at}
+                            kind={p.next_action_kind}
+                            className="shrink-0 text-xs"
+                          />
+                        ) : (
+                          <span className="shrink-0 text-xs text-slate-400">
+                            {p.next_action_at
+                              ? `Remonte le ${fmtDate(p.next_action_at)}`
+                              : "Aucune relance posée"}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
+          </div>
         )}
-        <DebriefList meetings={debriefMeetings} />
-      </section>
+
+        {/* Nouvelle relance libre (avec ou sans prospect) */}
+        <NouvelleRelanceLibre assigneeId={session?.userId ?? "none"} />
+
+        {/* ---------- 3. Réponses reçues — agir maintenant ---------- */}
+        <section className="mt-8">
+          <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+            Réponses reçues
+            {replies.length > 0 && (
+              <span className="rounded-full bg-celya-blue/15 px-2 py-0.5 text-[11px] text-blue-300">
+                {replies.length}
+              </span>
+            )}
+            {session?.me?.role === "admin" && (
+              <span className="ml-auto text-[11px] font-normal normal-case tracking-normal">
+                <Link href="/emails" className="text-slate-500 hover:text-slate-300">
+                  Non rattachés
+                </Link>
+              </span>
+            )}
+          </h2>
+
+          {replies.length === 0 ? (
+            <div className="card px-5 py-6 text-center text-sm text-slate-500">
+              Aucune réponse en attente. Les réponses aux emails remontent ici
+              automatiquement (relève toutes les 5 minutes).
+            </div>
+          ) : (
+            <ul className="card animate-rise divide-y divide-white/[0.05]">
+              {replies.map((e) => (
+                <ReplyCard key={e.id} email={e} />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
+            Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
+            du produit, ne pas en ajouter d'autre. ---------- */}
+        {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
+            débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
+            après le rafraîchissement — un démontage effacerait ce message. */}
+        <section className={debriefMeetings.length > 0 ? "mt-8" : "mt-8 empty:hidden"}>
+          {debriefMeetings.length > 0 && (
+            <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Rendez-vous à débriefer
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+                {debriefMeetings.length}
+              </span>
+            </h2>
+          )}
+          <DebriefList meetings={debriefMeetings} />
+        </section>
+      </AvecColonneAppels>
     </>
   );
 }

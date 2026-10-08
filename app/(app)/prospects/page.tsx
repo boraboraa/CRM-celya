@@ -10,6 +10,7 @@ import {
   LastActionLine,
   Icone,
   ProchaineActionTexte,
+  EtiquetteJanet,
 } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
@@ -35,6 +36,7 @@ import {
   type PerimetreViewer,
 } from "@/lib/crm/perimetre";
 import { plusRienDePrevu } from "@/lib/crm/prochaineAction";
+import { fichesAppeleesParJanet } from "@/lib/appelsIa/lectures";
 import type { ConfidenceLevel } from "@/lib/types";
 
 
@@ -119,27 +121,43 @@ export default async function ProspectsPage({
   // disent « Plus rien de prévu » au lieu de « — » (migration 022 — le débrief
   // sans suite ne doit pas faire disparaître une fiche en silence). Même
   // lecture parallèle, RLS appliquée ; on ne garde que les fiches affichées.
-  const [{ data, error }, actionsRes, membresRes, rdvClosRes] = await Promise.all([
-    query.limit(500),
-    supabase
-      .from("prospect_action_state")
-      .select(LAST_ACTION_SELECT)
-      .limit(2000),
-    peutElargir(viewer)
-      ? supabase
-          .from("crm_users")
-          .select("id, full_name, email")
-          .eq("is_active", true)
-          .order("full_name")
-      : Promise.resolve({ data: [] }),
-    supabase
-      .from("meetings_visibles")
-      .select("prospect_id")
-      .eq("kind", "prospect")
-      .in("status", ["honore", "annule"])
-      .not("prospect_id", "is", null)
-      .limit(2000),
-  ]);
+  //
+  // Les fiches qu'un appel RÉEL de Janet a touchées — l'étiquette « Janet »,
+  // ADMIN SEUL. Cette lecture a besoin des identifiants de la liste : elle part
+  // dès que la liste revient, sans attendre les trois autres lectures.
+  const [[{ data, error }, appeleesParJanet], actionsRes, membresRes, rdvClosRes] =
+    await Promise.all([
+      query.limit(500).then(
+        async (res) =>
+          [
+            res,
+            viewer.isAdmin && res.data?.length
+              ? await fichesAppeleesParJanet(
+                  supabase,
+                  (res.data as { id: string }[]).map((p) => p.id)
+                )
+              : new Set<string>(),
+          ] as const
+      ),
+      supabase
+        .from("prospect_action_state")
+        .select(LAST_ACTION_SELECT)
+        .limit(2000),
+      peutElargir(viewer)
+        ? supabase
+            .from("crm_users")
+            .select("id, full_name, email")
+            .eq("is_active", true)
+            .order("full_name")
+        : Promise.resolve({ data: [] }),
+      supabase
+        .from("meetings_visibles")
+        .select("prospect_id")
+        .eq("kind", "prospect")
+        .in("status", ["honore", "annule"])
+        .not("prospect_id", "is", null)
+        .limit(2000),
+    ]);
   const avecRdvClos = new Set(
     ((rdvClosRes.data ?? []) as { prospect_id: string | null }[])
       .map((m) => m.prospect_id)
@@ -202,6 +220,11 @@ export default async function ProspectsPage({
           new Date(lastActions.get(a.id)!.last_email_sent_at!).getTime()
       );
   }
+
+  // L'étiquette « Janet » — un TABLEAU d'identifiants pour les colonnes
+  // (composant client : un `Set` ne traverse pas la frontière serveur → client),
+  // borné aux fiches affichées.
+  const janetIds = prospects.filter((p) => appeleesParJanet.has(p.id)).map((p) => p.id);
 
   const boardProspects: BoardProspect[] = prospects.map((p) => ({
     id: p.id,
@@ -386,7 +409,7 @@ export default async function ProspectsPage({
           cta="Créer un prospect"
         />
       ) : view === "colonnes" ? (
-        <PipelineBoard prospects={boardProspects} />
+        <PipelineBoard prospects={boardProspects} janetIds={janetIds} />
       ) : (
         <div className="card animate-rise overflow-x-auto">
           <table className="w-full min-w-[820px]">
@@ -423,8 +446,14 @@ export default async function ProspectsPage({
                       >
                         <Avatar name={p.contact_name ?? p.company_name} />
                         <span className="min-w-0">
-                          <span className="block truncate font-semibold text-slate-50">
-                            {p.company_name}
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate font-semibold text-slate-50">
+                              {p.company_name}
+                            </span>
+                            {/* Un appel réel de Janet a touché la fiche — admin
+                                seul (l'ensemble est vide pour les autres). Le
+                                résumé, lui, est déjà dans « Dernière action ». */}
+                            {appeleesParJanet.has(p.id) && <EtiquetteJanet compact />}
                           </span>
                           <span className="block truncate text-xs text-slate-400">
                             {p.phone ?? p.contact_name ?? p.email ?? p.city ?? "—"}

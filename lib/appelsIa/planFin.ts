@@ -26,13 +26,14 @@ import {
   faitsDepuisRapport,
   finLisible,
   panneDeNotreCote,
+  transportInconnu,
   type RapportAppel,
 } from "../../supabase/functions/_shared/appels/rapport.ts";
 import { causeDe } from "./causes.ts";
 import { ecritureFiche, lireDeclaration, type Declaration, type ResultatAppel } from "./resultat.ts";
-import { suiteDuCycle, type MachinePassee, type Relance } from "./cycle.ts";
+import { HEURE_RELANCE, suiteDuCycle, type MachinePassee, type Relance } from "./cycle.ts";
 import { ligneApprise, type LigneApprise } from "./brief.ts";
-import { partiesBruxelles, type Fenetre } from "./calendrier.ts";
+import { lendemainOuvre, partiesBruxelles, type Fenetre } from "./calendrier.ts";
 import { OUTCOME_LABEL_APPEL } from "./libelles.ts";
 
 /** Une panne de notre côté : la ligne repart dans 10 min ; une fin illisible : dans 30 min. */
@@ -64,6 +65,11 @@ export type ContexteFin = {
   rdvLibelle: string | null;
   /** Pannes (nous ou neutres) d'affilée juste avant cet appel. */
   pannesAvant: number;
+  /**
+   * La fiche a déjà eu un échec de ligne de cause inconnue (`transport_inconnu`)
+   * ET un autre appel a abouti depuis : la ligne marche, c'est le numéro.
+   */
+  ligneProuveeDepuisEchec?: boolean;
   maintenant: Date;
   fenetre: Fenetre;
 };
@@ -135,12 +141,32 @@ export function planifierFin(c: ContexteFin): PlanFin {
     opposition: false,
   } as const;
 
+  // 0. Second échec de ligne inconnu sur la même fiche, alors que la ligne a
+  //    prouvé qu'elle marche entre-temps : le NUMÉRO est en cause. Le cycle
+  //    s'arrête, le moteur ne se met PAS en pause (les autres fiches passent),
+  //    rien n'est écrit au journal (personne n'a été joint), et le propriétaire
+  //    reçoit une relance pour vérifier le numéro.
+  if (transportInconnu(r) && c.ligneProuveeDepuisEchec && !c.appel.mode_test && c.fiche) {
+    const message = `${causeDe(r.erreur).message} Deuxième échec de ligne sur ce numéro alors que d'autres appels passent : numéro probablement injoignable.`;
+    return {
+      appel: { ...vide, statut: "echec", erreur_cote: null, erreur_code: "numero_injoignable", erreur_message: message.slice(0, 500) },
+      journal: null,
+      relance: { jour: lendemainOuvre(new Date(r.finA)), minutes: HEURE_RELANCE, titre: "Janet : numéro injoignable (deux échecs de ligne), à vérifier" },
+      appris: null,
+      file: c.file ? { statut: "arrete", essais: null, motif: "numéro injoignable", note: "deux échecs de ligne avant sonnerie" } : null,
+      pause: null,
+      chainer: true,
+    };
+  }
+
   // 1. Panne de notre côté.
   if (panneDeNotreCote(r)) {
     const cause = causeDe(r.erreur);
     const pause = cause.pauseImmediate || c.pannesAvant + 1 >= PANNES_AVANT_PAUSE ? cause.message : null;
+    // Un échec de ligne inconnu est marqué pour être reconnu au passage suivant.
+    const code = transportInconnu(r) ? "transport_inconnu" : (r.erreur?.code ?? r.erreur?.etape ?? null);
     return {
-      appel: { ...vide, statut: "echec", erreur_cote: "nous", erreur_code: r.erreur?.code ?? r.erreur?.etape ?? null, erreur_message: cause.message },
+      appel: { ...vide, statut: "echec", erreur_cote: "nous", erreur_code: code, erreur_message: cause.message },
       journal: null,
       relance: null,
       appris: null,

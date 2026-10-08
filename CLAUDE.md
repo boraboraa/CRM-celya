@@ -1700,7 +1700,11 @@ comme dans `crm-mail`.
 - Les transcriptions arrivent mot à mot (`.delta`), sans fin de tour : 900 ms de
   silence ferment une réplique (même règle que la réceptionniste).
 - L'annexe reçoit TOUT l'audio des deux voix (~64 Ko/s par sens) : il est
-  compté, jamais décodé (filtre sur le début du message, avant `JSON.parse`).
+  compté, jamais décodé — filtre sur le **début ET la fin** du message, avant
+  `JSON.parse`. Le seul début ne suffit pas : une trame dont la clé `type`
+  arrive après l'audio était décodée, inscrite au journal d'événements (borné
+  à 300 lignes) et le saturait, chassant `outil`, `raccroche` et
+  `session.closed` — trouvé par le faux serveur Live.
 - `session.instructions.append` (`delegation_id: null`) est le canal PROUVÉ pour
   faire parler la voix hors délégation : c'est lui qui dit « conclus » 45 s avant
   le plafond.
@@ -1814,6 +1818,22 @@ jour ouvré** que l'essai 2. L'ancien calcul (heures entières) rendait 17h puis
   composer** et le dit.
 
 ### Ce que le moteur garantit (`lib/appelsIa/`)
+
+- **Un échec de ligne AVANT sonnerie est trié** (`_shared/appels/transport.ts`,
+  `transport.failed` ne porte aucun code SIP, seulement un texte libre) :
+  identifiants, numéro appelant, crédit → **notre côté**, pause immédiate ;
+  occupé, numéro inexistant, refusé → **le prospect**, un essai comme un autre ;
+  cause **inconnue** → notre côté la première fois (rien n'est brûlé), et à la
+  seconde fois sur la même fiche, **si un autre appel a abouti entre-temps**,
+  « numéro injoignable » : le cycle s'arrête, une relance pour le propriétaire,
+  **sans pause du moteur**. Sans cette preuve que la ligne marche, la seconde
+  reste une panne de notre côté — un trunk en panne doit mettre en pause, pas
+  brûler les fiches une à une.
+- **Le jeton de fin** (`appels_ia.fin_prise_at`) : Next le prend avant d'écrire
+  la fin. L'annexe renvoie son rapport si le premier envoi dépasse 25 s ; sans
+  jeton, deux fins concurrentes écriraient deux fois au journal. Un jeton de
+  plus de 5 min est celui d'un écrivain mort, il se reprend. Base illisible →
+  503, l'annexe réessaie puis pose sa trace minimale (échec neutre).
 
 - **Une panne de notre côté ne brûle pas la file** (création refusée, annexe
   injoignable, jamais sonné) : rien sur la fiche, l'essai ne compte pas, la

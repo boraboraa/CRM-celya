@@ -257,7 +257,10 @@ async function appeler(faux: FauxLive, scenario: Scenario, o: { cle?: string } =
 }
 
 /** Le contexte de fin, comme lib/appelsIa/fin.ts le lit — ici depuis la mémoire. */
-function contexte(i: Issue, o: Partial<Pick<ContexteFin, "machinesAnterieures" | "dejaHumain" | "pannesAvant">> = {}): ContexteFin {
+function contexte(
+  i: Issue,
+  o: Partial<Pick<ContexteFin, "machinesAnterieures" | "dejaHumain" | "pannesAvant" | "ligneProuveeDepuisEchec">> = {}
+): ContexteFin {
   const maintenant = i.horloge();
   const rdv = i.memoire.rdvPoses[0] ?? null;
   return {
@@ -271,6 +274,7 @@ function contexte(i: Issue, o: Partial<Pick<ContexteFin, "machinesAnterieures" |
     rdvAVenir: i.memoire.rdvPoses.some((r) => instantLocal(r.debut).getTime() > maintenant.getTime()),
     rdvLibelle: rdv ? jourHeureFr(instantLocal(rdv.debut)) : null,
     pannesAvant: o.pannesAvant ?? 0,
+    ligneProuveeDepuisEchec: o.ligneProuveeDepuisEchec ?? false,
     maintenant,
     fenetre: FENETRE_DEFAUT,
   };
@@ -400,6 +404,11 @@ try {
     // d'outil entre les deux) forment UNE réplique : la transcription GPT-Live
     // n'a pas de fin de tour, seul le silence ou l'autre voix en ferme une.
     vrai("la dernière phrase de Janet est bien au rapport", (texteDe(r, "janet").at(-1) ?? "").endsWith("Au revoir."), texteDe(r, "janet").at(-1));
+    vrai(
+      "deux phrases de Janet dans la même réplique restent séparées par une espace",
+      !texteDe(r, "janet").some((t) => /[.!?…]\p{Lu}/u.test(t)),
+      texteDe(r, "janet")
+    );
 
     // Les outils : chacun a reçu sa réponse (sortie, puis response.create).
     verifie("six appels d'outil joués", s.outils.map((o) => o.nom), ["constructor", "creneaux", "rdv", "rdv", "noter_resultat", "fin_appel"]);
@@ -619,6 +628,62 @@ try {
     const plan = planifierFin(contexte(i));
     verifie("un « Allô ? » sans échange n'est pas un humain", [plan.appel.classement, plan.journal?.outcome, plan.journal?.isExchange], ["repondeur", "sans_reponse", false]);
     verifie("nouvel essai programmé", plan.file && [plan.file.statut, plan.file.essais], ["en_attente", 1]);
+  }
+
+  // =========================================================================
+  // En plus — la ligne échoue AVANT toute sonnerie : à qui la faute ?
+  // =========================================================================
+  const occupe = await appeler(faux, {
+    nom: "occupé avant sonnerie",
+    etapes: [{ type: "evenement", ev: { type: "transport.failed", error: { code: "busy", message: "486 Busy Here" } } }],
+  });
+  {
+    const plan = planifierFin(contexte(occupe));
+    verifie(
+      "occupé avant sonnerie : c'est le prospect — un essai, pas une panne",
+      [plan.appel.statut, plan.appel.erreur_cote, plan.appel.classement, plan.journal?.outcome, plan.pause],
+      ["termine", null, "occupe_echec", "sans_reponse", null]
+    );
+    verifie("occupé avant sonnerie : nouvel essai, l'essai compte", plan.file && [plan.file.statut, plan.file.essais], ["en_attente", 1]);
+  }
+
+  const refusLigne = await appeler(faux, {
+    nom: "ligne refusée avant sonnerie",
+    etapes: [{ type: "evenement", ev: { type: "transport.failed", error: { code: "sip_auth_failed", message: "407 Proxy Authentication Required" } } }],
+  });
+  {
+    const plan = planifierFin(contexte(refusLigne));
+    verifie(
+      "identifiants SIP refusés : de NOTRE côté, pause immédiate, rien sur la fiche",
+      [plan.appel.erreur_cote, Boolean(plan.pause), plan.journal, plan.file?.essais],
+      ["nous", true, null, null]
+    );
+  }
+
+  const inconnu = await appeler(faux, {
+    nom: "échec de ligne inconnu",
+    etapes: [{ type: "evenement", ev: { type: "transport.failed", error: { code: "sip_error", message: "call failed" } } }],
+  });
+  {
+    const premier = planifierFin(contexte(inconnu));
+    verifie(
+      "cause inconnue, première fois : de notre côté, marquée, sans pause ni essai",
+      [premier.appel.erreur_cote, premier.appel.erreur_code, premier.pause, premier.file?.statut, premier.file?.essais, premier.journal],
+      ["nous", "transport_inconnu", null, "en_attente", null, null]
+    );
+    const ligneMorte = planifierFin(contexte(inconnu, { pannesAvant: 1 }));
+    vrai("cause inconnue, deuxième panne d'affilée sans preuve de la ligne : pause (c'est peut-être la nôtre)", Boolean(ligneMorte.pause));
+    const numero = planifierFin(contexte(inconnu, { ligneProuveeDepuisEchec: true, pannesAvant: 1 }));
+    verifie(
+      "cause inconnue, la ligne a marché entre-temps : numéro injoignable — cycle arrêté, SANS pause",
+      [numero.appel.erreur_cote, numero.appel.erreur_code, numero.pause, numero.file?.statut, numero.journal, numero.chainer],
+      [null, "numero_injoignable", null, "arrete", null, true]
+    );
+    verifie(
+      "numéro injoignable : une relance pour le propriétaire, le lendemain ouvré à 9h",
+      numero.relance,
+      { jour: "2026-10-08", minutes: 540, titre: "Janet : numéro injoignable (deux échecs de ligne), à vérifier" }
+    );
   }
 } finally {
   await faux.fermer();

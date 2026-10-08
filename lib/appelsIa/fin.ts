@@ -86,6 +86,7 @@ async function contexte(admin: SupabaseClient, appel: AppelLu, rapport: RapportA
     /* la fenêtre par défaut suffit à dater un essai */
   }
   const rdv = appel.prospect_id && !appel.mode_test ? await prochainRdvAVenir(admin, appel.prospect_id) : null;
+  const ligneProuveeDepuisEchec = await ligneProuvee(admin, appel);
   return {
     appel: { id: appel.id, essai: appel.essai, mode_test: appel.mode_test, file_id: appel.file_id, prospect_id: appel.prospect_id },
     file: fileLue
@@ -101,9 +102,38 @@ async function contexte(admin: SupabaseClient, appel: AppelLu, rapport: RapportA
     rdvAVenir: Boolean(rdv),
     rdvLibelle: rdvPose.data ? jourHeureFr(new Date((rdvPose.data as { starts_at: string }).starts_at)) : null,
     pannesAvant,
+    ligneProuveeDepuisEchec,
     maintenant: new Date(),
     fenetre,
   };
+}
+
+/**
+ * La fiche a-t-elle déjà eu un échec de ligne inconnu, ET un autre appel
+ * a-t-il abouti depuis (la ligne marche, c'est donc le numéro) ? Lecture
+ * illisible : non — l'échec reste compté de notre côté, et c'est la pause qui
+ * tranchera si la ligne est vraiment en panne.
+ */
+async function ligneProuvee(admin: SupabaseClient, appel: AppelLu): Promise<boolean> {
+  if (!appel.prospect_id || appel.mode_test) return false;
+  const { data: echec, error } = await admin
+    .from("appels_ia")
+    .select("created_at")
+    .eq("prospect_id", appel.prospect_id)
+    .eq("erreur_code", "transport_inconnu")
+    .neq("id", appel.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !echec) return false;
+  const { data: aboutis, error: e2 } = await admin
+    .from("appels_ia")
+    .select("id")
+    .eq("statut", "termine")
+    .gt("created_at", (echec as { created_at: string }).created_at)
+    .lt("created_at", appel.created_at)
+    .limit(1);
+  return !e2 && (aboutis?.length ?? 0) > 0;
 }
 
 /** La relance de Janet pour le propriétaire — jamais par-dessus une relance humaine. */

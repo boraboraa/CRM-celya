@@ -9,6 +9,7 @@
  */
 
 import type { ErreurAppel } from "../../supabase/functions/_shared/appels/rapport.ts";
+import { coteTransport } from "../../supabase/functions/_shared/appels/transport.ts";
 
 export type Cause = {
   message: string;
@@ -45,8 +46,16 @@ export function causeDe(e: ErreurAppel | null | undefined): Cause {
     return { message: `La connexion annexe n'a pas pu s'ouvrir : ${msg || "sans détail"}. L'appel a été raccroché.`, pauseImmediate: false };
   }
   if (e.etape === "transport") {
+    const detail = [e.code, msg].filter(Boolean).join(" — ");
+    if (coteTransport(e) === "nous") {
+      // Identifiants, numéro appelant, crédit : rien ne se réparera seul.
+      return {
+        message: `La ligne a refusé l'appel avant la sonnerie${detail ? ` (${detail})` : ""} : identifiants SIP, profil sortant, numéro appelant ou crédit Telnyx à vérifier.`,
+        pauseImmediate: true,
+      };
+    }
     return {
-      message: `L'appel n'a jamais sonné${code ? ` (${code})` : ""} : identifiants SIP, profil sortant ou numéro appelant refusés par Telnyx ?`,
+      message: `L'appel n'a jamais sonné${detail ? ` (${detail})` : ""}, sans cause reconnue. Si d'autres appels passent, le numéro du prospect est en cause.`,
       pauseImmediate: false,
     };
   }

@@ -128,9 +128,11 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
     sonnerieA: sonnerieA !== null ? iso(sonnerieA) : null,
     decrocheA: decrocheA !== null ? iso(decrocheA) : null,
     finA: iso(d.maintenant()),
-    evenements,
-    tours,
-    outils,
+    // Des copies : ce qui arrive après la fin (fermeture de l'attache) ne
+    // modifie pas un rapport déjà rendu.
+    evenements: [...evenements],
+    tours: [...tours],
+    outils: [...outils],
     raisonFermeture,
     factureS,
     raccrochePar,
@@ -263,6 +265,10 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
       if (tour === tourJanet) tourJanet = null;
     }
     const repliquesProspect = () => tours.filter((t) => t.qui === "prospect" && aDesMots(t.texte)).length;
+    // Deux phrases dites à moins de 900 ms (un outil entre les deux) arrivent
+    // dans la même réplique, sans espace : « Bonne journée !Au revoir. ».
+    const accoler = (texte: string, delta: string) =>
+      /[.!?…]$/.test(texte) && /^\p{Lu}/u.test(delta) ? `${texte} ${delta}` : texte + delta;
 
     let silence: unknown = null;
     const motsDuProspect = (delta: string) => {
@@ -272,7 +278,7 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
       if (tourJanet) clore(tourJanet);
       if (!tourProspect) tourProspect = { qui: "prospect", texte: "", t: rel(), fin: rel(), minuterie: null };
       const tour = tourProspect;
-      tour.texte += delta;
+      tour.texte = accoler(tour.texte, delta);
       tour.fin = rel();
       moins(tour.minuterie);
       tour.minuterie = plus(() => clore(tour), FIN_REPLIQUE_MS);
@@ -296,7 +302,7 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
       if (tourProspect) clore(tourProspect);
       if (!tourJanet) tourJanet = { qui: "janet", texte: "", t: rel(), fin: rel(), minuterie: null };
       const tour = tourJanet;
-      tour.texte += delta;
+      tour.texte = accoler(tour.texte, delta);
       tour.fin = rel();
       moins(tour.minuterie);
       tour.minuterie = plus(() => clore(tour), FIN_REPLIQUE_MS);

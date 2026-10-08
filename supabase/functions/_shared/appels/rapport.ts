@@ -11,6 +11,7 @@
  */
 
 import { classerAppel, type FaitsAppel, type Tour } from "./classement.ts";
+import { coteTransport } from "./transport.ts";
 
 export type EvenementAppel = {
   /** Millisecondes depuis la création de l'appel. */
@@ -83,14 +84,22 @@ export type RapportAppel = {
  * Une panne de NOTRE côté : rien n'a atteint le prospect par notre faute. La
  * ligne repart en file, l'essai ne compte pas.
  *   · préparation, création ou attache refusées ;
- *   · `transport.failed` AVANT toute sonnerie (trunk refusé, identifiant
- *     d'appelant invalide…) — après sonnerie, c'est le prospect (occupé).
+ *   · `transport.failed` AVANT toute sonnerie, sauf quand l'erreur désigne le
+ *     prospect (occupé, numéro inexistant, refusé : voir transport.ts). Une
+ *     cause INCONNUE est d'abord comptée de notre côté — rien n'est brûlé ;
+ *     c'est le plan de fin qui la requalifie à la seconde fois sur la même
+ *     fiche (« numéro injoignable »). Après sonnerie, c'est le prospect.
  */
 export function panneDeNotreCote(r: RapportAppel): boolean {
   if (!r.erreur) return false;
   if (r.erreur.etape === "preparation" || r.erreur.etape === "creation" || r.erreur.etape === "attache") return true;
-  if (r.erreur.etape === "transport") return !r.sonnerieA;
+  if (r.erreur.etape === "transport") return !r.sonnerieA && coteTransport(r.erreur) !== "eux";
   return false;
+}
+
+/** Un échec de ligne avant sonnerie dont on ignore le responsable. */
+export function transportInconnu(r: RapportAppel): boolean {
+  return r.erreur?.etape === "transport" && !r.sonnerieA && coteTransport(r.erreur) === "inconnu";
 }
 
 /**
@@ -120,7 +129,8 @@ export function faitsDepuisRapport(r: RapportAppel): FaitsAppel {
       ? String((finAppel.arguments as Record<string, unknown>).motif ?? "")
       : null;
   return {
-    echecTransport: r.erreur?.etape === "transport" && Boolean(r.sonnerieA),
+    // Après sonnerie, ou avant quand l'erreur désigne le prospect (occupé…).
+    echecTransport: r.erreur?.etape === "transport" && (Boolean(r.sonnerieA) || coteTransport(r.erreur) === "eux"),
     decroche,
     dureeEnLigneS,
     tours: r.tours.map((t) => ({ qui: t.qui, texte: t.texte })),

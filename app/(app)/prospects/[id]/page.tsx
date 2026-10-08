@@ -16,6 +16,9 @@ import { DraftsSection } from "@/components/DraftsSection";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { RelancesSection } from "@/components/RelancesSection";
+import { AppelerAvecJanet } from "@/components/appelsIa/AppelerAvecJanet";
+import { BriefAppel } from "@/components/appelsIa/BriefAppel";
+import { lireBrief, lireSuiviFiche } from "@/lib/appelsIa/lectures";
 import { updateProspectAction, deleteProspectAction } from "@/app/actions";
 import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
@@ -63,48 +66,64 @@ export default async function ProspectDetailPage({
   const { repondre } = await searchParams;
   const supabase = await createClient();
   const session = await getSession();
+  // Effacer une trace du journal est réservé à l'admin (revérifié côté serveur).
+  // Lu AVANT les requêtes : les appels de Janet (admin seul) partent avec elles.
+  const isAdmin = session?.me?.role === "admin" && session.me.is_active;
 
   // Les emails portent un corps HTML et un `raw` jsonb qui ne servent pas ici :
   // on ne demande que ce qui s'affiche. Les activités montent à 200 parce que
   // les faits d'étape se lisent sur la même moisson (voir plus bas).
-  const [prospectRes, membersRes, activitiesRes, emailsRes, tasksRes, meetingsRes] =
-    await Promise.all([
-      supabase.from("prospects").select("*").eq("id", id).maybeSingle(),
-      supabase
-        .from("crm_users")
-        .select("id, full_name, email")
-        .eq("is_active", true)
-        .order("full_name"),
-      supabase
-        .from("activities")
-        .select(
-          "id, type, subject, body, outcome, occurred_at, is_draft, is_exchange, crm_users!activities_author_id_fkey(full_name)"
-        )
-        .eq("prospect_id", id)
-        .order("occurred_at", { ascending: false })
-        .limit(200),
-      supabase
-        .from("emails")
-        .select("id, direction, from_email, subject, body_text, received_at")
-        .eq("prospect_id", id)
-        .order("received_at", { ascending: false })
-        .limit(50),
-      supabase
-        .from("tasks")
-        .select("id, title, details, due_at, status, priority, prospect_id")
-        .eq("prospect_id", id)
-        .order("status")
-        .order("due_at", { ascending: true }),
-      // Les rendez-vous de la fiche (agenda) — lus via meetings_visibles,
-      // comme toute lecture d'agenda. Ils portent le fait « rendez-vous »
-      // et la prochaine action.
-      supabase
-        .from("meetings_visibles")
-        .select("id, title, starts_at, ends_at, location, status")
-        .eq("prospect_id", id)
-        .order("starts_at", { ascending: true })
-        .limit(50),
-    ]);
+  const [
+    prospectRes,
+    membersRes,
+    activitiesRes,
+    emailsRes,
+    tasksRes,
+    meetingsRes,
+    suiviJanet,
+    briefJanet,
+  ] = await Promise.all([
+    supabase.from("prospects").select("*").eq("id", id).maybeSingle(),
+    supabase
+      .from("crm_users")
+      .select("id, full_name, email")
+      .eq("is_active", true)
+      .order("full_name"),
+    supabase
+      .from("activities")
+      .select(
+        "id, type, subject, body, outcome, occurred_at, is_draft, is_exchange, crm_users!activities_author_id_fkey(full_name)"
+      )
+      .eq("prospect_id", id)
+      .order("occurred_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("emails")
+      .select("id, direction, from_email, subject, body_text, received_at")
+      .eq("prospect_id", id)
+      .order("received_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("tasks")
+      .select("id, title, details, due_at, status, priority, prospect_id")
+      .eq("prospect_id", id)
+      .order("status")
+      .order("due_at", { ascending: true }),
+    // Les rendez-vous de la fiche (agenda) — lus via meetings_visibles,
+    // comme toute lecture d'agenda. Ils portent le fait « rendez-vous »
+    // et la prochaine action.
+    supabase
+      .from("meetings_visibles")
+      .select("id, title, starts_at, ends_at, location, status")
+      .eq("prospect_id", id)
+      .order("starts_at", { ascending: true })
+      .limit(50),
+    // Janet — ADMIN SEUL : l'appel en cours ou le dernier, la ligne de file,
+    // et le brief d'appel. Tolérantes : migration 025 absente → indisponible,
+    // et rien de Janet ne s'affiche. Rien n'est demandé pour un commercial.
+    isAdmin ? lireSuiviFiche(supabase, id) : Promise.resolve(null),
+    isAdmin ? lireBrief(supabase, id) : Promise.resolve(null),
+  ]);
 
   const prospect = prospectRes.data as Prospect | null;
   if (!prospect) notFound();
@@ -116,8 +135,8 @@ export default async function ProspectDetailPage({
     "id" | "full_name" | "email"
   >[];
   const owner = members.find((m) => m.id === prospect.owner_id);
-  // Effacer une trace du journal est réservé à l'admin (revérifié côté serveur).
-  const isAdmin = session?.me?.role === "admin" && session.me.is_active;
+  // Les blocs de Janet n'existent que pour l'admin, migration 025 appliquée.
+  const janet = isAdmin && suiviJanet?.disponible ? suiviJanet : null;
 
   // ---------------------------------------------------------------------
   // LECTURE PARTAGÉE, ÉCRITURE PERSO (interrupteur d'équipe, migration 020).
@@ -453,6 +472,26 @@ export default async function ProspectDetailPage({
 
         {/* ---------- Colonne latérale ---------- */}
         <div className="space-y-6">
+          {/* Janet — admin seul. EN TÊTE de la colonne : c'est un geste, et il
+              ne bouscule pas PROCHAINE ACTION, qui garde le haut de la fiche.
+              Le brief suit, replié s'il est long : la fiche se lit d'abord. */}
+          {janet && (
+            <>
+              <section>
+                <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+                  Appel par Janet
+                </h2>
+                <AppelerAvecJanet prospectId={prospect.id} suivi={janet} />
+              </section>
+              <section>
+                <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+                  Brief d&apos;appel
+                </h2>
+                <BriefAppel prospectId={prospect.id} brief={briefJanet ?? null} />
+              </section>
+            </>
+          )}
+
           {/* Chiffres de l'affaire */}
           <section className="card space-y-3 p-5">
             <div>

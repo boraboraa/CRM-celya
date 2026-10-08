@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useOptimistic, useState, useTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { moveProspectAction } from "@/app/actions";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/lib/constants";
 import {
   ConfidenceBadge,
+  EtiquetteJanet,
   Icone,
   LastActionLine,
   ProchaineActionTexte,
@@ -97,8 +98,19 @@ export type BoardProspect = {
  * Plus aucun montant sur les cartes : c'est la CONFIANCE estimée par l'IA
  * (Chaud / Tiède / Froid, avec sa raison courte) qui dit si l'affaire est
  * chaude. « À évaluer » quand rien n'a pu être estimé.
+ *
+ * `janetIds` : les fiches qu'un appel réel de Janet a touchées (admin seul —
+ * vide sinon). Un TABLEAU, pas un `Set` : la page est un composant serveur,
+ * et seule la donnée simple traverse la frontière.
  */
-export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
+export function PipelineBoard({
+  prospects,
+  janetIds = [],
+}: {
+  prospects: BoardProspect[];
+  janetIds?: string[];
+}) {
+  const parJanet = useMemo(() => new Set(janetIds), [janetIds]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<ProspectStatus | null>(null);
   const [justMoved, setJustMoved] = useState<string | null>(null);
@@ -294,8 +306,11 @@ export function PipelineBoard({ prospects }: { prospects: BoardProspect[] }) {
                           prefetch={false}
                           className="block"
                         >
-                          <p className="truncate text-sm font-semibold text-slate-50">
-                            {c.company_name}
+                          <p className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate text-sm font-semibold text-slate-50">
+                              {c.company_name}
+                            </span>
+                            {parJanet.has(c.id) && <EtiquetteJanet compact />}
                           </p>
                           {c.contact_name && (
                             <p className="truncate text-xs text-slate-400">

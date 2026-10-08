@@ -4,7 +4,7 @@ import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/ui";
 import { NavLinks } from "@/components/Nav";
-import { NAV_ITEMS, ADMIN_ITEM, ACCOUNT_ITEM } from "@/lib/nav";
+import { NAV_ITEMS, ADMIN_ITEM, APPELS_IA_ITEM, ACCOUNT_ITEM } from "@/lib/nav";
 
 function SignOutButton({ full = false }: { full?: boolean }) {
   return (
@@ -28,7 +28,8 @@ export default async function AppLayout({
 
   if (!me || !me.is_active) redirect("/acces-refuse");
 
-  const items = me.role === "admin" ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
+  const items =
+    me.role === "admin" ? [...NAV_ITEMS, ADMIN_ITEM, APPELS_IA_ITEM] : NAV_ITEMS;
 
   return (
     <div className="flex min-h-screen">

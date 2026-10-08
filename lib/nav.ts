@@ -13,4 +13,6 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "equipe" };
+/** Les appels de Janet — admin seul, comme « Équipe » (la page le revérifie). */
+export const APPELS_IA_ITEM: NavItem = { href: "/appels-ia", label: "Appels IA", icon: "telephone" };
 export const ACCOUNT_ITEM: NavItem = { href: "/compte", label: "Mon compte", icon: "reglages" };

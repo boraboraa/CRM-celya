@@ -198,7 +198,12 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
     let socket: SocketMinimal | null = null;
     let raccrocheEnCours = false;
     const minuteries = new Set<unknown>();
-    const plus = (fn: () => void, ms: number) => {
+    // Après la fin, plus rien ne s'arme. La fermeture de la socket suit
+    // toujours `session.closed`, et son gestionnaire armait encore un
+    // `terminer` d'une seconde : un minuteur orphelin, qui gardait le worker
+    // (ou le test) éveillé pour rien (constaté par le faux serveur Live).
+    const plus = (fn: () => void, ms: number): unknown => {
+      if (fini) return null;
       const h = d.minuterie(() => {
         minuteries.delete(h);
         fn();
@@ -373,9 +378,15 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
     // --- Les messages de la connexion annexe.
     const message = (texte: string) => {
       if (fini) return;
-      // L'audio réfléchi (deux sens, ~5 trames par seconde) : compté, jamais décodé.
-      const tete = texte.slice(0, 120);
-      if (tete.includes('"session.input_audio.append"') || tete.includes('"session.output_audio.delta"')) return;
+      // L'audio réfléchi (deux sens, ~5 trames par seconde) : jamais décodé.
+      // Le `type` se cherche au DÉBUT et à la FIN de la trame : l'ordre des
+      // clés JSON n'est garanti par rien, et une trame dont le `type` suit
+      // l'audio passait le filtre — décodée, puis inscrite au journal
+      // d'événements (300 lignes au plus), qu'elle saturait en une minute
+      // en chassant `outil`, `raccroche` et `session.closed` (constaté par
+      // le faux serveur Live). Le `switch` les écarte aussi, en dernier filet.
+      const audio = (bout: string) => bout.includes('"session.input_audio.append"') || bout.includes('"session.output_audio.delta"');
+      if (audio(texte.slice(0, 120)) || (texte.length > 120 && audio(texte.slice(-120)))) return;
       let ev: Record<string, unknown>;
       try {
         ev = JSON.parse(texte) as Record<string, unknown>;
@@ -384,6 +395,9 @@ export async function menerAppel(p: ParametresAppel, d: DependancesAnnexe): Prom
       }
       const type = String(ev.type ?? "");
       switch (type) {
+        case "session.input_audio.append":
+        case "session.output_audio.delta":
+          return;
         case "transport.ringing":
           if (sonnerieA === null) {
             sonnerieA = d.maintenant();

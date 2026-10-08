@@ -797,7 +797,7 @@ quel jour), production revérifiée intacte. **Réversible** : remettre le corps
 022 de `recalc_next_action`, supprimer le trigger d'étape et
 `cron.unschedule('prochaine-action-fiches-closes')`.
 
-### Un rendez-vous à venir passe TOUJOURS devant (migration `024`, 23 septembre — ÉCRITE, PAS APPLIQUÉE)
+### Un rendez-vous à venir passe TOUJOURS devant (migration `024`, 23 septembre — appliquée le 23/09, `20260923141041`)
 
 > **Tant qu'une fiche a un rendez-vous à venir, c'est lui la prochaine action.
 > Toujours.** (décision de Bora, 23/09)

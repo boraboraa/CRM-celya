@@ -52,7 +52,7 @@ function UnSecret({ s }: { s: SecretVue }) {
           spellCheck={false}
           data-lpignore="true"
           data-1p-ignore
-          placeholder={s.poseLe ? "Nouvelle valeur, pour remplacer" : "Collez la valeur"}
+          placeholder={s.poseLe ? "Nouvelle valeur" : "Collez la valeur"}
           className="input min-w-0 font-mono text-xs"
         />
         <button type="submit" disabled={enCours} className="btn-ghost shrink-0 px-3 py-2 text-xs">

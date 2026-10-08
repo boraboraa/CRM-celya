@@ -49,7 +49,9 @@ function Contenu({ l, maintenant }: { l: LigneFileResume; maintenant: Date }) {
         Essais : {l.essais}/3
         {" · "}
         {l.statut === "en_attente"
-          ? `prochain essai ${quandAVenir(l.pas_avant, maintenant)}`
+          ? Date.parse(l.pas_avant) <= maintenant.getTime()
+            ? "prête : elle part dès que le moteur compose"
+            : `prochain essai ${quandAVenir(l.pas_avant, maintenant)}`
           : l.statut === "en_cours"
             ? "Janet appelle en ce moment"
             : `${l.fin_motif ?? STATUT_FILE_LABEL[l.statut] ?? l.statut} — ${quandPasse(l.updated_at, maintenant)}`}

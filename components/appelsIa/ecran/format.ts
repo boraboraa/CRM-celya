@@ -43,7 +43,7 @@ export function quandAVenir(iso: string | null | undefined, maintenant: Date): s
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  if (d.getTime() <= maintenant.getTime()) return "dès le prochain passage du moteur";
+  if (d.getTime() <= maintenant.getTime()) return "maintenant";
   const p = partiesBruxelles(d);
   const auj = partiesBruxelles(maintenant).ymd;
   const heure = heureFr(p.minutes);

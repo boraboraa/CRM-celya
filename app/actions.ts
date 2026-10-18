@@ -29,6 +29,7 @@ import {
   type MeetingConflit,
 } from "@/lib/crm/agenda";
 import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
+import { estIssueDebrief, type IssueDebrief } from "@/lib/crm/debrief";
 import { estTableAbsente } from "@/lib/crm/access";
 import { getSession } from "@/lib/auth";
 import {
@@ -762,14 +763,23 @@ export async function deplacerRendezVousAction(input: {
 
 export async function cloturerRendezVousAction(input: {
   id: string;
-  resultat: "honore" | "annule";
+  /** L'issue (lib/crm/debrief.ts) — le débrief de la fiche et du tableau de bord. */
+  issue?: IssueDebrief | null;
+  /** L'ancien débrief sans issue — encore accepté. */
+  resultat?: "honore" | "annule";
   compteRendu?: string | null;
-  /** « Et ensuite ? » — FACULTATIF : « YYYY-MM-DD » (09:00 Bruxelles), ou null. */
+  /** « Pas intéressé » : la raison, exigée. */
+  raison?: string | null;
+  /** « Et ensuite ? » : « YYYY-MM-DD » (09:00 Bruxelles), ou null. Exigée pour « à rappeler ». */
   suite?: string | null;
 }): Promise<ActionState & { plusRien?: boolean }> {
   const session = await getSession();
   if (!session) redirect("/login");
   const supabase = await createClient();
+
+  if (input.issue != null && !estIssueDebrief(input.issue)) {
+    return { error: "Issue de rendez-vous inconnue." };
+  }
 
   let suite: { dueAt: string } | null = null;
   if (input.suite) {
@@ -780,8 +790,10 @@ export async function cloturerRendezVousAction(input: {
 
   const r = await cloturerRendezVous(supabase, session.userId, {
     id: input.id,
+    issue: input.issue ?? null,
     resultat: input.resultat,
     compteRendu: input.compteRendu,
+    raison: input.raison,
     suite,
     isAdmin: session.me?.role === "admin",
   });

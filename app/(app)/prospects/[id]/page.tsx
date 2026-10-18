@@ -20,7 +20,7 @@ import { AppelerAvecJanet } from "@/components/appelsIa/AppelerAvecJanet";
 import { BriefAppel } from "@/components/appelsIa/BriefAppel";
 import { lireBrief, lireSuiviFiche } from "@/lib/appelsIa/lectures";
 import { updateProspectAction, deleteProspectAction } from "@/app/actions";
-import { factsFromRows, evaluateStatus } from "@/lib/crm/status";
+import { factsFromRows, evaluateStatus, raisonAffichee } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
 import {
   lireProchaineAction,
@@ -109,13 +109,17 @@ export default async function ProspectDetailPage({
       .eq("prospect_id", id)
       .order("status")
       .order("due_at", { ascending: true }),
-    // Les rendez-vous de la fiche (agenda) — lus via meetings_visibles,
-    // comme toute lecture d'agenda. Ils portent le fait « rendez-vous »
-    // et la prochaine action.
+    // Les rendez-vous DE PROSPECT de la fiche. Ils portent le fait
+    // « rendez-vous », l'issue de leur débrief (« À rappeler », 027) et la
+    // prochaine action. Lus dans `meetings` et non meetings_visibles : la vue
+    // ne porte pas `debrief_issue` et ne doit pas bouger (021) — et elle ne
+    // masque que les RDV PERSO des autres, qu'on écarte ici (kind = prospect).
+    // La RLS de meetings s'applique pareil.
     supabase
-      .from("meetings_visibles")
-      .select("id, title, starts_at, ends_at, location, status")
+      .from("meetings")
+      .select("id, title, starts_at, ends_at, location, status, debrief_issue, debriefed_at")
       .eq("prospect_id", id)
+      .eq("kind", "prospect")
       .order("starts_at", { ascending: true })
       .limit(50),
     // Janet — ADMIN SEUL : l'appel en cours ou le dernier, la ligne de file,
@@ -166,6 +170,8 @@ export default async function ProspectDetailPage({
     ends_at: string;
     location: string | null;
     status: string;
+    debrief_issue: string | null;
+    debriefed_at: string | null;
   }[];
   // Les tâches annulées ne sont pas affichées : TaskRow les rendrait comme
   // des relances actives en retard.
@@ -392,7 +398,14 @@ export default async function ProspectDetailPage({
               prospectId={prospect.id}
               status={status}
               locked={Boolean(prospect.status_locked)}
-              autoReason={prospect.status_auto_reason}
+              // Le fait d'AUJOURD'HUI, pas celui du jour où l'étape a bougé :
+              // jamais « un rendez-vous est prévu le 29 sept. » trois semaines
+              // après (18/10).
+              autoReason={
+                prospect.status_locked
+                  ? prospect.status_auto_reason
+                  : raisonAffichee(status, prospect.status_auto_reason, facts)
+              }
               suggestion={suggestion}
               lectureSeule={lectureSeule}
             />

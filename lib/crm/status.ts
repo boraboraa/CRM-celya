@@ -9,8 +9,11 @@
  *   contacte     au moins un échange réel (email envoyé/reçu, note d'appel
  *                attestée, rendez-vous)
  *   rendez_vous  UNIQUEMENT une activité « rendez_vous » réellement
- *                enregistrée, ou un rendez-vous À VENIR (non annulé) dans
- *                l'agenda (meetings)
+ *                enregistrée, ou un rendez-vous (non annulé) dans l'agenda
+ *   a_rappeler   UNIQUEMENT un rendez-vous débriefé « intéressé, à
+ *                rappeler » (meetings.debrief_issue, migration 027) — par
+ *                le débrief explicite, ou par un résultat « À rappeler » /
+ *                « Intéressé » posé après lui (débrief implicite, en base)
  *   proposition  UNIQUEMENT un signal explicite (proposal_sent_at)
  *   gagne/perdu  JAMAIS automatiques — décisions humaines irréversibles
  *
@@ -22,20 +25,24 @@
  *
  * Partagé par les server actions, le connecteur MCP et l'affichage de la
  * fiche : un seul jeu de règles, aucun doublon.
+ *
+ * Imports RELATIFS (et types seulement hors constants.ts) : la règle pure est
+ * exécutée telle quelle par `npm run test:debrief`.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ProspectStatus } from "@/lib/types";
-import { normalizeStatus, fmtDate, fmtDateTime } from "@/lib/constants";
+import type { ProspectStatus } from "../types.ts";
+import { normalizeStatus, fmtDate, fmtDateTime } from "../constants.ts";
 
 /** Ordre d'avancement. « Gagné » et « Perdu » sont des fins de parcours. */
 export const STATUS_RANK: Record<ProspectStatus, number> = {
   a_appeler: 0,
   contacte: 1,
   rendez_vous: 2,
-  proposition: 3,
-  gagne: 4,
-  perdu: 4,
+  a_rappeler: 3,
+  proposition: 4,
+  gagne: 5,
+  perdu: 5,
 };
 
 /** Étapes qui ne s'obtiennent qu'à la main, jamais par déduction. */
@@ -55,13 +62,20 @@ export type Fact = { at: string; label: string };
 export type ProspectFacts = {
   /** Dernier échange réel — email, note d'appel attestée, rendez-vous. */
   exchange: Fact | null;
-  /** Rendez-vous réellement enregistré (activité datée ou relance « RDV … »). */
+  /** Rendez-vous réellement enregistré (activité datée ou agenda). */
   meeting: Fact | null;
+  /** Rendez-vous débriefé « intéressé, à rappeler » (027). */
+  rappel: Fact | null;
   /** Proposition explicitement marquée envoyée. */
   proposal: Fact | null;
 };
 
-export const NO_FACTS: ProspectFacts = { exchange: null, meeting: null, proposal: null };
+export const NO_FACTS: ProspectFacts = {
+  exchange: null,
+  meeting: null,
+  rappel: null,
+  proposal: null,
+};
 
 /** Garde le fait le plus récent des deux. */
 function latest(a: Fact | null, b: Fact | null): Fact | null {
@@ -80,9 +94,15 @@ export type FactRows = {
     is_draft: boolean | null;
   }[];
   emails: { direction: string; received_at: string }[];
-  /** Rendez-vous de la fiche (agenda) — le filtre « à venir, non annulé »
-   *  est appliqué ici, pas chez l'appelant. */
-  meetings: { starts_at: string; status: string }[];
+  /** Rendez-vous de la fiche (agenda) — le filtre « non annulé » est
+   *  appliqué ici, pas chez l'appelant. `debrief_issue` : ce qu'a donné le
+   *  rendez-vous (027), absent chez un appelant qui ne le lit pas. */
+  meetings: {
+    starts_at: string;
+    status: string;
+    debrief_issue?: string | null;
+    debriefed_at?: string | null;
+  }[];
   proposalSentAt: string | null;
 };
 
@@ -95,7 +115,7 @@ export type FactRows = {
  * une deuxième fois (c'étaient quatre allers-retours de plus par ouverture).
  */
 export function factsFromRows(rows: FactRows): ProspectFacts {
-  const facts: ProspectFacts = { exchange: null, meeting: null, proposal: null };
+  const facts: ProspectFacts = { exchange: null, meeting: null, rappel: null, proposal: null };
 
   for (const a of rows.activities) {
     if (a.is_draft) continue;
@@ -133,17 +153,24 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
     });
   }
 
-  // Un rendez-vous À VENIR dans l'agenda (non annulé) : le fait que posait
-  // autrefois la tâche « RDV avec … ». Un rendez-vous passé n'est pas oublié
-  // pour autant — son activité `rendez_vous` (ci-dessus) reste un fait.
+  // Les rendez-vous de l'agenda (non annulés). À venir : le fait que posait
+  // autrefois la tâche « RDV avec … ». Passé : il reste un fait — et son
+  // libellé dit ce qu'il est devenu (tenu, ou en attente de son issue), jamais
+  // « est prévu » pour une date dépassée.
   const now = Date.now();
   for (const m of rows.meetings) {
     if (m.status === "annule") continue;
-    if (new Date(m.starts_at).getTime() < now) continue;
     facts.meeting = latest(facts.meeting, {
       at: m.starts_at,
-      label: `un rendez-vous est prévu le ${fmtDateTime(m.starts_at)}`,
+      label: libelleFaitRdv(m, now),
     });
+    if (m.status === "honore" && m.debrief_issue === "a_rappeler") {
+      const at = m.debriefed_at ?? m.starts_at;
+      facts.rappel = latest(facts.rappel, {
+        at,
+        label: `le rendez-vous du ${fmtDate(m.starts_at)} a été débriefé : intéressé, à rappeler`,
+      });
+    }
   }
 
   if (rows.proposalSentAt) {
@@ -154,6 +181,25 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
   }
 
   return facts;
+}
+
+/**
+ * Ce qu'un rendez-vous dit de l'étape, en clair. À venir : « est prévu » ;
+ * passé et tenu : « a été tenu » ; passé sans débrief : « en attente de son
+ * issue ». C'était le libellé faux du 18/10 : « un rendez-vous est prévu le
+ * 29 sept. » sous l'étape d'une fiche dont le RDV datait de trois semaines.
+ */
+export function libelleFaitRdv(
+  m: { starts_at: string; status: string },
+  now: number = Date.now()
+): string {
+  if (new Date(m.starts_at).getTime() > now) {
+    return `un rendez-vous est prévu le ${fmtDateTime(m.starts_at)}`;
+  }
+  if (m.status === "honore") {
+    return `un rendez-vous a été tenu le ${fmtDate(m.starts_at)}`;
+  }
+  return `un rendez-vous a eu lieu le ${fmtDate(m.starts_at)}, en attente de son issue`;
 }
 
 /**
@@ -179,17 +225,20 @@ export async function readProspectFacts(
       .eq("prospect_id", prospectId)
       .order("received_at", { ascending: false })
       .limit(50),
-    // La lecture de l'agenda passe par la vue meetings_visibles (règle du
-    // projet) — les colonnes lues ici ne sont jamais masquées pour un
-    // rendez-vous de prospect.
+    // Les rendez-vous DE PROSPECT de la fiche, lus dans `meetings` : la vue
+    // meetings_visibles ne porte pas `debrief_issue` (et ne doit pas bouger,
+    // voir 021). Rien de ce qui est lu ici n'est masqué par la vue : elle ne
+    // cache que le titre, le lieu, les notes et la fiche des RDV PERSO des
+    // autres — et on ne lit ni les uns ni les autres. La RLS de meetings
+    // s'applique comme à travers la vue (security_invoker).
     supabase
-      .from("meetings_visibles")
-      .select("starts_at, status")
+      .from("meetings")
+      .select("starts_at, status, debrief_issue, debriefed_at")
       .eq("prospect_id", prospectId)
+      .eq("kind", "prospect")
       .neq("status", "annule")
-      .gte("starts_at", new Date().toISOString())
-      .order("starts_at", { ascending: true })
-      .limit(10),
+      .order("starts_at", { ascending: false })
+      .limit(20),
     supabase
       .from("prospects")
       .select("proposal_sent_at")
@@ -214,6 +263,7 @@ export async function readProspectFacts(
 /** L'étape que les faits justifient — jamais « Gagné » ni « Perdu ». */
 export function statusFromFacts(facts: ProspectFacts): ProspectStatus {
   if (facts.proposal) return "proposition";
+  if (facts.rappel) return "a_rappeler";
   if (facts.meeting) return "rendez_vous";
   if (facts.exchange) return "contacte";
   return "a_appeler";
@@ -225,9 +275,29 @@ export function factReason(
   facts: ProspectFacts
 ): string | null {
   if (derived === "proposition") return facts.proposal?.label ?? null;
+  if (derived === "a_rappeler") return facts.rappel?.label ?? null;
   if (derived === "rendez_vous") return facts.meeting?.label ?? null;
   if (derived === "contacte") return facts.exchange?.label ?? null;
   return null;
+}
+
+/**
+ * Le motif affiché sous une étape déduite. Celui qui est stocké
+ * (`status_auto_reason`) date du moment où l'étape a bougé : « un rendez-vous
+ * est prévu le 29 sept. » restait affiché trois semaines après. Pour les deux
+ * étapes portées par l'agenda, on relit le fait d'AUJOURD'HUI ; pour les
+ * autres, le motif stocké ne vieillit pas.
+ */
+export function raisonAffichee(
+  status: ProspectStatus,
+  stored: string | null,
+  facts: ProspectFacts
+): string | null {
+  // Pas de motif stocké : l'étape n'a pas été déduite, on n'en invente pas un.
+  if (!stored) return null;
+  if (status === "rendez_vous" && facts.meeting) return facts.meeting.label;
+  if (status === "a_rappeler" && facts.rappel) return facts.rappel.label;
+  return stored;
 }
 
 export type StatusVerdict = {

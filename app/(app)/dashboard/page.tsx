@@ -27,7 +27,7 @@ import {
 } from "@/lib/crm/lastAction";
 import { relanceEnLecture } from "@/lib/crm/access";
 import { ligneAgendaJour } from "@/lib/crm/agendaJour";
-import { ficheClose } from "@/lib/crm/prochaineAction";
+import { rdvADebriefer } from "@/lib/crm/debrief";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -62,6 +62,7 @@ type MeetingRow = {
   ends_at: string;
   location: string | null;
   status: string;
+  debriefed_at?: string | null;
 };
 
 /**
@@ -208,14 +209,17 @@ export default async function TodoPage({
       .limit(30),
 
     // Rendez-vous passés jamais débriefés — la boucle qui manquait : rien ne
-    // demandait jamais ce qu'un rendez-vous avait donné.
+    // demandait jamais ce qu'un rendez-vous avait donné. De PROSPECT
+    // seulement : un RDV personnel ne réclame jamais de débrief (le « Rdv
+    // Ephec » du 18/10). « Passé » = a commencé, comme en base (027).
     filtrerProspects(
       supabase
         .from("meetings_visibles")
         .select(
-          "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status"
+          "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status, debriefed_at"
         )
-        .lt("ends_at", new Date().toISOString())
+        .eq("kind", "prospect")
+        .lte("starts_at", new Date().toISOString())
         // « reporte » AUSSI : un rendez-vous reporté puis passé attend son
         // débrief comme les autres. Sans lui, tout RDV déplacé une fois
         // échappait à cette zone pour toujours (Garage Boetendael, 02/09 →
@@ -225,8 +229,8 @@ export default async function TodoPage({
       perimetre,
       viewer
     )
-      .order("ends_at", { ascending: false })
-      .limit(20),
+      .order("starts_at", { ascending: false })
+      .limit(50),
 
     // La colonne « Appels » (Janet) — ADMIN SEUL, et lue avec le reste : elle
     // ne retarde pas la page. Tolérante : migration 025 absente → indisponible,
@@ -342,15 +346,14 @@ export default async function TodoPage({
   }[]) {
     meetingProspects.set(p.id, p);
   }
-  // Une fiche gagnée ou perdue ne réclame jamais de débrief (migration 023) :
-  // sa fiche ne le dit plus, cette zone non plus — une source d'affichage qui
-  // contredirait la fiche serait pire que pas de filtre du tout. Le statut
-  // vient de la requête groupée ci-dessus ; le RDV perso (sans fiche) reste.
-  const debriefMeetings: DebriefMeeting[] = aDebriefer
-    .filter(
-      (m) => !m.prospect_id || !ficheClose(meetingProspects.get(m.prospect_id)?.status)
-    )
-    .map((m) => ({
+  // Ce qui attend une issue — la règle vit dans lib/crm/debrief.ts : jamais
+  // un RDV perso, jamais une fiche gagnée ou perdue (023 : sa fiche ne le dit
+  // plus, cette zone non plus), UN SEUL rendez-vous par fiche (le plus récent ;
+  // la base clôt les plus anciens « remplacés » dès qu'il est débriefé, 027).
+  const debriefMeetings: DebriefMeeting[] = rdvADebriefer(
+    aDebriefer,
+    (id) => meetingProspects.get(id)?.status
+  ).map((m) => ({
       id: m.id,
       title: m.title,
       starts_at: m.starts_at,
@@ -544,6 +547,30 @@ export default async function TodoPage({
           </section>
         )}
 
+        {/* ---------- Rendez-vous à débriefer — EN TÊTE depuis le 18/10.
+            Elle était la quatrième et dernière zone : 14 rendez-vous y
+            attendaient sous 17 relances en retard, et personne ne l'atteignait.
+            Un rendez-vous passé non débriefé RESTE ici tant que rien n'est
+            posé après lui (027) : c'est le seul rappel du produit, ne pas en
+            ajouter d'autre. Mêmes boutons d'issue que la fiche (DebriefRdv). */}
+        {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
+            débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
+            après le rafraîchissement — un démontage effacerait ce message. */}
+        <section
+          id="a-debriefer"
+          className={`scroll-mt-6 ${debriefMeetings.length > 0 ? "mb-8" : "mb-8 empty:hidden"}`}
+        >
+          {debriefMeetings.length > 0 && (
+            <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Rendez-vous à débriefer
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+                {debriefMeetings.length}
+              </span>
+            </h2>
+          )}
+          <DebriefList meetings={debriefMeetings} />
+        </section>
+
         {nothingAtAll ? (
           <EmptyState
             title="Rien à faire aujourd'hui"
@@ -685,23 +712,6 @@ export default async function TodoPage({
           )}
         </section>
 
-        {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
-            Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
-            du produit, ne pas en ajouter d'autre. ---------- */}
-        {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
-            débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
-            après le rafraîchissement — un démontage effacerait ce message. */}
-        <section className={debriefMeetings.length > 0 ? "mt-8" : "mt-8 empty:hidden"}>
-          {debriefMeetings.length > 0 && (
-            <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Rendez-vous à débriefer
-              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
-                {debriefMeetings.length}
-              </span>
-            </h2>
-          )}
-          <DebriefList meetings={debriefMeetings} />
-        </section>
       </AvecColonneAppels>
     </>
   );

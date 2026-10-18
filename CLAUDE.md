@@ -22,6 +22,12 @@ l'ordre migration → edge function `appels-ia-annexe` → Vercel.
 L'organisation Supabase « celya » est en **plan Pro** (constaté le 08/10) — la
 ligne « plan gratuit » de ce fichier était fausse, corrigée dans Coordonnées.
 
+**Au 18 octobre**, les migrations **`026`** (étape « À rappeler ») et **`027`**
+(débrief implicite, un seul RDV en attente par fiche) sont écrites et
+recettées (027 : 50 OK), **pas appliquées**. Ordre : `026` seule, puis `027`,
+puis Vercel — voir « Débriefer là où on travaille ». Elles ne dépendent pas de
+la `025`.
+
 ### État au 19 septembre 2026
 
 L'équipe est **à cinq comptes actifs**, vérifié en base : Bora (admin, 52
@@ -432,9 +438,9 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password`, `voit_equipe` (l'interrupteur d'équipe, migration `020` — gardé par `guard_profile_privileges`, personne ne se le coche) |
 | `supervision` | l'encadrement (migration `021`) : `(encadrant_id, commercial_id)`, clé primaire composée, une ligne par couple. **À SENS UNIQUE** — l'encadrant VOIT, l'encadré ne gagne rien. RLS : lecture bornée aux lignes qui me désignent, **écriture admin seul**. Ne pas confondre avec `voit_equipe`, qui est réciproque |
 | `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at` |
-| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` — le RÉSULTAT d'appel, colonne de 001 réactivée le 7 août, **bornée le 2 septembre** (migration `019`, contrainte `activities_outcome_connu`) à cinq valeurs : `sans_reponse` · `barrage` · `rappeler` · `interesse` · `refus`. Reste en `text` : on borne, on ne convertit pas |
+| `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` — le RÉSULTAT d'appel, colonne de 001 réactivée le 7 août, **bornée le 2 septembre** (migration `019`, contrainte `activities_outcome_connu`) à cinq valeurs : `sans_reponse` · `barrage` · `rappeler` · `interesse` · `refus`. Reste en `text` : on borne, on ne convertit pas. `meeting_id` (migration `027`) : le RDV dont parle la ligne (débrief, report, clôture automatique) — une ligne rattachée ne déclenche jamais le débrief implicite |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
-| `meetings` | l'AGENDA (migration `017`, 31 août) : rendez-vous avec début ET fin, `kind` (`prospect`/`perso`), `location`, `status` (`prevu`/`confirme`/`honore`/`annule`/`reporte`), `debriefed_at`, `owner_id`. RLS : chacun les siens, l'admin tout. **Toute lecture passe par la vue `meetings_visibles`** (un RDV perso d'un autre membre = « Occupé », sans lieu ni notes — Rémi est indépendant, lire ses RDV privés serait un élément de requalification) |
+| `meetings` | l'AGENDA (migration `017`, 31 août) : rendez-vous avec début ET fin, `kind` (`prospect`/`perso`), `location`, `status` (`prevu`/`confirme`/`honore`/`annule`/`reporte`), `debriefed_at`, `debrief_issue` (migration `027` : `a_rappeler`/`proposition`/`signe`/`pas_interesse` au débrief, `suite_posee` au débrief implicite, `remplace` pour un RDV clos par un plus récent), `owner_id`. RLS : chacun les siens, l'admin tout. **Toute lecture passe par la vue `meetings_visibles`** (un RDV perso d'un autre membre = « Occupé », sans lieu ni notes — Rémi est indépendant, lire ses RDV privés serait un élément de requalification) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
 | `mcp_oauth_clients` / `mcp_oauth_codes` / `mcp_oauth_tokens` | état du serveur OAuth du connecteur MCP (migration `008`) — **RLS fermée sans policy** comme `email_accounts`, seul le `service_role` y accède. Ne pas « corriger » l'absence de policy. |
@@ -479,10 +485,12 @@ l'ancienne app de comptabilité, qui avait déjà un `profiles`. Ce schéma comp
 a été entièrement supprimé le 2 août à la demande de Bora, sauvegarde remise
 au préalable.
 
-### Les six étapes — et la règle qui remplace la mécanique
+### Les sept étapes — et la règle qui remplace la mécanique
 
 Statuts (`prospect_status`) : `a_appeler` → `contacte` → `rendez_vous` →
-`proposition` → `gagne` / `perdu` (migration `007_simplification`, 3 août :
+`a_rappeler` (migration `026`, 18/10 : le RDV a eu lieu, il faut rappeler la
+personne — voir « Débriefer là où on travaille ») → `proposition` → `gagne` /
+`perdu` (migration `007_simplification`, 3 août :
 sans_reponse/contact_etabli/rappel_programme → contacte, rdv → rendez_vous ;
 `activity_type` réduit à note/email/rendez_vous, appel/reunion/whatsapp/
 linkedin migrés vers note ; colonnes `call_attempts`, `last_outcome`,
@@ -687,7 +695,10 @@ faux, signée de qui a posé le RDV). Trigger `meetings_prochaine_action`.
   action.
 - **Un RDV passé non débriefé reste LA prochaine action**, affiché « À
   débriefer », jamais en ambre. C'est le seul garde-fou contre une fiche qui
-  disparaît quand on oublie de débriefer — **ne pas l'affaiblir**.
+  disparaît quand on oublie de débriefer — **ne pas l'affaiblir**. ⚠ **Depuis
+  la `027` (18/10) : TANT QUE RIEN N'EST POSÉ APRÈS LUI** — un échange, un
+  résultat d'appel ou un email le clôt (une relance seule, non). Voir
+  « Débriefer là où on travaille ».
 - **Un RDV clos (honoré / annulé) sans suite laisse la fiche SANS prochaine
   action** : ses relances d'avant ont été clôturées à la pose. Elle sort de
   « À faire » et reste dans la liste (« — »), étape inchangée. « Et ensuite ? »
@@ -854,6 +865,130 @@ automate qui écrit dans la base ressemble à un humain qui a décidé.
   liste dise « relance » pendant que la fiche dit « RDV ». L'edge function
   `crm-mail` est modifiée **dans le dépôt** et doit être **redéployée depuis
   lui** (puis le diff de contrôle), séparément de Vercel.
+
+### Débriefer là où on travaille (migrations `026` et `027`, 18 octobre — ÉCRITES, PAS APPLIQUÉES)
+
+Relevé en base le 18/10 : **15 rendez-vous depuis le début, 0 débriefé**, 14
+passés et toujours `prevu` / `reporte`, 9 fiches avec « RDV passé, à
+débriefer » pour prochaine action (Nathan : 7 fiches sur 8). Le débrief
+n'existait que dans la **dernière** zone du tableau de bord, sous 17 relances en
+retard ; ses boutons ne disaient pas l'issue (« Ça s'est fait / Annulé /
+Reporté ») et ne pouvaient pas faire bouger l'étape. Les commerciaux travaillent
+depuis la FICHE : ils notent, rappellent, posent une relance — et le RDV ne se
+fermait jamais (Carrosserie carsystem : RDV tenu le 29/09, appels les 14 et
+15/10, relance du 22/10 masquée derrière « À débriefer »).
+
+> **LA RÈGLE 022/024 CHANGE (décision de Bora, 18/10) : un rendez-vous passé
+> non débriefé reste la prochaine action — TANT QUE RIEN N'EST POSÉ APRÈS LUI.**
+
+**1. Le débrief explicite — l'ISSUE, en un tap** (`lib/crm/debrief.ts`, la
+règle écrite une fois ; `components/DebriefRdv.tsx`, UN composant, sur la
+carte PROCHAINE ACTION de la fiche ET dans la zone du tableau de bord ; un seul
+chemin serveur, `cloturerRendezVous` ; outil MCP `debriefer_rendez_vous`) :
+
+| Issue | RDV | Étape | Exigé | Autre |
+|---|---|---|---|---|
+| 👍 Intéressé — à rappeler | `honore` / `a_rappeler` | suit les faits → **À rappeler** | la date (Demain / +3 j / +1 sem / date) | relance à cette date |
+| 📄 Proposition envoyée | `honore` / `proposition` | suit les faits → Proposition | — | `proposal_sent_at` |
+| 🏆 Signé | `honore` / `signe` | **Gagné, verrouillé** | — | — |
+| ✕ Pas intéressé | `honore` / `pas_interesse` | **Perdu, verrouillé** | la raison → `lost_reason` | relances ouvertes annulées |
+| N'a pas eu lieu → Reporter | `reporte` | — | la nouvelle date | `deplacerRendezVous` |
+| N'a pas eu lieu → Annulé | `annule` | — | — | — |
+
+Chaque débrief laisse UNE ligne au journal (« Débrief du RDV du 29/09 à 10h :
+signé »), rattachée au RDV (`activities.meeting_id`), portant le résultat
+d'appel quand il y en a un (`interesse` / `refus`, c'est lui que la carte
+affiche). Sur la fiche, le débrief **remplace** les pastilles de résultat
+d'appel tant que le RDV attend son issue (deux rangées côte à côte, c'est une
+de trop). « Gagné » et « Perdu » restent des décisions humaines : c'est
+l'humain qui tape l'issue, comme un clic sur l'étape.
+
+**2. Le débrief IMPLICITE — en SQL, trigger sur `activities` et SEULEMENT sur
+`activities`** (`activities_debrief_implicite`, 027). Une action humaine posée
+sur la fiche APRÈS le début du RDV — échange attesté, résultat d'appel (même
+« pas de réponse »), email envoyé — le clôt en `honore`, avec une ligne au
+journal « RDV du 29/09 marqué comme tenu (suite posée le 15/10) », datée **une
+milliseconde avant** l'action (la « dernière action » de la carte reste celle
+de l'humain). La relance redevient la prochaine action. Un résultat « À
+rappeler » ou « Intéressé » vaut l'issue `a_rappeler` (donc l'étape « À
+rappeler ») ; tout le reste vaut `suite_posee`.
+- **PAS de trigger sur `tasks` — décision de Bora, et c'est le point à ne pas
+  « compléter »** : le suivi CRM automatique re-date des relances tout seul
+  (Alain docteur, 21/09) ; il fermerait des rendez-vous que personne n'a tenus.
+  **Une relance seule (posée, re-datée, cochée) ne ferme rien.**
+- Exclus : brouillon, note de repérage, activité `rendez_vous` (elle
+  accompagne une pose), ligne rattachée à un RDV (`meeting_id` : compte rendu
+  de débrief, report, clôture automatique), fiche gagnée / perdue, RDV à venir,
+  RDV perso, action datée avant le début du RDV.
+- Pourquoi en SQL : tous les écrivains passent par là — l'écran, le connecteur
+  MCP (service_role), l'email envoyé par `crm-mail` (**non modifiée**) et
+  Janet (**`lib/appelsIa` non modifié**).
+- `security definer`, borné aux RDV de la fiche de la ligne : la note de
+  Nathan doit pouvoir clore un RDV que Bora a posé sur SA fiche
+  (`meetings_update` est réservé au propriétaire du RDV) ; l'insertion de la
+  note a déjà passé la RLS de la fiche. Rémi, refusé (42501) à l'insertion, ne
+  ferme rien.
+- `honore` ne vient QUE de là ou du débrief explicite : d'une action humaine
+  posée après le RDV.
+- Limite acceptée (Bora, 18/10) : `crm-mail` n'écrit d'activité que pour un
+  envoi — une réponse reçue ne ferme rien.
+
+**3. UN SEUL RDV en attente par fiche** (trigger `meetings_rdv_remplaces`,
+027). Poser ou reporter un RDV clôt tout AUTRE RDV passé non débriefé de la
+fiche en **`annule`** (`debrief_issue = 'remplace'`), note « RDV du 29/09
+remplacé par le RDV du 06/10 à 14h » — **jamais `honore`** : rien ne dit qu'il
+a eu lieu (décision de Bora). Un RDV qui passe en `honore` clôt de même les
+RDV en attente plus ANCIENS que lui (les doublons de Nice Cars, Garage des
+Cultivateurs, API CAR 3000, Garage Vivier d'oie) ; une annulation ne remplace
+rien. **Un RDV à venir n'est jamais touché** (démo puis installation restent
+légitimes).
+
+**4. La zone « Rendez-vous à débriefer » passe EN TÊTE de « À faire »** (après
+l'agenda du jour, avant les relances en retard), avec les mêmes boutons que la
+fiche. Sa liste vient de `rdvADebriefer` (`lib/crm/debrief.ts`) : jamais un RDV
+perso (le « Rdv Ephec »), jamais une fiche close, **un seul RDV par fiche** (le
+plus récent). « Passé » = **a commencé**, comme en base. L'outil MCP `a_faire`
+renvoie la même liste (`rdv_a_debriefer`).
+
+**5. Le libellé sous l'étape suit le fait du JOUR** (`raisonAffichee`,
+`libelleFaitRdv`) : « un rendez-vous a eu lieu le 29 sept. 2026, en attente de
+son issue », « un rendez-vous a été tenu le … », jamais « est prévu » pour une
+date dépassée. Le motif stocké (`status_auto_reason`) datait du jour où l'étape
+avait bougé.
+
+**Rattrapage : AUCUN.** Les 14 RDV en souffrance ne sont pas clôturés
+rétroactivement : la règle vaut à l'événement. Ils remontent en tête de
+« À faire » ; le premier geste posé sur leur fiche les fermera.
+
+**La nouvelle étape `a_rappeler`** (migration `026`) — « À rappeler »,
+**indigo, flèche de retour** (`retour`), entre `rendez_vous` et `proposition`.
+Ne pas la confondre avec « À appeler » (ardoise, téléphone) : couleur ET
+pictogramme différents, c'est voulu. On y entre par un FAIT (`facts.rappel` :
+un RDV `honore` dont `debrief_issue = 'a_rappeler'`) — l'étape avance, ne
+recule jamais, ne passe jamais par-dessus le verrou ; à la main, le
+glisser-déposer verrouille comme ailleurs. Le modèle ne la propose jamais
+(`analyzeNoteAction` la retire). `readProspectFacts` et la fiche lisent les RDV
+**dans `meetings`** (kind = prospect), parce que `meetings_visibles` ne porte
+pas `debrief_issue` et **ne doit pas bouger** (021) ; la vue ne masque que les
+RDV perso des autres, qu'on écarte de toute façon.
+
+**Ordre de mise en ligne — à respecter** : **`026` d'abord, SEULE** (Postgres
+refuse d'utiliser une valeur d'enum dans la transaction qui l'a créée — d'où
+deux migrations), **puis `027`**, **puis** le déploiement : le code lit
+`meetings.debrief_issue` et écrit `activities.meeting_id`, il casserait la
+fiche contre une base sans la 027. Les deux sont **additives** et
+**indépendantes de la `025`**. Réversible : supprimer les deux triggers (les
+colonnes peuvent rester) ; la valeur d'enum reste, inerte.
+
+**Recette** : `supabase/recettes/027_assembler.sh`, **50 OK, 0 faute** le
+18/10, en transaction annulée contre la production, production revérifiée
+intacte (aucune colonne, aucun trigger, aucune fiche de sonde, 86 fiches). Elle
+couvre les cinq gestes qui ferment (écran ET service_role), les huit qui ne
+ferment rien (**dont la relance seule, posée / re-datée / cochée**), le RDV
+posé par Bora fermé par la note de Collins, Rémi refusé, les doublons, la pose
+et le report qui remplacent, et **rejoue Carrosserie carsystem**. Côté
+TypeScript : **`npm run test:debrief`** (issues, zone, étape « À rappeler »,
+libellés).
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
@@ -1521,6 +1656,9 @@ de doublon au lieu de créer (forçable par `forcer: true`).
 Depuis le 1er septembre, `creer_prospect` accepte `adresse` (adresse ou lien
 Maps, stocké tel quel), `obtenir_prospect` la renvoie, et le `lieu` de
 `poser_rendez_vous` **hérite de l'adresse de la fiche** s'il est laissé vide.
+Depuis le 18 octobre : **`debriefer_rendez_vous`** (l'issue d'un RDV passé —
+même chemin que l'écran, `cloturerRendezVous` ; date exigée pour `a_rappeler`,
+raison pour `pas_interesse`), et `a_faire` renvoie `rdv_a_debriefer` en tête.
 Depuis octobre 2026 (appels IA, **admin seul, vérifié en code**) :
 `ecrire_brief_appel`, `mettre_en_campagne` (simulation d'abord) et
 `etat_appels`, et un `brief` facultatif sur `creer_prospect` et
@@ -2119,7 +2257,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
-`npm run test:appels`, `npm run test:appels-live`,
+`npm run test:debrief`, `npm run test:appels`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
 sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,
@@ -2511,6 +2649,17 @@ module `"use client"` — server actions exceptées. Il descend dans les ternair
 qui crie au loup finit désactivé). Il se teste lui-même sur le code exact de
 fc4cfbc. Remis devant la page d'avant, il désigne `page.tsx:675`.
 
+**`drop trigger` bloque l'outil `execute_sql` du MCP Supabase (18 octobre 2026).**
+La recette de la `027` dépassait le délai (60 s) sans erreur ni requête en
+cours côté base : l'outil prend `drop trigger if exists` pour une écriture
+destructive et **attend une confirmation qui ne s'affiche jamais**. Trouvé par
+jalons (`drop constraint if exists` et `revoke` passent). L'assembleur de la
+027 retire donc ces lignes (les triggers n'existent pas avant la migration, la
+baseline le vérifie). Et pour ne JAMAIS bloquer la production pendant une
+recette : `set local lock_timeout = '3s'` en tête, et **aucun DDL dans le corps**
+(les doublons de RDV se construisent en insérant « annulé » puis en ranimant,
+pas en coupant un trigger, qui prendrait un verrou sur `meetings`).
+
 **Connecteur MCP Vercel.** Il **liste** bien le projet `celya-accounting-app`
 (`prj_kK7E10MBZe04YOAh89CL3rBwK6vQ`, équipe `bora`) — corrigé le 21/09, la
 version précédente de ce fichier disait qu'il ne le voyait pas. Mais son jeton
@@ -2824,6 +2973,13 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
       worker (`appels_ia.age_worker_s`) et la durée facturée sont notés.
    7. Seulement ensuite : couper le mode test, allumer l'interrupteur, et
       monter en volume progressivement (plafonds bas la première semaine).
+8ter. **Appliquer les migrations `026` puis `027`** (débrief des RDV, étape
+   « À rappeler »), dans cet ordre et SÉPARÉMENT (la `026` seule : valeur
+   d'enum), **avant** le déploiement du code du même lot — il lit
+   `meetings.debrief_issue`. Vérifier après coup : `prospect_status` porte
+   `a_rappeler` entre `rendez_vous` et `proposition` ; les triggers
+   `activities_debrief_implicite` et `meetings_rdv_remplaces` existent ; aucun
+   RDV n'a changé (aucun rattrapage). Indépendantes de la `025`.
 9. Activer la protection contre les mots de passe compromis (tableau de bord
    Supabase → Authentication).
 (La région des fonctions est réglée et vérifiée — voir « Vitesse et fluidité ».)

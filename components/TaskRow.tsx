@@ -129,7 +129,7 @@ export function TaskRow({
           ? "block"
           : compact
             ? "grid grid-cols-[auto_1fr] items-start"
-            : "flex flex-wrap items-start sm:flex-nowrap"
+            : "flex flex-wrap items-start lg:flex-nowrap"
       }`}
     >
       {!lecture && (
@@ -272,9 +272,13 @@ export function TaskRow({
       </div>
 
       {!lecture && !done && (
+        // Sur un écran étroit, la date et les raccourcis passent SOUS le
+        // titre (18/10, 390 px) : à côté, ils l'écrasaient en une colonne de
+        // trois mots et faisaient défiler la ligne de côté. Alignés sur le
+        // titre (pl-8, la largeur de la case à cocher).
         <div
           className={`flex flex-wrap items-center gap-1 ${
-            compact ? "col-start-2 mt-2" : "shrink-0"
+            compact ? "col-start-2 mt-2" : "w-full pl-8 lg:w-auto lg:shrink-0 lg:pl-0"
           }`}
         >
           {/* « À rappeler » vient d'être enregistré : il ne manque plus que le

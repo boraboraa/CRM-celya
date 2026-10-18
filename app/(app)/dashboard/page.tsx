@@ -12,7 +12,6 @@ import {
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
-import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { DebriefList, type DebriefMeeting } from "@/components/DebriefList";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
@@ -691,8 +690,6 @@ export default async function TodoPage({
           </div>
         )}
 
-        {/* Nouvelle relance libre (avec ou sans prospect) */}
-        <NouvelleRelanceLibre assigneeId={session?.userId ?? "none"} />
 
         {/* ---------- 3. Réponses reçues — agir maintenant ---------- */}
         <section className="mt-8">

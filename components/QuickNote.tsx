@@ -568,7 +568,7 @@ export function QuickNote({
           donc repliés : on les déclare, on ne les devine jamais. */}
       <details className="group rounded-xl bg-white/[0.02] px-3.5 py-3 ring-1 ring-white/[0.06]">
         <summary className="btn-link list-none text-xs cursor-pointer">
-          <Icone nom="chevron" className="transition-transform group-open:rotate-180" />
+          <Icone nom="chevron" className="h-3 w-3 transition-transform group-open:rotate-180" />
           Plus d&apos;options
         </summary>
         <div className="mt-3 space-y-2">

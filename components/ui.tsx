@@ -245,6 +245,10 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
 /**
  * Le pictogramme d'un nom. Décoratif : le libellé à côté porte le sens,
  * l'icône est `aria-hidden`.
+ *
+ * Une `className` sans hauteur garde la taille par défaut : passer seulement
+ * « transition group-open:rotate-180 » laissait le SVG prendre toute la
+ * largeur — l'icône démesurée de « Plus d'options » sur mobile (18/10).
  */
 export function Icone({
   nom,
@@ -262,7 +266,7 @@ export function Icone({
       strokeWidth={1.6}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`shrink-0 ${className}`}
+      className={`shrink-0 ${/(^|\s)h-/.test(className) ? "" : "h-3.5 w-3.5 "}${className}`}
     >
       {TRACES[nom]}
     </svg>

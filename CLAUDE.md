@@ -1139,6 +1139,17 @@ l'IA ne marche pas, ancre `#assistant-ia`) · `/acces-refuse`. `/taches` redirig
   route est refusé en base. La gestion des rôles reste ici, et nulle part
   ailleurs.
 
+**Mobile 390 px (18 octobre, mesuré au banc Playwright avant / après).** Avant :
+la barre d'onglets défilait et cachait « Équipe », « Appels IA » et « Mon
+compte » ; le sélecteur de périmètre alignait neuf noms et faisait défiler
+toute la page de côté ; l'icône de « Plus d'options » mesurait **84 × 84 px**.
+Après : une colonne égale par onglet (icône + libellé court, « Compte »), le
+sélecteur compact, l'icône à 12 × 12, et sur « À faire » la date et les
+raccourcis passent SOUS le titre de la relance jusqu'à `lg`. **Aucune ligne plus
+large que l'écran, aucun défilement horizontal** aux deux tailles. La cause de
+l'icône : passer à `Icone` une `className` sans hauteur remplaçait sa taille par
+défaut — `Icone` garde désormais `h-3.5 w-3.5` tant qu'on ne donne pas de `h-`.
+
 **Ouvrir une fiche plus vite (18 octobre).** Trois chemins, une seule règle de
 recherche (`lib/crm/recherche.ts`, `npm run test:recherche`) :
 - **Recherche globale** sur tous les écrans — ⌘K / Ctrl+K, « / », ou le bouton
@@ -2230,13 +2241,10 @@ supprimer une relance (`TaskList`), planifier une relance sur une fiche
 (`ActionState`) au lieu de la garder pour elles — sans quoi il n'y a rien à
 annuler.
 
-Deux endroits volontairement NON optimistes, et c'est un choix :
-- « ✨ Réévaluer » la confiance — le niveau à afficher est justement ce qu'on
-  ignore avant la réponse ;
-- « Nouvelle relance » du tableau À faire (`NouvelleRelanceLibre`) — cet écran
-  ne montre que ce qui échoit aujourd'hui ; une relance posée au 14 octobre
-  n'y a pas sa place, l'y faire apparaître une seconde serait un mensonge.
-  Retour immédiat quand même : bouton en attente, champ vidé, confirmation.
+Un endroit volontairement NON optimiste, et c'est un choix : « ✨ Réévaluer »
+la confiance — le niveau à afficher est justement ce qu'on ignore avant la
+réponse. (La « Nouvelle relance » libre du tableau À faire l'était aussi ; elle
+est **supprimée** depuis le 18/10, voir la migration `028`.)
 
 ### Cache du routeur et région
 
@@ -2514,7 +2522,10 @@ valait `is_member()` et rien d'autre : mesuré, **Rémi pouvait poser une relanc
 sur une fiche de Bora qu'il ne voit pas**, et le trigger `sync_next_action`
 déplaçait le « À faire » de Bora. Le trou existait depuis le début et ne se
 voyait pas, faute d'un écran qui y mène. Corrigé en `020`, en gardant la relance
-LIBRE (`prospect_id is null`, le pense-bête du tableau de bord). **Un `USING`
+LIBRE (`prospect_id is null`, le pense-bête du tableau de bord) — **retirée le
+18/10** : `NouvelleRelanceLibre` supprimé, `createTaskAction` exige une fiche, et
+la contrainte `tasks_ouverte_sur_fiche` (migration `028`, NOT VALID) refuse
+toute relance OUVERTE sans fiche, service_role compris. **Un `USING`
 serré avec un `WITH CHECK` large ne protège que la modification, jamais
 l'insertion** — et les deux se relisent séparément.
 
@@ -3007,6 +3018,14 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
       worker (`appels_ia.age_worker_s`) et la durée facturée sont notés.
    7. Seulement ensuite : couper le mode test, allumer l'interrupteur, et
       monter en volume progressivement (plafonds bas la première semaine).
+8quater. **Les deux relances sans fiche** (Nathan, en retard depuis le 27/09 :
+   « Relancer vivier d'oie pour le rdv lundi à 10h » et « Garage vivier d'oie
+   lundi à 10h ») : Bora les traite lui-même — **les rattacher à la fiche Garage
+   Vivier d'oie, les cocher ou les supprimer** — idéalement **avant** la `028`.
+   Après elle, tant qu'elles sont ouvertes et sans fiche, les RE-DATER est
+   refusé (23514) ; les rattacher, cocher ou supprimer reste possible (recette
+   `supabase/recettes/028.sql`, **7 OK** le 18/10). La `028` est indépendante
+   des autres.
 8ter. **Appliquer les migrations `026` puis `027`** (débrief des RDV, étape
    « À rappeler »), dans cet ordre et SÉPARÉMENT (la `026` seule : valeur
    d'enum), **avant** le déploiement du code du même lot — il lit

@@ -608,6 +608,13 @@ export async function deleteEmailAction(fd: FormData): Promise<ActionState> {
 export async function createTaskAction(fd: FormData): Promise<ActionState> {
   const { supabase, userId } = await currentUserId();
 
+  // Une relance se pose sur une FICHE (18/10, migration 028) : le pense-bête
+  // libre fabriquait des relances orphelines, sans lien ni « Résultat ». La
+  // base le refuse aussi (23514) ; on le dit ici en clair, avant elle.
+  if (!str(fd, "prospect_id")) {
+    return { error: "Une relance se pose sur une fiche prospect — ouvrez la fiche pour la planifier." };
+  }
+
   const due =
     dateInputToISO(str(fd, "due_local")) ??
     localInputToISO(str(fd, "due_at")) ??

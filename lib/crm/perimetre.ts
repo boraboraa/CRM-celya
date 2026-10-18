@@ -9,7 +9,12 @@
  *
  * Ce module pose donc un filtre PAR-DESSUS la sécurité :
  *
- *   · défaut « moi » POUR TOUT LE MONDE, admin compris ;
+ *   · défaut « Toute l'équipe » pour l'ADMIN, « moi » pour tous les autres
+ *     (décision de Bora, 18/10 : l'admin arrivait sur « moi », non mémorisé,
+ *     et ne trouvait pas les fiches de ses commerciaux) ;
+ *   · le DERNIER choix est mémorisé (cookie `celya_perimetre`, posé par le
+ *     middleware) pour tous ceux qui peuvent élargir — il repasse par la même
+ *     validation que l'URL, il n'ouvre donc rien de plus ;
  *   · l'admin peut élargir (?perimetre=equipe) ou viser un membre
  *     (?perimetre=<uuid>) ;
  *   · depuis l'interrupteur d'équipe (migration 020), un PORTEUR en a le droit
@@ -62,6 +67,21 @@ export type PerimetreViewer = {
   partageIds?: readonly string[];
 };
 
+/**
+ * Le cookie qui mémorise le dernier périmètre choisi. Un simple RAPPEL : sa
+ * valeur repasse par `lirePerimetre`, exactement comme `?perimetre=` — un
+ * cookie trafiqué ne vaut pas plus qu'une URL trafiquée.
+ */
+export const PERIMETRE_COOKIE = "celya_perimetre";
+
+/** Les écrans qui portent le sélecteur — et donc ceux où le choix se mémorise. */
+export const PAGES_PERIMETRE = ["/dashboard", "/prospects", "/agenda"] as const;
+
+/** Le périmètre quand rien n'est demandé ni mémorisé. */
+export function perimetreParDefaut(viewer: PerimetreViewer): "moi" | "equipe" {
+  return viewer.isAdmin ? "equipe" : "moi";
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -82,7 +102,8 @@ export function peutElargir(viewer: PerimetreViewer): boolean {
 }
 
 /**
- * Lit `?perimetre=` — « moi » (défaut), « equipe », ou l'uuid d'un membre.
+ * Lit `?perimetre=` — « moi », « equipe », ou l'uuid d'un membre. À défaut,
+ * le choix MÉMORISÉ (cookie) ; à défaut encore, `perimetreParDefaut`.
  *
  * Un commercial sans interrupteur ni encadrement obtient TOUJOURS « moi », quoi
  * qu'il y ait dans l'URL. Un PORTEUR ou un ENCADRANT peut demander « equipe »,
@@ -95,14 +116,16 @@ export function peutElargir(viewer: PerimetreViewer): boolean {
  */
 export function lirePerimetre(
   searchParams: { perimetre?: string | string[] },
-  viewer: PerimetreViewer
+  viewer: PerimetreViewer,
+  memorise?: string | null
 ): Perimetre {
   if (!peutElargir(viewer)) return { mode: "moi" };
 
-  const raw = Array.isArray(searchParams.perimetre)
+  const demande = Array.isArray(searchParams.perimetre)
     ? searchParams.perimetre[0]
     : searchParams.perimetre;
-  if (!raw || raw === "moi") return { mode: "moi" };
+  const raw = demande || memorise || perimetreParDefaut(viewer);
+  if (raw === "moi") return { mode: "moi" };
   if (raw === "equipe") return { mode: "equipe" };
   if (!UUID_RE.test(raw)) return { mode: "moi" };
   if (viewer.isAdmin) return { mode: "membre", id: raw };

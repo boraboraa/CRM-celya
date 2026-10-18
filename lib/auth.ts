@@ -1,8 +1,9 @@
 import { cache } from "react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { lirePorteurs, lireEncadres } from "@/lib/crm/access";
-import type { PerimetreViewer } from "@/lib/crm/perimetre";
+import { PERIMETRE_COOKIE, type PerimetreViewer } from "@/lib/crm/perimetre";
 import type { Profile } from "@/lib/types";
 
 export type Session = {
@@ -96,6 +97,14 @@ export const getPerimetreViewer = cache(async (): Promise<PerimetreViewer> => {
     ],
   };
 });
+
+/**
+ * Le dernier périmètre choisi, mémorisé par le middleware — ou null. Un simple
+ * rappel, à passer à `lirePerimetre`, qui le valide comme une URL.
+ */
+export async function perimetreMemorise(): Promise<string | null> {
+  return (await cookies()).get(PERIMETRE_COOKIE)?.value ?? null;
+}
 
 export async function requireMember(): Promise<Session & { me: Profile }> {
   const session = await getSession();

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession, getPerimetreViewer } from "@/lib/auth";
+import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
 import {
   PageHeader,
   StatusChip,
@@ -13,6 +13,8 @@ import {
   EtiquetteJanet,
 } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
+import { FiltresProspects } from "@/components/FiltresProspects";
+import { filtreRecherche } from "@/lib/crm/recherche";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import {
   STATUS_ORDER,
@@ -71,12 +73,16 @@ export default async function ProspectsPage({
   // « Emails envoyés » : ne garder que les fiches à qui un mail est parti,
   // triées par date du dernier envoi — pour les retrouver d'un coup.
   const filtreEmails = filtre === "emails";
+  // « À débriefer » (18/10) : les fiches dont la prochaine action est un
+  // rendez-vous déjà commencé — ce qui attend une issue. Fiches closes
+  // exclues (023 : elles ne réclament jamais rien).
+  const filtreDebrief = filtre === "a_debriefer";
 
   // `getPerimetreViewer` porte aussi l'interrupteur « travaille en équipe »
   // et la liste des porteurs (migration 020) — `cache()`é, donc une seule
   // requête par rendu, et zéro pour un admin.
   const viewer: PerimetreViewer = await getPerimetreViewer();
-  const perimetre = lirePerimetre(params, viewer);
+  const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
   let query = filtrerProspects(
     supabase
@@ -88,11 +94,17 @@ export default async function ProspectsPage({
     viewer
   );
 
-  if (q) {
-    const like = `%${q}%`;
-    query = query.or(
-      `company_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like},city.ilike.${like}`
-    );
+  // La recherche — la même règle que la recherche globale de l'en-tête
+  // (lib/crm/recherche.ts) : société, contact, email, ville, et le
+  // téléphone chiffre à chiffre. Saisie nettoyée : une virgule cassait le
+  // filtre or() et renvoyait une erreur.
+  const recherche = filtreRecherche(q);
+  if (recherche) query = query.or(recherche);
+  if (filtreDebrief) {
+    query = query
+      .eq("next_action_kind", "rendez_vous")
+      .lte("next_action_at", new Date().toISOString())
+      .not("status", "in", "(gagne,perdu)");
   }
   // Filtre d'étape poussé en SQL (sinon il s'appliquerait après .limit()
   // et fausserait résultats et compteur au-delà de 500 fiches).
@@ -249,15 +261,23 @@ export default async function ProspectsPage({
    *  périmètre. */
   const makeHref = (over: {
     vue?: "liste" | "colonnes";
-    filtreEmails?: boolean;
+    filtre?: "emails" | "a_debriefer" | null;
   }) => {
     const sp = new URLSearchParams();
     if (q) sp.set("q", q);
     if (statut && statut !== "tous") sp.set("statut", statut);
     if (tri) sp.set("tri", tri);
     if ((over.vue ?? view) === "colonnes") sp.set("vue", "colonnes");
-    if (over.filtreEmails ?? filtreEmails) sp.set("filtre", "emails");
-    if (params.perimetre && params.perimetre !== "moi") {
+    const f =
+      over.filtre !== undefined
+        ? over.filtre
+        : filtreEmails
+          ? "emails"
+          : filtreDebrief
+            ? "a_debriefer"
+            : null;
+    if (f) sp.set("filtre", f);
+    if (params.perimetre) {
       sp.set("perimetre", params.perimetre);
     }
     const qs = sp.toString();
@@ -320,7 +340,7 @@ export default async function ProspectsPage({
         {/* Emails envoyés : retrouver d'un coup les fiches déjà démarchées
             par mail, avec la date du dernier envoi. */}
         <Link
-          href={makeHref({ filtreEmails: !filtreEmails })}
+          href={makeHref({ filtre: filtreEmails ? null : "emails" })}
           aria-pressed={filtreEmails}
           title="Ne montrer que les prospects à qui un mail a été envoyé"
           className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
@@ -333,54 +353,30 @@ export default async function ProspectsPage({
           Emails envoyés
         </Link>
 
-        <form className="flex flex-1 flex-wrap items-end gap-3">
-          {view === "colonnes" && <input type="hidden" name="vue" value="colonnes" />}
-          {filtreEmails && <input type="hidden" name="filtre" value="emails" />}
-          {params.perimetre && params.perimetre !== "moi" && (
-            <input type="hidden" name="perimetre" value={params.perimetre} />
-          )}
-          <div className="min-w-[200px] flex-1">
-            <label className="label" htmlFor="q">
-              Rechercher
-            </label>
-            <input
-              id="q"
-              name="q"
-              defaultValue={q ?? ""}
-              className="input"
-              placeholder="Nom, contact, email, ville…"
-            />
-          </div>
+        {/* À débriefer : les fiches dont un rendez-vous attend son issue —
+            le même ensemble que la zone en tête de « À faire ». */}
+        <Link
+          href={makeHref({ filtre: filtreDebrief ? null : "a_debriefer" })}
+          aria-pressed={filtreDebrief}
+          title="Ne montrer que les fiches dont un rendez-vous passé attend son débrief"
+          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
+            filtreDebrief
+              ? "bg-amber-500/15 text-amber-200 ring-amber-400/40"
+              : "bg-white/[0.03] text-slate-400 ring-white/10 hover:text-slate-200"
+          }`}
+        >
+          <Icone nom="calendrier" className="h-3.5 w-3.5" />
+          À débriefer
+        </Link>
 
-          <div>
-            <label className="label" htmlFor="statut">
-              Étape
-            </label>
-            <select id="statut" name="statut" defaultValue={statut ?? "tous"} className="input">
-              <option value="tous">Toutes</option>
-              {STATUS_ORDER.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABEL[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {view === "liste" && (
-            <div>
-              <label className="label" htmlFor="tri">
-                Trier par
-              </label>
-              <select id="tri" name="tri" defaultValue={sort} className="input">
-                <option value="recent">Activité récente</option>
-                <option value="relance">Prochaine action</option>
-                <option value="nom">Nom</option>
-              </select>
-            </div>
-          )}
-
-          <button className="btn-ghost">Filtrer</button>
-        </form>
+        {/* Recherche, étape, tri : à la frappe, sans bouton « Filtrer ». */}
+        <FiltresProspects
+          q={q ?? ""}
+          statut={statut ?? "tous"}
+          tri={tri ?? ""}
+          etapes={STATUS_ORDER.map((s) => [s, STATUS_LABEL[s]] as [string, string])}
+          avecTri={view === "liste"}
+        />
       </div>
 
       {error && (
@@ -394,14 +390,18 @@ export default async function ProspectsPage({
           title={
             filtreEmails
               ? "Aucun email envoyé"
-              : q || statut
+              : filtreDebrief
+                ? "Aucun rendez-vous à débriefer"
+                : q || statut
                 ? "Aucun résultat"
                 : "Aucun prospect pour l'instant"
           }
           hint={
             filtreEmails
               ? "Aucun mail n'est encore parti vers ces prospects — le filtre ne montre que les fiches déjà démarchées par email."
-              : q || statut
+              : filtreDebrief
+                ? "Aucun rendez-vous passé n'attend son issue dans ce périmètre."
+                : q || statut
                 ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
                 : "Créez votre première fiche, ou importez une liste depuis un fichier CSV."
           }
@@ -434,7 +434,13 @@ export default async function ProspectsPage({
             <tbody className="divide-y divide-white/[0.04]">
               {prospects.map((p) => {
                 return (
-                  <tr key={p.id} className="transition duration-200 hover:bg-white/[0.04]">
+                  // TOUTE la ligne ouvre la fiche (18/10), pas seulement le nom :
+                  // le lien du nom s'étend sur la ligne (`before:inset-0`), et
+                  // le seul autre geste — « ✉ » — passe au-dessus (z-10).
+                  <tr
+                    key={p.id}
+                    className="relative cursor-pointer transition duration-200 hover:bg-white/[0.04]"
+                  >
                     <td className="td">
                       {/* Pas de préchargement : la liste peut afficher 500
                           lignes, et chacune déclenchait le rendu serveur
@@ -442,7 +448,7 @@ export default async function ProspectsPage({
                       <Link
                         href={`/prospects/${p.id}`}
                         prefetch={false}
-                        className="flex items-center gap-3"
+                        className="flex items-center gap-3 before:absolute before:inset-0 before:content-['']"
                       >
                         <Avatar name={p.contact_name ?? p.company_name} />
                         <span className="min-w-0">
@@ -514,7 +520,7 @@ export default async function ProspectsPage({
                           prefetch={false}
                           title={`Écrire à ${p.email}`}
                           aria-label={`Écrire à ${p.company_name}`}
-                          className="inline-flex rounded-lg px-2 py-1 text-slate-500 transition hover:bg-white/[0.06] hover:text-celya-blue"
+                          className="relative z-10 inline-flex rounded-lg px-2 py-1 text-slate-500 transition hover:bg-white/[0.06] hover:text-celya-blue"
                         >
                           <Icone nom="enveloppe" className="h-4 w-4" />
                         </Link>

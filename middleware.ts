@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
+import { PAGES_PERIMETRE, PERIMETRE_COOKIE } from "@/lib/crm/perimetre";
 
 // /login, /auth : parcours d'authentification de l'app.
 // /mcp, /sse, /message : serveur MCP (auth par jeton Bearer, pas par cookie).
@@ -71,6 +72,28 @@ export async function middleware(request: NextRequest) {
     url.pathname = "/dashboard";
     url.search = "";
     return NextResponse.redirect(url);
+  }
+
+  // Le DERNIER périmètre choisi (« Moi », « Toute l'équipe », un membre) se
+  // mémorise ici — un composant serveur ne peut pas poser de cookie. Ce n'est
+  // qu'un rappel : la valeur repasse par `lirePerimetre`, qui la valide comme
+  // une URL (lib/crm/perimetre.ts). Longueur bornée : rien d'autre qu'un mot
+  // ou un uuid n'a à y entrer.
+  const choisi = request.nextUrl.searchParams.get("perimetre");
+  if (
+    user &&
+    choisi &&
+    choisi.length <= 40 &&
+    PAGES_PERIMETRE.some((p) => path === p) &&
+    request.cookies.get(PERIMETRE_COOKIE)?.value !== choisi
+  ) {
+    response.cookies.set(PERIMETRE_COOKIE, choisi, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: request.nextUrl.protocol === "https:",
+      maxAge: 60 * 60 * 24 * 365,
+    });
   }
 
   return response;

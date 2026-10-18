@@ -11,6 +11,7 @@ import { INTENT_LABEL, fmtDate, relative } from "@/lib/constants";
 import { composerHref } from "@/lib/crm/composer";
 import { Icone } from "@/components/ui";
 import type { EmailIntent } from "@/lib/types";
+import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
 
 export type ReplyCardEmail = {
   id: string;
@@ -50,7 +51,7 @@ export function ReplyCard({ email }: { email: ReplyCardEmail }) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {email.prospects ? (
           <Link
-            href={`/prospects/${email.prospects.id}`}
+            href={lienDepuisAFaire(email.prospects.id)}
               prefetch={false}
             className="font-medium text-slate-100 hover:text-celya-blue"
           >

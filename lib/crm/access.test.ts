@@ -332,7 +332,25 @@ const PC = { userId: COLLINS, isAdmin: false, voitEquipe: true, partageIds: [COL
 const PR = { userId: REMI, isAdmin: false };
 const PB = { userId: BORA, isAdmin: true };
 
-verifie("défaut « moi » pour l'admin aussi", lirePerimetre({}, PB), { mode: "moi" });
+// Depuis le 18/10 : l'admin arrive sur « Toute l'équipe », les autres sur « moi ».
+verifie("défaut « Toute l'équipe » pour l'admin (18/10)", lirePerimetre({}, PB), { mode: "equipe" });
+verifie("défaut « moi » pour un porteur", lirePerimetre({}, PC), { mode: "moi" });
+verifie("défaut « moi » pour un commercial sans partage", lirePerimetre({}, PR), { mode: "moi" });
+
+// Le choix MÉMORISÉ (cookie) : un rappel, jamais une clé.
+verifie("mémorisé : l'admin revient sur « moi » s'il l'avait choisi",
+  lirePerimetre({}, PB, "moi"), { mode: "moi" });
+verifie("mémorisé : le porteur revient sur « equipe »",
+  lirePerimetre({}, PC, "equipe"), { mode: "equipe" });
+verifie("mémorisé : le porteur revient sur son co-porteur",
+  lirePerimetre({}, PC, NATHAN), { mode: "membre", id: NATHAN });
+verifie("l'URL passe devant le cookie",
+  lirePerimetre({ perimetre: "moi" }, PC, "equipe"), { mode: "moi" });
+verifie("cookie trafiqué (uuid de Rémi) chez un porteur : « moi », comme l'URL",
+  lirePerimetre({}, PC, REMI), { mode: "moi" });
+verifie("cookie « equipe » chez un commercial sans partage : ignoré",
+  lirePerimetre({}, PR, "equipe"), { mode: "moi" });
+verifie("cookie illisible : « moi »", lirePerimetre({}, PC, "n'importe quoi"), { mode: "moi" });
 verifie("porteur : « equipe » accepté", lirePerimetre({ perimetre: "equipe" }, PC), {
   mode: "equipe",
 });

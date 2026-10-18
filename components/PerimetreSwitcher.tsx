@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Perimetre } from "@/lib/crm/perimetre";
+import { ChoixMembrePerimetre } from "@/components/ChoixMembrePerimetre";
 
 /**
  * Le sélecteur de périmètre — « Moi », les autres, « Toute l'équipe ».
@@ -24,7 +25,13 @@ import type { Perimetre } from "@/lib/crm/perimetre";
  *
  * Navigation par lien : `?perimetre=` est réécrit en CONSERVANT les autres
  * paramètres de la page (q, statut, tri, vue, filtre…) — même mécanique que le
- * `makeHref` de /prospects.
+ * `makeHref` de /prospects. Depuis le 18/10, « moi » s'écrit lui aussi dans
+ * l'URL : le dernier choix est mémorisé (cookie), et l'admin arrive sur
+ * « Toute l'équipe » par défaut — l'absence de paramètre ne veut plus dire
+ * « moi ».
+ *
+ * COMPACT (18/10) : « Moi » · « Toute l'équipe » en boutons, les personnes
+ * dans un menu déroulant — neuf noms en ligne débordaient de l'écran.
  *
  * Composant serveur, sans état : le périmètre EST l'URL.
  */
@@ -60,8 +67,7 @@ export function PerimetreSwitcher({
       if (k === "perimetre" || v === undefined) continue;
       params.set(k, Array.isArray(v) ? v[0] : v);
     }
-    // « moi » est le défaut : pas de paramètre, l'URL reste propre.
-    if (valeur !== "moi") params.set("perimetre", valeur);
+    params.set("perimetre", valeur);
     const qs = params.toString();
     return `${basePath}${qs ? `?${qs}` : ""}`;
   };
@@ -73,7 +79,7 @@ export function PerimetreSwitcher({
   // c'est le sélecteur mensonger qu'on refuse à un simple commercial.
   if (role !== "admin" && autres.length === 0) return null;
 
-  const options: { cle: string; label: string; actif: boolean }[] = [
+  const boutons: { cle: string; label: string; actif: boolean }[] = [
     {
       cle: "moi",
       label: "Moi",
@@ -81,17 +87,19 @@ export function PerimetreSwitcher({
         perimetre.mode === "moi" ||
         (perimetre.mode === "membre" && perimetre.id === viewerId),
     },
-    ...autres.map((m) => ({
-      cle: m.id,
-      label: m.full_name?.split(" ")[0] ?? m.email,
-      actif: perimetre.mode === "membre" && perimetre.id === m.id,
-    })),
     { cle: "equipe", label: "Toute l'équipe", actif: perimetre.mode === "equipe" },
   ];
+  // Le nom complet dans le menu : deux « Collins » se distinguent ; le
+  // prénom seul suffisait quand ils étaient trois.
+  const personnes = autres.map((m) => ({
+    href: href(m.id),
+    label: m.full_name?.trim() || m.email,
+    actif: perimetre.mode === "membre" && perimetre.id === m.id,
+  }));
 
   return (
-    <div className="flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
-      {options.map((o) => (
+    <div className="flex flex-wrap items-center gap-0.5 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
+      {boutons.map((o) => (
         <Link
           key={o.cle}
           href={href(o.cle)}
@@ -105,6 +113,7 @@ export function PerimetreSwitcher({
           {o.label}
         </Link>
       ))}
+      {personnes.length > 0 && <ChoixMembrePerimetre options={personnes} />}
     </div>
   );
 }

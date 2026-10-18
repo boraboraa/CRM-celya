@@ -6,6 +6,7 @@ import { fmtDateTime, relative } from "@/lib/constants";
 import { Icone } from "@/components/ui";
 import { DebriefRdv } from "@/components/DebriefRdv";
 import { PLUS_RIEN } from "@/lib/crm/prochaineAction";
+import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
 
 export type DebriefMeeting = {
   id: string;
@@ -80,7 +81,7 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
                   <p className="truncate text-sm font-medium text-slate-100">
                     {m.prospect ? (
                       <Link
-                        href={`/prospects/${m.prospect.id}`}
+                        href={lienDepuisAFaire(m.prospect.id)}
                         prefetch={false}
                         className="underline-offset-2 hover:text-celya-blue hover:underline"
                       >

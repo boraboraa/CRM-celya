@@ -406,7 +406,15 @@ filtre : en admin, Bora recevait l'union des portefeuilles. D'où
 `lib/crm/perimetre.ts` — `lirePerimetre` (`?perimetre=moi | equipe | <uuid>`),
 `filtrerTaches` (`assignee_id`), `filtrerProspects` (`owner_id`),
 `filtrerJointProspects`, `restreindreAuxProspects` (les vues sans `owner_id`).
-**Défaut « moi » pour tout le monde, admin compris**. Depuis la migration `020`,
+**Défaut « Toute l'équipe » pour l'admin, « moi » pour tous les autres**
+(18/10 — l'admin arrivait sur « moi » et ne trouvait pas les fiches de ses
+commerciaux ; c'était « moi » pour tout le monde jusque-là), et le **dernier
+choix est mémorisé** : le middleware pose le cookie `celya_perimetre` quand
+`?perimetre=` arrive sur `/dashboard`, `/prospects` ou `/agenda`, et
+`lirePerimetre(params, viewer, memorise)` le relit — **en le validant comme une
+URL** : un cookie trafiqué ne vaut pas plus qu'une URL trafiquée. Le sélecteur
+est **compact** : « Moi » · « Toute l'équipe » en boutons, les personnes dans
+un menu déroulant (`ChoixMembrePerimetre`) — neuf noms en ligne débordaient. Depuis la migration `020`,
 un **porteur** de l'interrupteur d'équipe peut élargir lui aussi, et depuis la
 `021` un **encadrant** — chacun borné à son propre partage (`partageIds` en est
 l'UNION : moi, mes co-porteurs, mes encadrés). Viser l'uuid de Bora ou de Rémi
@@ -1130,6 +1138,31 @@ l'IA ne marche pas, ancre `#assistant-ia`) · `/acces-refuse`. `/taches` redirig
   `42501` hors admin** : masquer le lien ne suffirait pas, un appel direct à la
   route est refusé en base. La gestion des rôles reste ici, et nulle part
   ailleurs.
+
+**Ouvrir une fiche plus vite (18 octobre).** Trois chemins, une seule règle de
+recherche (`lib/crm/recherche.ts`, `npm run test:recherche`) :
+- **Recherche globale** sur tous les écrans — ⌘K / Ctrl+K, « / », ou le bouton
+  de la barre latérale (loupe sur mobile) : société, contact, email, ville et
+  **téléphone chiffre à chiffre** (« 081 22 33 44 » retrouve
+  « +32 81 22 33 44 »), Entrée ouvre la fiche. UNE seule fenêtre
+  (`RechercheGlobale`, dans le layout) ; les boutons l'ouvrent par événement.
+  Elle part sur le client de l'utilisateur : **la RLS borne**, chacun ne
+  retrouve que ce qu'il voit — recette `supabase/recettes/recherche.sql`,
+  **11 OK** le 18/10 (commercial seul, porteur, encadrant, encadré, admin).
+  La saisie est nettoyée : une virgule cassait le filtre `or()` de PostgREST
+  (`PGRST100`) au lieu de rendre des résultats.
+- **/prospects** : recherche, étape et tri **à la frappe** (`FiltresProspects`,
+  plus de bouton « Filtrer ») ; filtre **« À débriefer »** (`?filtre=a_debriefer` :
+  prochaine action = RDV commencé, fiche ouverte) ; **toute la ligne** ouvre la
+  fiche (lien étiré, le « ✉ » passe au-dessus). L'outil MCP `lister_prospects`
+  cherche avec la même règle.
+- **« Fiche suivante »** sur une fiche ouverte depuis « À faire »
+  (`?depuis=a-faire`) : le tableau de bord mémorise l'ordre de ses lignes
+  (sessionStorage, `lib/crm/ficheSuivante.ts`) — débrief, à appeler, en
+  attente, réponses — et la fiche ouvre la suivante sans repasser par lui ; à
+  la dernière, elle le dit.
+- **/equipe** : les cartes d'abord, « Créer un accès » replié ; chaque carte
+  porte « Voir ses prospects » et « Ses RDV à débriefer ».
 
 **La fiche se lit d'abord — elle ne s'ouvre pas sur des formulaires** (refonte
 du 4 août). De haut en bas :
@@ -2257,7 +2290,8 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
-`npm run test:debrief`, `npm run test:appels`, `npm run test:appels-live`,
+`npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
+`npm run test:appels`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
 sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,

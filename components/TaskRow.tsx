@@ -9,6 +9,7 @@ import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
+import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
 
 export type TaskWithProspect = {
   id: string;
@@ -169,7 +170,10 @@ export function TaskRow({
           {!lecture && task.prospects && (
             <>
               <Link
-                href={`/prospects/${task.prospects.id}`}
+                // Ce lien n'existe que sur « À faire » (seul écran qui joint la
+                // fiche à ses relances) : il porte `depuis`, pour « Fiche
+                // suivante » (lib/crm/ficheSuivante.ts).
+                href={lienDepuisAFaire(task.prospects.id)}
                 prefetch={false}
                 className="text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
               >

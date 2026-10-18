@@ -100,6 +100,7 @@ import {
   readProspectFacts,
 } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
+import { filtreRecherche } from "@/lib/crm/recherche";
 import {
   ISSUE_LABEL,
   estIssueDebrief,
@@ -583,11 +584,13 @@ function register(server: McpServer) {
         q = q.not("next_action_at", "is", null).lte("next_action_at", end);
       }
       if (args.recherche) {
-        const t = safeSearch(args.recherche);
-        if (t)
-          q = q.or(
-            `company_name.ilike.%${t}%,contact_name.ilike.%${t}%,email.ilike.%${t}%,phone.ilike.%${t}%`
-          );
+        // La même règle que l'écran et la recherche globale
+        // (lib/crm/recherche.ts) : société, contact, email, ville, et le
+        // téléphone chiffre à chiffre (« 081 22 33 44 » retrouve
+        // « +32 81 22 33 44 »). La cloison (scopeProspects) est déjà posée
+        // sur `q` : ce `or` se combine avec elle, il ne l'élargit pas.
+        const filtre = filtreRecherche(args.recherche);
+        if (filtre) q = q.or(filtre);
       }
 
       const { data, error } = await q;

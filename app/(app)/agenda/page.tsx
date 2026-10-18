@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession, getPerimetreViewer } from "@/lib/auth";
+import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
 import { PageHeader, Icone } from "@/components/ui";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import {
@@ -63,7 +63,7 @@ export default async function AgendaPage({
   // et la liste des porteurs (migration 020) — `cache()`é, donc une seule
   // requête par rendu, et zéro pour un admin.
   const viewer: PerimetreViewer = await getPerimetreViewer();
-  const perimetre = lirePerimetre(params, viewer);
+  const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
   const aujourdHui = isoToLocalInput(new Date().toISOString()).slice(0, 10);
   const vueJour = params.vue === "jour";
@@ -200,7 +200,7 @@ export default async function AgendaPage({
     } else if ((over.ref ?? lundi) !== lundiDe(aujourdHui)) {
       sp.set("semaine", over.ref ?? lundi);
     }
-    if (params.perimetre && params.perimetre !== "moi") {
+    if (params.perimetre) {
       sp.set("perimetre", params.perimetre);
     }
     const qs = sp.toString();

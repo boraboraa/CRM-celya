@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession, getPerimetreViewer } from "@/lib/auth";
+import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
 import {
   PageHeader,
@@ -28,6 +28,8 @@ import {
 import { relanceEnLecture } from "@/lib/crm/access";
 import { ligneAgendaJour } from "@/lib/crm/agendaJour";
 import { rdvADebriefer } from "@/lib/crm/debrief";
+import { lienDepuisAFaire, ordreAFaire } from "@/lib/crm/ficheSuivante";
+import { MemoireAFaire } from "@/components/FicheSuivante";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -94,7 +96,7 @@ export default async function TodoPage({
   // la liste des porteurs (migration 020) — `cache()`é, donc une seule requête
   // par rendu, et zéro pour un admin.
   const viewer: PerimetreViewer = await getPerimetreViewer();
-  const perimetre = lirePerimetre(params, viewer);
+  const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
   const TASK_SELECT =
     "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind)";
@@ -426,6 +428,16 @@ export default async function TodoPage({
       );
     });
 
+  // L'ordre des lignes de l'écran, pour « Fiche suivante » sur la fiche
+  // ouverte d'ici — exactement ce qui s'affiche, dans l'ordre des zones.
+  const ordre = ordreAFaire([
+    debriefMeetings.map((m) => m.prospect?.id),
+    overdue.map((t) => t.prospects?.id),
+    today.map((t) => t.prospects?.id),
+    waiting.map((p) => p.id),
+    replies.map((e) => e.prospects?.id),
+  ]);
+
   const firstName = session?.me?.full_name?.split(" ")[0];
   const nothingAtAll =
     overdue.length +
@@ -447,6 +459,8 @@ export default async function TodoPage({
           </Link>
         }
       />
+
+      <MemoireAFaire ids={ordre} />
 
       {/* La colonne « Appels » de Janet — admin seul. Sans elle (commercial,
           migration 025 absente), le contenu est rendu tel quel. */}
@@ -644,7 +658,7 @@ export default async function TodoPage({
                         />
                         <div className="min-w-0 flex-1">
                           <Link
-                            href={`/prospects/${p.id}`}
+                            href={lienDepuisAFaire(p.id)}
                             prefetch={false}
                             className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-blue hover:underline"
                           >

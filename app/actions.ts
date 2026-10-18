@@ -30,6 +30,7 @@ import {
 } from "@/lib/crm/agenda";
 import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
 import { estIssueDebrief, type IssueDebrief } from "@/lib/crm/debrief";
+import { filtreRecherche } from "@/lib/crm/recherche";
 import { estTableAbsente } from "@/lib/crm/access";
 import { getSession } from "@/lib/auth";
 import {
@@ -801,6 +802,50 @@ export async function cloturerRendezVousAction(input: {
 
   revalidateAgenda(r.prospectId);
   return { plusRien: r.plusRien ?? false };
+}
+
+// =====================================================================
+// Recherche globale (en-tête, ⌘K ou « / »)
+// =====================================================================
+
+export type ResultatRecherche = {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  phone: string | null;
+  city: string | null;
+  status: ProspectStatus;
+};
+
+/**
+ * Les fiches qui correspondent au texte tapé — société, contact, email,
+ * ville, téléphone (lib/crm/recherche.ts, la même règle que /prospects).
+ * Client de l'UTILISATEUR, donc sous la RLS : chacun ne retrouve que ce qu'il
+ * voit déjà (commercial seul, porteur d'équipe, encadrant, admin). Aucun
+ * périmètre d'affichage ici : chercher une fiche, c'est chercher partout où
+ * l'on a le droit de regarder.
+ */
+export async function rechercherProspectsAction(
+  q: string
+): Promise<{ resultats: ResultatRecherche[]; error?: string }> {
+  const session = await getSession();
+  if (!session?.me?.is_active) return { resultats: [] };
+  const filtre = filtreRecherche(q);
+  if (!filtre) return { resultats: [] };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("prospects")
+    .select("id, company_name, contact_name, phone, city, status")
+    .or(filtre)
+    .order("company_name", { ascending: true })
+    .limit(8);
+  if (error) return { resultats: [], error: error.message };
+  return {
+    resultats: ((data ?? []) as ResultatRecherche[]).map((r) => ({
+      ...r,
+      status: normalizeStatus(r.status),
+    })),
+  };
 }
 
 // =====================================================================

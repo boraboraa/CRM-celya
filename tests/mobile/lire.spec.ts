@@ -23,6 +23,7 @@ test.describe("À faire", () => {
     const { mobile, role } = contexte(info);
     test.skip(!mobile || role !== "commercial", "commercial sur téléphone (4 RDV de test)");
     await page.goto("/dashboard");
+    await page.waitForLoadState("networkidle");
     await expect(page.getByText("Trois états, jamais mélangés")).toBeHidden();
     await expect(page.locator("main").getByRole("link", { name: "+ Nouveau prospect" })).toBeHidden();
     // Trois lignes, puis « Voir les N ».
@@ -58,9 +59,16 @@ test.describe("À faire", () => {
     const { rdv } = await ficheAvecRdvPasse("commercial", "Débrief feuille");
     try {
       await page.goto("/dashboard");
+      await page.waitForLoadState("networkidle");
+      const ligne = page.locator("#a-debriefer").getByRole("button", { name: /Débrief feuille/ });
       const voir = page.getByRole("button", { name: /^Voir les \d+$/ });
-      if (await voir.isVisible()) await voir.click();
-      await page.locator("#a-debriefer").getByRole("button", { name: /Débrief feuille/ }).click();
+      // « Voir les N » n'agit qu'une fois la page hydratée : on réessaie le
+      // geste jusqu'à ce que la ligne apparaisse.
+      await expect(async () => {
+        if (!(await ligne.isVisible()) && (await voir.isVisible())) await voir.click();
+        await expect(ligne).toBeVisible({ timeout: 1000 });
+      }).toPass({ timeout: 15_000 });
+      await ligne.click();
       const feuille = page.getByRole("dialog");
       await expect(feuille).toBeVisible();
       await ciblesTactiles(feuille.getByRole("group", { name: "Ce qu'a donné le rendez-vous" }));

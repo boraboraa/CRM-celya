@@ -10,7 +10,13 @@ import { PAGES_PERIMETRE, PERIMETRE_COOKIE } from "@/lib/crm/perimetre";
 // pg_cron (secret du Vault) et par l'edge function annexe (signature HMAC) —
 // jamais par un navigateur. /api/appels-ia/suivi et /etat restent derrière la
 // session : ce sont les écrans de l'admin qui les sondent.
+// /manifest.webmanifest, /icon, /apple-icon : l'application installable —
+// le navigateur les charge SANS cookie (une redirection vers /login casserait
+// l'installation). Ils ne portent aucune donnée.
 const PUBLIC_PATHS = [
+  "/manifest.webmanifest",
+  "/icon",
+  "/apple-icon",
   "/api/appels-ia/tick",
   "/api/appels-ia/outils",
   "/api/appels-ia/fin",

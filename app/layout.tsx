@@ -4,6 +4,17 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Celya CRM",
   description: "Suivi des prospects et des relances — Celya",
+  // Installé sur l'iPhone : plein écran, barre d'état sombre, le nom sous
+  // l'icône. (Le manifeste, app/manifest.ts, porte le reste ; l'icône vient
+  // de app/apple-icon.tsx.)
+  appleWebApp: {
+    capable: true,
+    title: "Celya CRM",
+    statusBarStyle: "black",
+  },
+  // Next 15 n'émet plus que « mobile-web-app-capable » : les iOS plus anciens
+  // attendent encore la balise préfixée.
+  other: { "apple-mobile-web-app-capable": "yes" },
 };
 
 export const viewport: Viewport = {

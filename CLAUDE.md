@@ -1281,6 +1281,30 @@ ouvre sa feuille : Appeler, Ouvrir la fiche, Maps, **Reporter**
 `jourCourt` / `heureCourte` (« mar. 21/10 », « 11h ») vivent dans
 `lib/time.ts`.
 
+**Lot E — comme une app.** `app/manifest.ts` (« Celya CRM », `standalone`,
+`start_url: /dashboard`, couleurs Celya, raccourci « Nouveau prospect » →
+`/dashboard?ajout=1`, que `AjoutRapide` lit puis efface de l'URL) ; les icônes
+sont **générées** par `next/og` (`app/icon.tsx` → `/icon/192`, `/icon/512`,
+`app/apple-icon.tsx` → `/apple-icon`, dessin `components/IconeApp.tsx` — aucun
+binaire dans le dépôt, fond plein pour `maskable`) ; `metadata.appleWebApp`
++ `apple-mobile-web-app-capable` (Next 15 n'émet plus que la balise sans
+préfixe). ⚠ **Le manifeste et les icônes sont dans `PUBLIC_PATHS`** du
+middleware : le navigateur les charge SANS cookie, une redirection vers
+`/login` casserait l'installation. Pas de service worker (décidé : rien hors
+ligne dans ce chantier). Note : `/favicon.ico` répond 401 depuis toujours —
+la route du connecteur MCP (`app/[transport]`) l'attrape ; sans gravité, les
+navigateurs suivent désormais les `<link rel="icon">` générés.
+
+**Relancer le banc** : il suffit des deux comptes de test (créés depuis
+`/equipe` — un commercial, un admin — si ceux du chantier ont été supprimés)
+et de leurs identifiants en `E2E_*`. Le projet `connexion` **recrée à chaque
+lancement** leurs fiches « ZZ Test mobile » (`tests/mobile/donnees.ts`, dates
+relatives au jour : une relance en retard, quatre RDV à débriefer, un RDV
+aujourd'hui), sous LEUR session — la RLS s'applique, rien d'autre n'est
+touché. `CAPTURES_DIR=… npx playwright test captures --project=iphone-commercial
+--project=iphone-admin` produit les captures à 390 px (l'admin en périmètre
+« moi » : aucune fiche réelle à l'image).
+
 ⚠ **Le banc local et la navigation « même page, autres paramètres »** (19/10) :
 sur `next start` en local, un `router.push` de `/prospects` vers
 `/prospects?statut=…` (ou `/dashboard` → `/dashboard?perimetre=…`) **ne

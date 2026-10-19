@@ -1,7 +1,17 @@
 import { test as setup, expect } from "@playwright/test";
 import { identifiants } from "./outils";
+import { peupler } from "./donnees";
 
-/** Une connexion par rôle, gardée pour tous les projets (tests/mobile/.auth). */
+/**
+ * Avant tout : les fiches de test, recréées (dates relatives au jour), puis
+ * une connexion par rôle, gardée pour tous les projets (tests/mobile/.auth).
+ */
+setup("données de test", async () => {
+  setup.setTimeout(120_000);
+  await peupler("commercial");
+  await peupler("admin");
+});
+
 for (const role of ["commercial", "admin"] as const) {
   setup(`connexion ${role}`, async ({ page }) => {
     const { email, password } = identifiants(role);

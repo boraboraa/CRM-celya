@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { ProfileForm, PasswordForm } from "@/components/AccountForms";
 import { DiagnosticIA } from "@/components/DiagnosticIA";
+import { BoutonDeconnexion } from "@/components/BarreOnglets";
 
 
 export default async function AccountPage() {
@@ -63,6 +64,12 @@ export default async function AccountPage() {
             <DiagnosticIA />
           </section>
         )}
+
+        {/* Sur téléphone, « Se déconnecter » a quitté l'en-tête : il vit ici
+            (la barre latérale le porte toujours sur ordinateur). */}
+        <section className="card p-2 lg:hidden">
+          <BoutonDeconnexion />
+        </section>
       </div>
     </>
   );

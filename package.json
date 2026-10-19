@@ -17,8 +17,10 @@
     "test:debrief": "node --experimental-strip-types lib/crm/debrief.test.ts",
     "test:recherche": "node --experimental-strip-types lib/crm/recherche.test.ts",
     "test:fiche-suivante": "node --experimental-strip-types lib/crm/ficheSuivante.test.ts",
+    "test:nav": "node --experimental-strip-types lib/nav.test.ts",
     "test:appels": "node --experimental-strip-types lib/appelsIa/regles.test.ts && node --experimental-strip-types lib/appelsIa/cycle.test.ts && node --experimental-strip-types lib/appelsIa/classement.test.ts && node --experimental-strip-types lib/appelsIa/ecriture.test.ts && node --experimental-strip-types lib/appelsIa/instructions.test.ts",
-    "test:appels-live": "node --experimental-strip-types lib/appelsIa/faux-live.test.ts"
+    "test:appels-live": "node --experimental-strip-types lib/appelsIa/faux-live.test.ts",
+    "test:mobile": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -32,6 +34,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

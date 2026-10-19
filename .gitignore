@@ -4,3 +4,8 @@ node_modules
 .vercel
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Banc Playwright (tests/mobile)
+tests/mobile/.auth
+test-results
+playwright-report

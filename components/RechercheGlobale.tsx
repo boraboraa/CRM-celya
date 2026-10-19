@@ -35,7 +35,7 @@ export function BoutonRecherche({ compact = false }: { compact?: boolean }) {
       aria-label="Rechercher une fiche (⌘K)"
       className={
         compact
-          ? "inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.06]"
+          ? "inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-300 transition hover:bg-white/[0.06]"
           : "flex w-full items-center gap-2 rounded-xl bg-white/[0.03] px-3 py-2 text-sm text-slate-400 ring-1 ring-white/10 transition hover:text-slate-200"
       }
     >
@@ -127,9 +127,12 @@ export function RechercheGlobale() {
 
   return (
     <>
+      {/* Sur téléphone, la recherche prend TOUT l'écran (19/10) : le clavier en
+          occupe la moitié, une fenêtre flottante n'aurait laissé de la place
+          qu'à deux résultats. */}
       {ouvert && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-[12vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm sm:px-4 sm:pt-[12vh]"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) fermer();
           }}
@@ -137,7 +140,7 @@ export function RechercheGlobale() {
           aria-modal="true"
           aria-label="Rechercher une fiche"
         >
-          <div className="card w-full max-w-lg overflow-hidden p-0 shadow-2xl">
+          <div className="card flex h-[100dvh] w-full max-w-lg flex-col overflow-hidden rounded-none p-0 shadow-2xl sm:h-auto sm:rounded-2xl">
             <div className="flex items-center gap-2 border-b border-white/[0.06] px-4">
               <Icone nom="loupe" className="h-4 w-4 text-slate-400" />
               <input
@@ -157,22 +160,32 @@ export function RechercheGlobale() {
                     ouvrir(resultats[actif]);
                   }
                 }}
+                type="search"
+                enterKeyHint="go"
+                autoComplete="off"
                 placeholder="Société, contact, téléphone…"
                 aria-label="Société, contact ou téléphone"
-                className="min-h-[52px] flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
+                className="min-h-[52px] min-w-0 flex-1 bg-transparent text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
               />
               {cherche && <span className="text-[11px] text-slate-500">…</span>}
               <button
                 type="button"
                 onClick={fermer}
-                className="rounded-md px-1.5 py-0.5 text-[10px] text-slate-400 ring-1 ring-white/10"
+                className="hidden rounded-md px-1.5 py-0.5 text-[10px] text-slate-400 ring-1 ring-white/10 sm:inline"
               >
                 Échap
+              </button>
+              <button
+                type="button"
+                onClick={fermer}
+                className="-mr-2 min-h-[44px] px-2 text-sm text-celya-blue sm:hidden"
+              >
+                Annuler
               </button>
             </div>
 
             {q.trim() && (
-              <ul className="max-h-[50vh] overflow-y-auto py-1" role="listbox">
+              <ul className="min-h-0 flex-1 overflow-y-auto py-1 sm:max-h-[50vh] sm:flex-none" role="listbox">
                 {resultats.length === 0 && !cherche && (
                   <li className="px-4 py-4 text-sm text-slate-500">Aucune fiche ne correspond.</li>
                 )}
@@ -182,7 +195,7 @@ export function RechercheGlobale() {
                       type="button"
                       onMouseEnter={() => setActif(i)}
                       onClick={() => ouvrir(r)}
-                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition ${
+                      className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-2.5 text-left transition ${
                         i === actif ? "bg-white/[0.06]" : ""
                       }`}
                     >

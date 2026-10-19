@@ -10,6 +10,9 @@ export const viewport: Viewport = {
   themeColor: "#0A0E1A",
   width: "device-width",
   initialScale: 1,
+  // Sans « cover », iOS laisse env(safe-area-inset-*) à 0 : la barre d'onglets
+  // du bas passerait sous la barre d'accueil de l'iPhone.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

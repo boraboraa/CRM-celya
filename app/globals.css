@@ -34,6 +34,11 @@ body {
     animation: rise 220ms ease-out both;
   }
 
+  /* La feuille du bas monte depuis le bord : 150 ms, l'élan d'un tiroir. */
+  .animate-feuille {
+    animation: feuille 150ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
   /* Petit rebond quand une étape vient d'être choisie. */
   .animate-pop {
     animation: pop 200ms ease-out;
@@ -43,8 +48,10 @@ body {
     @apply block text-[11px] font-medium uppercase tracking-wider text-slate-400 mb-1.5;
   }
 
+  /* 16 px sur téléphone : en dessous, Safari iOS zoome la page à chaque
+     champ touché, et ne dézoome pas en sortant. */
   .input {
-    @apply w-full rounded-xl bg-space-700/70 px-3.5 py-2.5 text-sm text-slate-100
+    @apply w-full rounded-xl bg-space-700/70 px-3.5 py-2.5 text-base sm:text-sm text-slate-100
            ring-1 ring-white/10 placeholder:text-slate-500 outline-none
            focus:ring-2 focus:ring-celya-blue/60 transition;
   }
@@ -107,6 +114,17 @@ body {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes feuille {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
   }
 }
 

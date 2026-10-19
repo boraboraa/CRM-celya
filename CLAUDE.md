@@ -5,6 +5,15 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 19 octobre 2026 — chantier mobile
+
+**Le compte `recette-epuration@celya.test` est SUPPRIMÉ** (19/10, demande de
+Bora, via `crm-admin` `delete_user` : 0 fiche, 0 ligne rattachée). Deux comptes
+de test le temps du chantier mobile : `mobile-commercial@celya.test` et
+`mobile-admin@celya.test` (« ZZ Test mobile … »), leurs fiches « ZZ Test mobile »
+aux numéros **fictifs** (`+32 000 …`) — **à supprimer à la fin du chantier**,
+avec tout ce qui leur est rattaché. Voir « Le téléphone d'abord ».
+
 ## État au 8 octobre 2026
 
 Relu en base le 08/10 : **neuf comptes actifs** — Bora (admin, 52 fiches), Rémi
@@ -1173,6 +1182,46 @@ large que l'écran, aucun défilement horizontal** aux deux tailles. La cause de
 l'icône : passer à `Icone` une `className` sans hauteur remplaçait sa taille par
 défaut — `Icone` garde désormais `h-3.5 w-3.5` tant qu'on ne donne pas de `h-`.
 
+### Le téléphone d'abord (chantier du 19 octobre — pour le 2 novembre)
+
+Les commerciaux (Nathan, Collins, Rémi, les étudiants du Sales Trophy à partir
+du 2 novembre) travaillent au téléphone, d'une main, entre deux visites. Le
+CRM était un écran d'ordinateur rétréci. Seuils, décidés par Bora : **la
+coquille et les listes en cartes sous `lg`** (là où la barre latérale n'est
+pas) ; **les réglages propres au téléphone sous `sm`** (vue Jour, grille 2 × 2).
+
+**Lot A — la coquille.** La navigation est EN BAS, sous le pouce
+(`components/BarreOnglets.tsx`) : À faire · Prospects · ＋ · Agenda pour un
+commercial, et « Plus » pour l'admin (Équipe, Appels IA, Compte, Se
+déconnecter). Les onglets sortent de **`ongletsMobiles(role)`** (`lib/nav.ts`),
+qui puise dans `NAV_ITEMS` — jamais une seconde liste (`npm run test:nav`).
+L'en-tête mobile n'a plus que le logo, la loupe et l'avatar (→ `/compte`) ;
+« Se déconnecter » vit sur `/compte` (et dans « Plus »). La recherche ⌘K prend
+tout l'écran sous `sm`. `viewportFit: "cover"` est INDISPENSABLE : sans lui,
+iOS laisse `env(safe-area-inset-bottom)` à 0 et la barre passe sous la barre
+d'accueil. Les champs `.input` font **16 px sur téléphone** : en dessous,
+Safari iOS zoome la page à chaque champ touché.
+
+**`components/FeuilleBas.tsx` — UNE feuille du bas pour tout le mobile.** Trois
+choses qu'on oublierait en la refaisant : le **portail** vers `body` (un
+`.card` porte un `backdrop-filter`, qui fait de lui le repère des `fixed`
+qu'il contient — une feuille ouverte depuis une ligne se serait collée dans la
+carte) ; `visualViewport` (le clavier iOS recouvre l'écran sans le réduire :
+la feuille remonte de sa hauteur) ; la zone sûre en bas.
+
+**Le banc : `npm run test:mobile`** (Playwright, `playwright.config.ts`,
+`tests/mobile/`). Le seul test du dépôt qui demande un serveur lancé
+(`npm run build && npm start`) et la base : trois tailles (390 × 844,
+360 × 800, 1280 × 900) × deux rôles, identifiants des comptes de test en
+variables d'environnement (`E2E_*`, voir la config). Il échoue
+automatiquement si une page est plus large que l'écran (et nomme les éléments
+qui dépassent) ou si une cible fait moins de 44 px. Les tests qui écrivent
+créent leurs propres fiches « ZZ Test mobile e2e — … » et les retirent.
+⚠ Piège du banc : `pkill -f "next start"` tue aussi le shell qui le lance (le
+motif est dans sa propre ligne de commande), et un ancien serveur resté sur le
+port 3000 sert de vieux fichiers CSS → la page s'affiche SANS style et toutes
+les mesures sont fausses. Arrêter le serveur par son PID.
+
 **Ouvrir une fiche plus vite (18 octobre).** Trois chemins, une seule règle de
 recherche (`lib/crm/recherche.ts`, `npm run test:recherche`) :
 - **Recherche globale** sur tous les écrans — ⌘K / Ctrl+K, « / », ou le bouton
@@ -2322,7 +2371,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
-`npm run test:appels`, `npm run test:appels-live`,
+`npm run test:nav`, `npm run test:appels`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
 sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,
@@ -2334,7 +2383,9 @@ d'une panne à 100 % des pages. **`npm run lint` n'est PAS configuré** : le scr
 dépôt n'a aucune configuration ESLint et `next lint` ouvre alors un assistant
 interactif qui installe des dépendances — il bloque une session non
 interactive. Ne pas en ajouter une au passage : ce serait une décision d'outil,
-pas une correction.
+pas une correction. Et pour tout ce qui touche l'écran :
+**`npm run test:mobile`** (serveur lancé, comptes de test — voir « Le
+téléphone d'abord »).
 
 ---
 

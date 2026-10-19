@@ -263,7 +263,7 @@ export default async function AgendaPage({
           ))}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex w-full items-center gap-1.5 sm:w-auto">
           <Link
             href={href({ ref: vueJour ? decale(jour, -1) : decale(lundi, -7) })}
             aria-label={vueJour ? "Jour précédent" : "Semaine précédente"}
@@ -271,7 +271,7 @@ export default async function AgendaPage({
           >
             <Icone nom="chevron" className="h-4 w-4 rotate-90" />
           </Link>
-          <span className="min-w-[180px] text-center text-sm font-medium text-slate-200">
+          <span className="min-w-0 flex-1 text-center text-sm font-medium text-slate-200 sm:min-w-[180px] sm:flex-none">
             {titrePeriode.charAt(0).toUpperCase() + titrePeriode.slice(1)}
           </span>
           <Link

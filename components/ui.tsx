@@ -68,7 +68,9 @@ export type IconeNom =
   | "equipe"
   | "reglages"
   | "loupe"
-  | "suivant";
+  | "suivant"
+  | "points"
+  | "sortie";
 
 /** Le combiné, réutilisé par « téléphone barré ». */
 const COMBINE = (
@@ -100,6 +102,16 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
     <>
       <path d="M2.8 8h10" />
       <path d="M9.4 4.4 13 8l-3.6 3.6" />
+    </>
+  ),
+  /** « Plus » — trois points, l'onglet des écrans qui ne sont pas de terrain. */
+  points: <path d="M3.4 8h.01M8 8h.01M12.6 8h.01" strokeWidth={2.4} />,
+  /** Se déconnecter : la porte et la flèche qui en sort. */
+  sortie: (
+    <>
+      <path d="M6.2 13.2H3.6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1h2.6" />
+      <path d="M7 8h6.4" />
+      <path d="M10.6 5.2 13.4 8l-2.8 2.8" />
     </>
   ),
   retour: (

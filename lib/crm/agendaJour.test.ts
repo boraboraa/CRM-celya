@@ -19,6 +19,7 @@
  */
 
 import { lienTel } from "./telephone.ts";
+import { estTelephone, vueAgendaParDefaut } from "./agendaJour.ts";
 import {
   ligneAgendaJour,
   heureBruxelles,
@@ -241,6 +242,24 @@ verifie("tel : barres et points", lienTel("081/22.33.44"), "tel:081223344");
 verifie("tel : parenthèses", lienTel("0032 (81) 22 33 44"), "tel:003281223344");
 verifie("tel : sans chiffre, pas de lien", lienTel("à demander"), null);
 verifie("tel : vide", lienTel(null), null);
+
+// La vue par défaut de l'agenda : Jour sur téléphone, Semaine ailleurs.
+const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+const ANDROID = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Mobile Safari/537.36";
+const IPAD = "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+const TABLETTE = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
+const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
+verifie("iPhone : téléphone", estTelephone(IPHONE), true);
+verifie("Android mobile : téléphone", estTelephone(ANDROID), true);
+verifie("iPad : pas un téléphone", estTelephone(IPAD), false);
+verifie("tablette Android (sans « Mobile ») : pas un téléphone", estTelephone(TABLETTE), false);
+verifie("Mac : pas un téléphone", estTelephone(MAC), false);
+verifie("sans en-tête : pas un téléphone", estTelephone(null), false);
+verifie("agenda : Jour par défaut sur téléphone", vueAgendaParDefaut(undefined, IPHONE), "jour");
+verifie("agenda : Semaine par défaut sur ordinateur", vueAgendaParDefaut(undefined, MAC), "semaine");
+verifie("agenda : ?vue=semaine l'emporte sur téléphone", vueAgendaParDefaut("semaine", IPHONE), "semaine");
+verifie("agenda : ?vue=jour l'emporte sur ordinateur", vueAgendaParDefaut("jour", MAC), "jour");
+verifie("agenda : une vue inconnue retombe sur le défaut", vueAgendaParDefaut("mois", MAC), "semaine");
 
 console.log(
   echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`

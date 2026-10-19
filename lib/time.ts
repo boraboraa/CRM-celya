@@ -88,3 +88,18 @@ export function todayBounds(): { start: string; end: string } {
     end: localInputToISO(`${today}T23:59`)!,
   };
 }
+
+const JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+
+/** « mar. 21/10 » — une date « YYYY-MM-DD » sans fuseau (pas de décalage). */
+export function jourCourt(ymd: string): string {
+  const [a, m, j] = ymd.slice(0, 10).split("-").map(Number);
+  const d = new Date(Date.UTC(a, m - 1, j));
+  return `${JOURS[d.getUTCDay()]} ${String(j).padStart(2, "0")}/${String(m).padStart(2, "0")}`;
+}
+
+/** « 11h », « 11h30 » — la forme des phrases. */
+export function heureCourte(hm: string): string {
+  const [h, m] = hm.split(":");
+  return `${Number(h)}h${m && m !== "00" ? m : ""}`;
+}

@@ -19,6 +19,9 @@
  * L'étape n'est jamais demandée : elle suit les faits (`applyAutoStatus`).
  */
 import type { Raccourci } from "./raccourcis.ts";
+import { jourCourt, heureCourte } from "../time.ts";
+
+export { jourCourt, heureCourte };
 
 /** L'événement de fenêtre qui ouvre la feuille (le « ＋ » de la barre du bas). */
 export const OUVRIR_AJOUT = "celya:ajout-rapide";
@@ -45,21 +48,6 @@ export type LectureRapide = {
   /** Ce qui sera enregistré, en clair — les pastilles sous le champ. */
   pastilles: string[];
 };
-
-const JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
-
-/** « mar. 21/10 » — une date « YYYY-MM-DD » sans fuseau (pas de décalage). */
-export function jourCourt(ymd: string): string {
-  const [a, m, j] = ymd.slice(0, 10).split("-").map(Number);
-  const d = new Date(Date.UTC(a, m - 1, j));
-  return `${JOURS[d.getUTCDay()]} ${String(j).padStart(2, "0")}/${String(m).padStart(2, "0")}`;
-}
-
-/** « 11h », « 11h30 » — la forme des phrases. */
-export function heureCourte(hm: string): string {
-  const [h, m] = hm.split(":");
-  return `${Number(h)}h${m && m !== "00" ? m : ""}`;
-}
 
 export function lireCeQuiSestPasse(
   texte: string,

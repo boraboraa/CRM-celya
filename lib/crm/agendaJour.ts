@@ -104,3 +104,25 @@ export function ligneAgendaJour(
     poseParJanet: posesParJanet.has(m.id),
   };
 }
+
+// ---------------------------------------------------------------------------
+// La vue par défaut de /agenda (19/10) : JOUR sur un téléphone — six colonnes
+// de 7h à 21h ne tiennent pas dans 390 px —, SEMAINE ailleurs. Décidée côté
+// serveur, d'après l'en-tête User-Agent, pour qu'il n'y ait aucun saut d'écran.
+// Un `?vue=` explicite l'emporte toujours ; une tablette garde la semaine.
+// ---------------------------------------------------------------------------
+
+/** Le navigateur est-il celui d'un téléphone (pas d'une tablette) ? */
+export function estTelephone(userAgent: string | null | undefined): boolean {
+  const ua = userAgent ?? "";
+  if (/iPad|Tablet/i.test(ua)) return false;
+  return /iPhone|iPod|Windows Phone|Android.+Mobile|Mobile.+Firefox|Mobi/i.test(ua);
+}
+
+export function vueAgendaParDefaut(
+  vueDemandee: string | null | undefined,
+  userAgent: string | null | undefined
+): "jour" | "semaine" {
+  if (vueDemandee === "jour" || vueDemandee === "semaine") return vueDemandee;
+  return estTelephone(userAgent) ? "jour" : "semaine";
+}

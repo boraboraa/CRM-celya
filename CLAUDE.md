@@ -1264,6 +1264,23 @@ Règles, décidées avec Bora le 19/10 :
   du clavier (pied de `FeuilleBas` + `visualViewport`).
 « Plus de champs » mène au formulaire complet, qui reste.
 
+**Lot C — l'agenda au téléphone.** **Vue Jour par défaut sur un téléphone**,
+décidée côté serveur d'après l'User-Agent (`vueAgendaParDefaut` /
+`estTelephone`, `lib/crm/agendaJour.ts` — une tablette garde la semaine, un
+`?vue=` explicite l'emporte toujours). Sous `sm`, en vue Jour, la **liste des
+rendez-vous du jour** (heure, société, lieu, 📞) prend la place de la grille,
+repliée derrière « Grille horaire » ; on change de jour par les flèches (44 px)
+ou d'un **balayage**. « ＋ RDV » ouvre le panneau de création dans la feuille
+du bas — le MÊME panneau que sur ordinateur (`contenuCreation`, un seul rendu),
+avec **le jour et l'heure en deux champs** (sans heure, « Poser » reste éteint ;
+`poserRendezVousAction` refuserait de toute façon). Toucher un rendez-vous
+ouvre sa feuille : Appeler, Ouvrir la fiche, Maps, **Reporter**
+(`deplacerRendezVousAction`) et **Annuler**, en deux temps
+(`cloturerRendezVousAction`, issue « annulé » — le chemin de l'outil MCP
+`deplacer_rendez_vous(annuler)`). Le glisser-déposer reste sur ordinateur.
+`jourCourt` / `heureCourte` (« mar. 21/10 », « 11h ») vivent dans
+`lib/time.ts`.
+
 ⚠ **Le banc local et la navigation « même page, autres paramètres »** (19/10) :
 sur `next start` en local, un `router.push` de `/prospects` vers
 `/prospects?statut=…` (ou `/dashboard` → `/dashboard?perimetre=…`) **ne

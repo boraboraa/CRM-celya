@@ -6,6 +6,9 @@ import { Avatar, Icone } from "@/components/ui";
 import { AdresseInline } from "@/components/AdresseInline";
 import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
+import { RepliMobile } from "@/components/RepliMobile";
+import { lienTel } from "@/lib/crm/telephone";
+import { lienAller } from "@/lib/crm/maps";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
 import { ProspectForm } from "@/components/ProspectForm";
 import { ProspectJournal } from "@/components/ProspectJournal";
@@ -303,6 +306,10 @@ export default async function ProspectDetailPage({
     ? { to: replyTo.from_email, subject: replySubject(replyTo.subject) }
     : undefined;
 
+  // Les deux gestes du terrain (téléphone) : composer, et y aller.
+  const telFiche = lienTel(prospect.phone);
+  const lienAdresse = lienAller(prospect.address, prospect.city);
+
   return (
     <>
       {/* ---------- En-tête : qui, et où on en est ---------- */}
@@ -339,17 +346,19 @@ export default async function ProspectDetailPage({
           </p>
         )}
 
-        <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-50">
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+          <div className="min-w-0 w-full lg:w-auto">
+            <h1 className="font-display text-xl font-semibold tracking-tight text-slate-50 lg:text-2xl">
               {prospect.company_name}
             </h1>
-            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400">
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400 lg:mt-1.5">
               {prospect.contact_name && <span>{prospect.contact_name}</span>}
-              {prospect.phone && (
+              {/* Sur téléphone, le numéro devient le bouton « Appeler » juste
+                  en dessous ; l'email reste dans le composeur. */}
+              {telFiche && (
                 <a
-                  href={`tel:${prospect.phone.replace(/\s/g, "")}`}
-                  className="text-celya-blue hover:underline"
+                  href={telFiche}
+                  className="hidden text-celya-blue hover:underline lg:inline"
                 >
                   {prospect.phone}
                 </a>
@@ -357,7 +366,7 @@ export default async function ProspectDetailPage({
               {prospect.email && (
                 <a
                   href={`mailto:${prospect.email}`}
-                  className="text-celya-blue hover:underline"
+                  className="hidden text-celya-blue hover:underline lg:inline"
                 >
                   {prospect.email}
                 </a>
@@ -365,6 +374,36 @@ export default async function ProspectDetailPage({
               {prospect.city && <span>{prospect.city}</span>}
             </p>
 
+            {/* Téléphone : les deux gestes du terrain, en GROS, sous le nom
+                (19/10) — appeler, et y aller. Un petit lien bleu n'est pas un
+                bouton qu'on vise d'un pouce entre deux visites. */}
+            {(telFiche || lienAdresse) && (
+              <div className="mt-3 grid grid-cols-2 gap-2 lg:hidden">
+                {telFiche ? (
+                  <a href={telFiche} className="btn-primary min-h-[48px]">
+                    <Icone nom="telephone" className="h-4 w-4" />
+                    Appeler
+                  </a>
+                ) : (
+                  <span />
+                )}
+                {lienAdresse && (
+                  <a
+                    href={lienAdresse.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-ghost min-h-[48px]"
+                  >
+                    <Icone nom={lienAdresse.itineraire ? "itineraire" : "epingle"} className="h-4 w-4" />
+                    {lienAdresse.itineraire ? "Itinéraire" : "Maps"}
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* L'adresse et la confiance : repliées sur téléphone, à leur place
+                sur ordinateur (un seul rendu, voir RepliMobile). */}
+            <RepliMobile libelle="Adresse et confiance">
             {/* L'adresse — à côté du téléphone, les deux gestes du terrain :
                 ouvrir la fiche Maps, ou lancer l'itinéraire. Sans adresse, le
                 point d'entrée est ICI (« Ajouter une adresse ») : le champ
@@ -405,6 +444,7 @@ export default async function ProspectDetailPage({
                 lectureSeule={lectureSeule}
               />
             </div>
+            </RepliMobile>
           </div>
 
           <div className="w-full max-w-md">

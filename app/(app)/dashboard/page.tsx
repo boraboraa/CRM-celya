@@ -465,6 +465,7 @@ export default async function TodoPage({
       <PageHeader
         title={firstName ? `Bonjour ${firstName}` : "À faire"}
         subtitle="Trois états, jamais mélangés : à appeler, en attente de réponse, réponses reçues."
+        compactMobile
         action={
           <Link href="/prospects/nouveau" className="btn-primary">
             + Nouveau prospect

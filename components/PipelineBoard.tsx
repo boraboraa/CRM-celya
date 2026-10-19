@@ -121,6 +121,14 @@ export function PipelineBoard({
   const [enCours, setEnCours] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const [, startTransition] = useTransition();
+  /**
+   * Téléphone (sous `lg`) : UNE étape à la fois, choisie dans la rangée du
+   * haut — six colonnes de 272 px ne tiennent pas dans 390. Par défaut, la
+   * première étape qui a des fiches.
+   */
+  const [etapeMobile, setEtapeMobile] = useState<ProspectStatus>(
+    () => STATUS_ORDER.find((s) => prospects.some((p) => p.status === s)) ?? STATUS_ORDER[0]
+  );
 
   /**
    * La carte change de colonne AU MOMENT DU DÉPÔT, pas quand le serveur
@@ -174,14 +182,43 @@ export function PipelineBoard({
         </p>
       )}
 
-      <p className="mb-4 text-xs text-slate-500">
+      <p className="mb-4 hidden text-xs text-slate-500 lg:block">
         Faites glisser une fiche d&apos;une colonne à l&apos;autre pour corriger son
         étape — ce choix est alors verrouillé, l&apos;assistant n&apos;y touchera plus.
-        Sur mobile, utilisez le menu au bas de chaque carte.
+      </p>
+
+      {/* Téléphone : le sélecteur d'étape. Il défile de côté dans son propre
+          cadre — la page, elle, ne déborde jamais. */}
+      <div className="-mx-4 mb-3 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
+        <div className="flex w-max gap-1.5" role="group" aria-label="Étape affichée">
+          {STATUS_ORDER.map((status) => {
+            const n = items.filter((c) => c.status === status).length;
+            const actif = status === etapeMobile;
+            return (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setEtapeMobile(status)}
+                aria-pressed={actif}
+                className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-3 text-xs font-medium ring-1 transition ${
+                  actif ? COLUMN_BANNER[status] : "text-slate-400 ring-white/10"
+                }`}
+              >
+                <Icone nom={STATUS_ICON[status]} className="h-3.5 w-3.5" />
+                {STATUS_LABEL[status]}
+                <span className="tabular-nums opacity-80">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="mb-3 text-[11px] text-slate-500 lg:hidden">
+        Pour changer l&apos;étape d&apos;une fiche, utilisez le menu de sa carte — ce
+        choix est alors verrouillé.
       </p>
 
       <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
-        <div className="flex min-w-max gap-4">
+        <div className="lg:flex lg:min-w-max lg:gap-4">
           {STATUS_ORDER.map((status, columnIndex) => {
             const list = items.filter((c) => c.status === status);
             const isTarget = overColumn === status;
@@ -210,7 +247,9 @@ export function PipelineBoard({
                   if (id) move(id, status);
                 }}
                 style={{ animationDelay: `${columnIndex * 40}ms` }}
-                className={`w-[272px] shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 ${
+                className={`w-full shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 lg:block lg:w-[272px] ${
+                  status === etapeMobile ? "" : "hidden"
+                } ${
                   isTarget
                     ? COLUMN_TARGET[status]
                     : isSource
@@ -359,12 +398,15 @@ export function PipelineBoard({
                           )}
                         </Link>
 
-                        {/* Repli tactile : le glisser-déposer HTML5 ne marche pas au doigt. */}
+                        {/* Repli tactile : le glisser-déposer HTML5 ne marche pas
+                            au doigt. Absent sur la fiche d'un collègue : masquer,
+                            pas désactiver (la base refuserait après coup). */}
+                        {c.modifiable !== false && (
                         <select
                           value={c.status}
                           onChange={(e) => move(c.id, e.target.value as ProspectStatus)}
                           aria-label={`Étape de ${c.company_name}`}
-                          className="mt-2.5 w-full rounded-lg bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60 lg:hidden"
+                          className="mt-2.5 min-h-[44px] w-full rounded-lg bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60 lg:hidden"
                         >
                           {STATUS_ORDER.map((s) => (
                             <option key={s} value={s}>
@@ -372,6 +414,7 @@ export function PipelineBoard({
                             </option>
                           ))}
                         </select>
+                        )}
                       </article>
                     );
                   })}

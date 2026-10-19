@@ -18,6 +18,7 @@
     "test:recherche": "node --experimental-strip-types lib/crm/recherche.test.ts",
     "test:fiche-suivante": "node --experimental-strip-types lib/crm/ficheSuivante.test.ts",
     "test:nav": "node --experimental-strip-types lib/nav.test.ts",
+    "test:filtres": "node --experimental-strip-types lib/crm/filtresProspects.test.ts",
     "test:appels": "node --experimental-strip-types lib/appelsIa/regles.test.ts && node --experimental-strip-types lib/appelsIa/cycle.test.ts && node --experimental-strip-types lib/appelsIa/classement.test.ts && node --experimental-strip-types lib/appelsIa/ecriture.test.ts && node --experimental-strip-types lib/appelsIa/instructions.test.ts",
     "test:appels-live": "node --experimental-strip-types lib/appelsIa/faux-live.test.ts",
     "test:mobile": "playwright test"

@@ -10,6 +10,7 @@
  */
 
 import {
+  lienAller,
   estLienMaps,
   requeteMaps,
   lienMaps,
@@ -167,6 +168,12 @@ verifie("ville connue → précis", adressePrecise("12 rue Garibaldi", "Lyon"), 
 verifie("ni l'un ni l'autre → à signaler", adressePrecise("12 rue Garibaldi"), false);
 verifie("un lien porte sa localisation", adressePrecise(court), true);
 verifie("rien de saisi → rien à signaler", adressePrecise(""), true);
+
+// --- « Y aller » sur téléphone : itinéraire, sinon Maps, sinon rien ---------
+verifie("adresse → itinéraire", lienAller(eghezee)?.itineraire, true);
+verifie("lien collé → ouvrir dans Maps", lienAller(court), { href: court, itineraire: false });
+verifie("rien → rien", lienAller(""), null);
+verifie("javascript: → rien", lienAller("javascript:alert(1)"), null);
 
 if (echecs > 0) {
   console.error(`\n${echecs} vérification(s) en échec.`);

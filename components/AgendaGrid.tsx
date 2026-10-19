@@ -10,6 +10,7 @@ import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { phraseAnnulees } from "@/lib/crm/prochaineAction";
 import { fmtDateTime } from "@/lib/constants";
+import { lienTel } from "@/lib/crm/telephone";
 import { Icone } from "@/components/ui";
 
 export type AgendaProspect = {
@@ -609,7 +610,7 @@ export function AgendaGrid({
                             )}
                             {m.prospect?.phone && (
                               <a
-                                href={`tel:${m.prospect.phone.replace(/\s/g, "")}`}
+                                href={lienTel(m.prospect.phone) ?? undefined}
                                 className="text-celya-blue hover:underline"
                               >
                                 {m.prospect.phone}

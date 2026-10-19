@@ -18,6 +18,7 @@
  * gardé parce qu'une branche non testée reste une branche non testée.
  */
 
+import { lienTel } from "./telephone.ts";
 import {
   ligneAgendaJour,
   heureBruxelles,
@@ -233,6 +234,13 @@ verifie(
   ).poseParJanet,
   false
 );
+
+// Le lien `tel:` — le même pour tous les boutons « Appeler » (lib/crm/telephone.ts).
+verifie("tel : espaces retirés, + gardé", lienTel("+32 81 22 33 44"), "tel:+3281223344");
+verifie("tel : barres et points", lienTel("081/22.33.44"), "tel:081223344");
+verifie("tel : parenthèses", lienTel("0032 (81) 22 33 44"), "tel:003281223344");
+verifie("tel : sans chiffre, pas de lien", lienTel("à demander"), null);
+verifie("tel : vide", lienTel(null), null);
 
 console.log(
   echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`

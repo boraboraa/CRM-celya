@@ -190,6 +190,21 @@ export function lienItineraire(
 }
 
 /**
+ * Le bouton « Y aller » du téléphone (fiche) : l'itinéraire quand l'adresse en
+ * nomme un, sinon l'ouverture dans Maps (un lien collé), sinon rien. Le
+ * libellé suit : on ne promet pas un itinéraire qu'on ne sait pas tracer.
+ */
+export function lienAller(
+  valeur: string | null | undefined,
+  ville?: string | null
+): { href: string; itineraire: boolean } | null {
+  const itineraire = lienItineraire(valeur, ville);
+  if (itineraire) return { href: itineraire, itineraire: true };
+  const ouvrir = lienMaps(valeur, ville);
+  return ouvrir ? { href: ouvrir, itineraire: false } : null;
+}
+
+/**
  * La valeur est-elle assez précise pour que Maps ne se trompe pas de pays ?
  * Un code postal, ou une ville connue — sinon « 12 rue Garibaldi » peut
  * atterrir n'importe où. Sert l'avertissement ambre du champ de saisie.

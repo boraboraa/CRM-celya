@@ -452,20 +452,39 @@ export function PageHeader({
   title,
   subtitle,
   action,
+  compactMobile = false,
 }: {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  /**
+   * Téléphone (sous `lg`) : le titre sur UNE ligne, sans sous-titre ni
+   * action — le premier écran appartient au travail, pas à l'en-tête. L'action
+   * habituelle (« Nouveau prospect ») est déjà dans la barre du bas.
+   */
+  compactMobile?: boolean;
 }) {
   return (
-    <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-50">
+    <div
+      className={`flex flex-wrap items-end justify-between gap-4 ${
+        compactMobile ? "mb-4 lg:mb-7" : "mb-7"
+      }`}
+    >
+      <div className="min-w-0">
+        <h1
+          className={`font-display font-semibold tracking-tight text-slate-50 ${
+            compactMobile ? "truncate text-xl lg:text-2xl" : "text-2xl"
+          }`}
+        >
           {title}
         </h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-400">{subtitle}</p>}
+        {subtitle && (
+          <p className={`mt-1 text-sm text-slate-400 ${compactMobile ? "hidden lg:block" : ""}`}>
+            {subtitle}
+          </p>
+        )}
       </div>
-      {action}
+      {action && (compactMobile ? <div className="hidden lg:block">{action}</div> : action)}
     </div>
   );
 }

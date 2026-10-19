@@ -1202,6 +1202,46 @@ iOS laisse `env(safe-area-inset-bottom)` à 0 et la barre passe sous la barre
 d'accueil. Les champs `.input` font **16 px sur téléphone** : en dessous,
 Safari iOS zoome la page à chaque champ touché.
 
+**Lot B — lire vite.** Sous `lg` :
+- **À faire** : titre seul (`PageHeader compactMobile`), le périmètre replié en
+  UNE puce (`PucePerimetre`, les liens viennent de **`optionsPerimetre`** dans
+  `PerimetreSwitcher.tsx` — calculés une fois pour l'ordinateur, la puce et la
+  feuille « Filtres »). La zone débrief tient en **une ligne par RDV**, trois
+  puis « Voir les N » ; un tap ouvre la feuille du bas avec le MÊME
+  `DebriefRdv` (`DebriefList`, deux rendus CSS d'un seul état optimiste).
+  Chaque relance : le titre sur toute la largeur, puis UNE ligne d'actions —
+  Appeler (`tel:`), Résultat (ou « Débriefer le RDV »), la date (un tap déplie
+  la date et les raccourcis). La case à cocher garde son dessin de 20 px mais
+  répond sur 44.
+- **Prospects** : des CARTES (nom sur toute la ligne, étape + contact,
+  prochaine action + 📞, dernière action) ; le tableau reste sur ordinateur.
+  La recherche reste à l'écran, tout le reste passe dans la feuille
+  **« Filtres »** (`FeuilleFiltres`) ; les filtres posés restent visibles en
+  puces retirables. L'URL et les puces sortent de
+  **`lib/crm/filtresProspects.ts`** (`hrefProspects`, `filtresActifs`,
+  `npm run test:filtres`) — un filtre inconnu dans l'URL n'est jamais recopié.
+  Les colonnes : une étape à la fois (rangée d'étapes), l'étape d'une fiche se
+  change par le menu de sa carte — **absent sur la fiche d'un collègue**
+  (masquer, pas désactiver ; il s'affichait avant, et la base refusait).
+- **Fiche** : nom et contact, puis **« Appeler » et « Itinéraire » en gros**
+  (`lienTel`, `lib/crm/telephone.ts` — le seul constructeur de `tel:` du
+  projet ; `lienAller`, `lib/crm/maps.ts` : l'itinéraire, à défaut Maps) ;
+  l'adresse et la confiance repliées (`RepliMobile` : un seul DOM, replié sous
+  `lg`, ouvert au-dessus) ; les quatre issues du débrief en grille 2 × 2 sous
+  `sm` ; la chronologie à 5 entrées puis « Voir plus » (10 sur ordinateur, en
+  CSS, sans écart d'hydratation).
+
+⚠ **Le banc local et la navigation « même page, autres paramètres »** (19/10) :
+sur `next start` en local, un `router.push` de `/prospects` vers
+`/prospects?statut=…` (ou `/dashboard` → `/dashboard?perimetre=…`) **ne
+s'applique pas toujours** quand la page a des résultats — la requête RSC part,
+répond 200, et l'URL ne bouge pas. Reproduit **sur `main`** (donc antérieur au
+chantier), et **pas en production** : contre
+`celya-accounting-app.vercel.app`, avec le compte de test, 4 navigations sur 4
+s'appliquent en une seconde. Les tests du banc vérifient donc l'URL que porte
+un lien, puis chargent cette URL — ils ne cliquent pas un lien qui ne change
+que les paramètres de la page courante.
+
 **`components/FeuilleBas.tsx` — UNE feuille du bas pour tout le mobile.** Trois
 choses qu'on oublierait en la refaisant : le **portail** vers `body` (un
 `.card` porte un `backdrop-filter`, qui fait de lui le repère des `fixed`

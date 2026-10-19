@@ -30,6 +30,8 @@
  *     rien, jamais « posé par Janet » par défaut.
  */
 
+import { lienTel } from "./telephone.ts";
+
 /** Une ligne de `meetings_visibles`, réduite à ce que la zone affiche. */
 export type RendezVousDuJour = {
   id: string;
@@ -96,7 +98,7 @@ export function ligneAgendaJour(
     lienFiche: fiche ? `/prospects/${fiche.id}` : null,
     contact: fiche?.contact_name || null,
     telephone: fiche?.phone || null,
-    telHref: fiche?.phone ? `tel:${fiche.phone.replace(/\s/g, "")}` : null,
+    telHref: lienTel(fiche?.phone),
     lieu: m.location || null,
     ville: fiche?.city || null,
     poseParJanet: posesParJanet.has(m.id),

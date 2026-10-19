@@ -54,7 +54,7 @@ test("« Plus » (admin) : Équipe, Appels IA, Compte, Se déconnecter", async (
   await expect(feuille.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
   await ciblesTactiles(feuille);
   await feuille.getByRole("link", { name: "Équipe" }).click();
-  await page.waitForURL(/\/equipe/);
+  await expect(page).toHaveURL(/\/equipe/);
   await expect(page.getByRole("dialog", { name: "Plus" })).toHaveCount(0);
 });
 
@@ -70,7 +70,7 @@ test("en-tête compact : loupe et compte, pas de « Se déconnecter »", async (
 
   // « Se déconnecter » est sur Compte.
   await entete.getByRole("link", { name: "Mon compte" }).click();
-  await page.waitForURL(/\/compte/);
+  await expect(page).toHaveURL(/\/compte/);
   await expect(page.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
 });
 

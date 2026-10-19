@@ -12,13 +12,21 @@ import {
   ProchaineActionTexte,
   EtiquetteJanet,
 } from "@/components/ui";
-import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
+import { PerimetreSwitcher, optionsPerimetre } from "@/components/PerimetreSwitcher";
 import { FiltresProspects } from "@/components/FiltresProspects";
+import { FeuilleFiltres } from "@/components/FeuilleFiltres";
+import {
+  FILTRES_RAPIDES,
+  TRIS,
+  filtresActifs,
+  hrefProspects,
+} from "@/lib/crm/filtresProspects";
 import { filtreRecherche } from "@/lib/crm/recherche";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import {
   STATUS_ORDER,
   STATUS_LABEL,
+  STATUS_EDGE,
   normalizeStatus,
   relative,
   fmtDate,
@@ -29,6 +37,7 @@ import {
   type LastActionRow,
 } from "@/lib/crm/lastAction";
 import { composerHref } from "@/lib/crm/composer";
+import { lienTel } from "@/lib/crm/telephone";
 import {
   lirePerimetre,
   filtrerProspects,
@@ -258,38 +267,37 @@ export default async function ProspectsPage({
   }));
 
   /** URL de la page en conservant recherche, étape, tri, vue, filtre — et
-   *  périmètre. */
+   *  périmètre (la règle vit dans lib/crm/filtresProspects.ts). */
   const makeHref = (over: {
     vue?: "liste" | "colonnes";
     filtre?: "emails" | "a_debriefer" | null;
-  }) => {
-    const sp = new URLSearchParams();
-    if (q) sp.set("q", q);
-    if (statut && statut !== "tous") sp.set("statut", statut);
-    if (tri) sp.set("tri", tri);
-    if ((over.vue ?? view) === "colonnes") sp.set("vue", "colonnes");
-    const f =
-      over.filtre !== undefined
-        ? over.filtre
-        : filtreEmails
-          ? "emails"
-          : filtreDebrief
-            ? "a_debriefer"
-            : null;
-    if (f) sp.set("filtre", f);
-    if (params.perimetre) {
-      sp.set("perimetre", params.perimetre);
-    }
-    const qs = sp.toString();
-    return `/prospects${qs ? `?${qs}` : ""}`;
-  };
+  }) => hrefProspects(params, over);
   const viewHref = (v: "liste" | "colonnes") => makeHref({ vue: v });
+
+  // ---- Téléphone : la feuille « Filtres » reçoit des liens tout faits.
+  const proprietes = {
+    role: session?.me?.role ?? "commercial",
+    viewerId: viewer.userId,
+    perimetre,
+    membres: membresProposables(membres, viewer),
+    peutElargir: peutElargir(viewer),
+    basePath: "/prospects",
+    searchParams: params,
+  };
+  const libellesEtapes = Object.fromEntries(STATUS_ORDER.map((st) => [st, STATUS_LABEL[st]]));
+  const actifs = filtresActifs(params, libellesEtapes);
+  const lienFiltre = (over: Parameters<typeof hrefProspects>[1], label: string, actif: boolean) => ({
+    href: hrefProspects(params, over),
+    label,
+    actif,
+  });
 
   return (
     <>
       <PageHeader
         title="Prospects"
         subtitle={`${prospects.length} fiche${prospects.length > 1 ? "s" : ""}`}
+        compactMobile
         action={
           <div className="flex gap-2">
             <Link href="/prospects/import" className="btn-ghost">
@@ -302,9 +310,69 @@ export default async function ProspectsPage({
         }
       />
 
-      <div className="mb-5 flex flex-wrap items-end gap-3">
+      {/* Téléphone : la recherche, et UNE puce « Filtres » pour tout le reste ;
+          les filtres posés restent visibles, chacun retirable d'un tap. */}
+      <div className="mb-4 space-y-2 lg:hidden">
+        <div className="flex items-center gap-2">
+          <FiltresProspects
+            q={q ?? ""}
+            statut={statut ?? "tous"}
+            tri={tri ?? ""}
+            etapes={[]}
+            avecTri={false}
+            seulementRecherche
+          />
+          <FeuilleFiltres
+            nbActifs={actifs.filter((f) => f.cle !== "q").length}
+            vues={[
+              lienFiltre({ vue: null }, "Liste", view === "liste"),
+              lienFiltre({ vue: "colonnes" }, "Colonnes", view === "colonnes"),
+            ]}
+            perimetre={optionsPerimetre(proprietes)}
+            raccourcis={(Object.keys(FILTRES_RAPIDES) as (keyof typeof FILTRES_RAPIDES)[]).map((f) =>
+              lienFiltre({ filtre: filtre === f ? null : f }, FILTRES_RAPIDES[f], filtre === f)
+            )}
+            etapes={[
+              lienFiltre({ statut: null }, "Toutes", !statut || statut === "tous"),
+              ...STATUS_ORDER.map((st) => lienFiltre({ statut: st }, STATUS_LABEL[st], statut === st)),
+            ]}
+            tris={
+              view === "liste"
+                ? (Object.keys(TRIS) as (keyof typeof TRIS)[]).map((t) =>
+                    lienFiltre({ tri: t === "recent" ? null : t }, TRIS[t], (tri || "recent") === t)
+                  )
+                : null
+            }
+          />
+        </div>
+        {actifs.some((f) => f.cle !== "q") && (
+          <ul className="flex flex-wrap gap-1.5" aria-label="Filtres actifs">
+            {actifs
+              .filter((f) => f.cle !== "q")
+              .map((f) => (
+                <li key={f.cle}>
+                  <Link
+                    href={f.retirer}
+                    prefetch={false}
+                    aria-label={`Retirer le filtre ${f.label}`}
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-celya-blue/10 px-3 text-xs text-blue-100 ring-1 ring-celya-blue/30"
+                  >
+                    {f.label}
+                    <Icone nom="croix" className="h-3 w-3" />
+                  </Link>
+                </li>
+              ))}
+          </ul>
+        )}
+        <p className="text-xs text-slate-500">
+          {prospects.length} fiche{prospects.length > 1 ? "s" : ""}
+        </p>
+      </div>
+
+      <div className="mb-5 hidden flex-wrap items-end gap-3 lg:flex">
         {/* Le périmètre — admin seulement (le composant ne rend rien sinon). */}
         <PerimetreSwitcher
+          puceMobile={false}
           role={session?.me?.role ?? "commercial"}
           viewerId={viewer.userId}
           perimetre={perimetre}
@@ -411,7 +479,71 @@ export default async function ProspectsPage({
       ) : view === "colonnes" ? (
         <PipelineBoard prospects={boardProspects} janetIds={janetIds} />
       ) : (
-        <div className="card animate-rise overflow-x-auto">
+        <>
+        {/* Téléphone : des CARTES, pas un tableau de 1 939 px dans un cadre
+            qui défile de côté (on n'y voyait que le nom). Mêmes données, mêmes
+            formateurs que le tableau — rien n'est recalculé pour le mobile. */}
+        <ul className="animate-rise space-y-2 lg:hidden">
+          {prospects.map((p) => {
+            const a = lastActions.get(p.id);
+            return (
+              <li
+                key={p.id}
+                className={`card relative border-l-4 px-4 py-3 transition active:scale-[0.995] ${STATUS_EDGE[p.status]}`}
+              >
+                <p className="flex min-w-0 items-center gap-1.5">
+                  {/* Toute la carte ouvre la fiche (lien étiré) ; seul
+                      « Appeler » passe au-dessus. Le nom a TOUTE la ligne. */}
+                  <Link
+                    href={`/prospects/${p.id}`}
+                    prefetch={false}
+                    className="truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
+                  >
+                    {p.company_name}
+                  </Link>
+                  {appeleesParJanet.has(p.id) && <EtiquetteJanet compact />}
+                </p>
+                <div className="mt-1 flex min-w-0 items-center gap-2">
+                  <StatusChip status={p.status} />
+                  <span className="min-w-0 truncate text-xs text-slate-400">
+                    {[p.contact_name, p.city].filter(Boolean).join(" · ") || p.email || ""}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                  <ProchaineActionTexte
+                    at={p.next_action_at}
+                    kind={p.next_action_kind}
+                    statut={p.status}
+                    plusRien={plusRien(p)}
+                    className="min-w-0 truncate"
+                  />
+                  {lienTel(p.phone) && (
+                    <a
+                      href={lienTel(p.phone)!}
+                      aria-label={`Appeler ${p.company_name}`}
+                      className="relative z-10 -my-2 -mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-celya-blue transition active:bg-white/[0.06]"
+                    >
+                      <Icone nom="telephone" className="h-4 w-4" />
+                    </a>
+                  )}
+                </div>
+                {a?.last_kind && (
+                  <p className="mt-1 truncate text-[11px]">
+                    <LastActionLine
+                      kind={a.last_kind}
+                      at={a.last_at}
+                      outcome={a.last_outcome}
+                      text={a.last_text}
+                      streak={a.last_no_answer_streak}
+                    />
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="card animate-rise hidden overflow-x-auto lg:block">
           <table className="w-full min-w-[820px]">
             <thead className="border-b border-white/[0.06]">
               <tr>
@@ -532,6 +664,7 @@ export default async function ProspectsPage({
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
   );

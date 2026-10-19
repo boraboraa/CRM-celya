@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
+import { fmtDate, fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
 import { infoRdvPrevu, jourHeureCourt } from "@/lib/crm/prochaineAction";
@@ -11,6 +11,7 @@ import { DebriefRdv } from "@/components/DebriefRdv";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
+import { lienTel } from "@/lib/crm/telephone";
 
 export type TaskWithProspect = {
   id: string;
@@ -114,6 +115,12 @@ export function TaskRow({
   const rdvEnAttente = debriefFait ? null : task.rdv_a_debriefer ?? null;
   /** « À rappeler » vient d'être tapé : la ligne réclame une date. */
   const [pourQuand, setPourQuand] = useState(false);
+  /**
+   * Téléphone : la date et ses raccourcis se déplient d'un tap sur la date
+   * (sur ordinateur, ils sont toujours là, à droite du titre).
+   */
+  const [reprogOuvert, setReprogOuvert] = useState(false);
+  const tel = lienTel(task.prospects?.phone);
 
   const dueLocal = isoToLocalInput(task.due_at); // YYYY-MM-DDTHH:mm Bruxelles
   const dueDate = dueLocal.slice(0, 10);
@@ -149,20 +156,26 @@ export function TaskRow({
     >
       {!lecture && (
         <div className="pt-0.5">
+          {/* La case garde son dessin de 20 px ; sur téléphone, la zone qui
+              répond au doigt fait 44 px (marges négatives : la ligne ne bouge pas). */}
           <button
             type="button"
             onClick={onComplete}
             disabled={!onComplete}
             aria-label={done ? "Rouvrir la relance" : "Marquer comme faite"}
-            className={`grid h-5 w-5 place-items-center rounded-md ring-1 transition ${
-              done
-                ? "bg-emerald-500/25 text-emerald-300 ring-emerald-400/30"
-                : "bg-white/[0.04] text-transparent ring-white/15 hover:ring-celya-blue/60"
-            }`}
+            className="group -m-3 grid h-11 w-11 place-items-center lg:m-0 lg:h-5 lg:w-5"
           >
-            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor">
-              <path d="M8 13.2 4.8 10l-1.2 1.2L8 15.6l8.4-8.4-1.2-1.2z" />
-            </svg>
+            <span
+              className={`grid h-5 w-5 place-items-center rounded-md ring-1 transition ${
+                done
+                  ? "bg-emerald-500/25 text-emerald-300 ring-emerald-400/30"
+                  : "bg-white/[0.04] text-transparent ring-white/15 group-hover:ring-celya-blue/60"
+              }`}
+            >
+              <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor">
+                <path d="M8 13.2 4.8 10l-1.2 1.2L8 15.6l8.4-8.4-1.2-1.2z" />
+              </svg>
+            </span>
           </button>
         </div>
       )}
@@ -194,11 +207,8 @@ export function TaskRow({
               >
                 {task.prospects.company_name}
               </Link>
-              {task.prospects.phone && (
-                <a
-                  href={`tel:${task.prospects.phone.replace(/\s/g, "")}`}
-                  className="text-celya-blue hover:underline"
-                >
+              {tel && (
+                <a href={tel} className="hidden text-celya-blue hover:underline lg:inline">
                   {task.prospects.phone}
                 </a>
               )}
@@ -286,7 +296,7 @@ export function TaskRow({
                 type="button"
                 onClick={() => setResultatOuvert(true)}
                 aria-expanded={resultatOuvert}
-                className="btn-link text-[11px]"
+                className="btn-link hidden text-[11px] lg:inline-flex"
               >
                 Débriefer le RDV du {jourHeureCourt(rdvEnAttente.starts_at)}
               </button>
@@ -306,11 +316,55 @@ export function TaskRow({
                 type="button"
                 onClick={() => setResultatOuvert(true)}
                 aria-expanded={resultatOuvert}
-                className="btn-link text-[11px]"
+                className="btn-link hidden text-[11px] lg:inline-flex"
               >
                 Résultat
               </button>
             )}
+          </div>
+        )}
+
+        {/* Téléphone : UNE ligne d'actions sous le titre, au pouce (19/10) —
+            Appeler, Résultat (ou le débrief du RDV), la date. Le titre garde
+            toute la largeur au lieu d'être écrasé par les commandes. */}
+        {!lecture && !done && !compact && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-2 lg:hidden">
+            {tel && (
+              <a href={tel} className="btn-ghost min-h-[44px] px-3.5 text-xs">
+                <Icone nom="telephone" className="h-4 w-4" />
+                Appeler
+              </a>
+            )}
+            {task.prospects && !resultatOuvert && (
+              <button
+                type="button"
+                onClick={() => setResultatOuvert(true)}
+                aria-expanded={false}
+                className="btn-ghost min-h-[44px] px-3.5 text-xs"
+              >
+                {rdvEnAttente ? (
+                  <>
+                    <Icone nom="calendrier" className="h-4 w-4" />
+                    Débriefer le RDV
+                  </>
+                ) : (
+                  "Résultat"
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setReprogOuvert((o) => !o)}
+              aria-expanded={reprogOuvert}
+              aria-label={`Reprogrammer — ${fmtDateTime(task.due_at)}`}
+              className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-3 text-xs ring-1 ring-white/10 transition hover:bg-white/[0.05] ${
+                overdue ? "text-amber-300" : "text-slate-300"
+              }`}
+            >
+              <Icone nom="report" className="h-3.5 w-3.5" />
+              {fmtDate(task.due_at)}
+              <Icone nom="chevron" className={`h-3 w-3 transition ${reprogOuvert ? "rotate-180" : ""}`} />
+            </button>
           </div>
         )}
       </div>
@@ -321,8 +375,10 @@ export function TaskRow({
         // trois mots et faisaient défiler la ligne de côté. Alignés sur le
         // titre (pl-8, la largeur de la case à cocher).
         <div
-          className={`flex flex-wrap items-center gap-1 ${
-            compact ? "col-start-2 mt-2" : "w-full pl-8 lg:w-auto lg:shrink-0 lg:pl-0"
+          className={`flex-wrap items-center gap-1 ${
+            compact
+              ? "col-start-2 mt-2 flex"
+              : `w-full pl-8 lg:flex lg:w-auto lg:shrink-0 lg:pl-0 ${reprogOuvert || pourQuand ? "flex" : "hidden"}`
           }`}
         >
           {/* « À rappeler » vient d'être enregistré : il ne manque plus que le
@@ -340,7 +396,7 @@ export function TaskRow({
             disabled={!onReschedule}
             onChange={(e) => reschedule(e.target.value)}
             aria-label="Reprogrammer la relance"
-            className="rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
+            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60 lg:min-h-0"
           />
           {RACCOURCIS_RELANCE.map(({ label, jours }) => (
             <button
@@ -349,7 +405,7 @@ export function TaskRow({
               disabled={!onReschedule}
               onClick={() => reschedule(shiftedDate(jours))}
               title={`Reprogrammer à dans ${jours} jour${jours > 1 ? "s" : ""}`}
-              className="rounded-lg px-2 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200"
+              className="min-h-[44px] rounded-lg px-2.5 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 lg:min-h-0 lg:px-2"
             >
               {label}
             </button>
@@ -361,7 +417,7 @@ export function TaskRow({
             disabled={!onDelete}
             title="Supprimer la relance"
             aria-label="Supprimer la relance"
-            className="rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400"
+            className="min-h-[44px] min-w-[44px] rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400 lg:min-h-0 lg:min-w-0"
           >
             <Icone nom="croix" className="h-3 w-3" />
           </button>

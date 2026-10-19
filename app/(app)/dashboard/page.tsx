@@ -383,8 +383,21 @@ export default async function TodoPage({
   const relanceLue = (t: TaskWithProspect) =>
     relanceEnLecture(viewer, t.assignee_id);
 
-  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction);
-  const today = todayAll.filter(inZone1).map(avecDerniereAction);
+  // Une fiche dont le RDV passé attend son issue : sa ligne offre le débrief
+  // à la place de « Résultat », comme la carte de la fiche (même liste que la
+  // zone débrief — jamais un RDV perso, jamais une fiche close).
+  const rdvParFiche = new Map(
+    debriefMeetings
+      .filter((m) => m.prospect)
+      .map((m) => [m.prospect!.id, { id: m.id, starts_at: m.starts_at }])
+  );
+  const avecDebrief = (t: TaskWithProspect): TaskWithProspect => {
+    const rdv = t.prospect_id ? rdvParFiche.get(t.prospect_id) : undefined;
+    return rdv ? { ...t, rdv_a_debriefer: rdv } : t;
+  };
+
+  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
+  const today = todayAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
 
   // Le résultat du prédicat, pas le prédicat : `TaskList` est un composant
   // CLIENT, et une fonction ne traverse pas la frontière serveur → client

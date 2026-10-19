@@ -10,9 +10,11 @@
  * fiche close), et la règle d'étape (lib/crm/status.ts) — « À rappeler »
  * avance sur un fait, ne recule jamais, respecte le verrou.
  *
- * Ce qui est testé AILLEURS : le débrief implicite et les RDV remplacés vivent
- * en SQL (migration 027), testés par supabase/recettes/027_corps.sql — cas
- * Carrosserie carsystem compris.
+ * Le débrief implicite et les RDV remplacés vivent en SQL (migration 027),
+ * testés par supabase/recettes/027_corps.sql — cas Carrosserie carsystem
+ * compris. Ici, seulement la recopie lisible de la règle implicite
+ * (`issueImplicite`), sur les mêmes cas : ce qui ferme, ce qui ne ferme rien
+ * (pas de réponse, barrage, repérage), et « Pas intéressé » → Perdu.
  */
 
 import {
@@ -21,6 +23,7 @@ import {
   sujetDebrief,
   rdvADebriefer,
   estIssueDebrief,
+  issueImplicite,
   ISSUES_TENUES,
   type RdvEnAttente,
 } from "./debrief.ts";
@@ -96,6 +99,30 @@ verifie("le sujet d'une annulation",
 verifie("estIssueDebrief : les quatre issues tenues + annulé, rien d'autre",
   [...ISSUES_TENUES, "annule", "reporte", "constructor", ""].map(estIssueDebrief),
   [true, true, true, true, true, false, false, false]);
+
+// --- 1b. Le débrief IMPLICITE (miroir du trigger SQL de la 027) ------------
+console.log("\n— le débrief implicite —");
+
+verifie("« Pas de réponse » après le RDV : ne ferme RIEN",
+  issueImplicite({ type: "note", outcome: "sans_reponse", isExchange: false }), null);
+verifie("« Barrage » après le RDV : ne ferme RIEN, même attesté",
+  issueImplicite({ type: "note", outcome: "barrage", isExchange: true }), null);
+verifie("« À rappeler » → a_rappeler", issueImplicite({ type: "note", outcome: "rappeler", isExchange: true }), "a_rappeler");
+verifie("« Intéressé » → a_rappeler", issueImplicite({ type: "note", outcome: "interesse", isExchange: true }), "a_rappeler");
+const refusImplicite = issueImplicite({ type: "note", outcome: "refus", isExchange: true });
+verifie("« Pas intéressé » → pas_interesse (et non suite_posee)", refusImplicite, "pas_interesse");
+const effetsRefus = effetsDebrief(refusImplicite as "pas_interesse");
+verifie("« Pas intéressé » implicite : mêmes effets que l'explicite — Perdu verrouillé, relances annulées",
+  [effetsRefus.statutRdv, effetsRefus.etapeDecidee, effetsRefus.annulerRelances], ["honore", "perdu", true]);
+verifie("échange attesté sans résultat → suite_posee",
+  issueImplicite({ type: "note", outcome: null, isExchange: true }), "suite_posee");
+verifie("email envoyé → suite_posee", issueImplicite({ type: "email", isExchange: false }), "suite_posee");
+verifie("note de repérage (outcome NULL, pas un échange) : rien — le piège NULL du SQL",
+  issueImplicite({ type: "note", outcome: null, isExchange: false }), null);
+verifie("brouillon : rien", issueImplicite({ type: "email", isExchange: false, isDraft: true }), null);
+verifie("activité rendez_vous : rien", issueImplicite({ type: "rendez_vous", isExchange: true }), null);
+verifie("ligne rattachée à un RDV : rien",
+  issueImplicite({ type: "note", outcome: "refus", isExchange: true, meetingId: "m1" }), null);
 
 // --- 2. La zone « à débriefer » ---------------------------------------------
 console.log("\n— la zone « à débriefer » —");

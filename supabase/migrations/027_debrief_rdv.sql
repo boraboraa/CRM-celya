@@ -22,9 +22,14 @@
 --
 -- 2. Le DÉBRIEF IMPLICITE (trigger sur activities, et SEULEMENT sur
 --    activities) : une action humaine posée sur la fiche APRÈS le début du
---    rendez-vous — échange attesté, résultat d'appel, email envoyé — le clôt
---    en « honore », avec une ligne au journal. La relance redevient la
---    prochaine action (recalcul par le trigger de la 022).
+--    rendez-vous — échange attesté, résultat d'appel « À rappeler »,
+--    « Intéressé » ou « Pas intéressé », email envoyé — le clôt en « honore »,
+--    avec une ligne au journal. La relance redevient la prochaine action
+--    (recalcul par le trigger de la 022).
+--    · « Pas de réponse » et « Barrage » ne ferment RIEN (décision de Bora,
+--      19/10) : ne pas avoir eu la personne ne prouve pas que le rendez-vous a
+--      eu lieu. Un « Barrage » est un échange attesté (on a eu un standard),
+--      il est donc écarté explicitement, avant le test d'échange.
 --    · PAS de trigger sur tasks, et c'est voulu : le suivi CRM automatique
 --      re-date des relances tout seul (Alain docteur, 21/09) — il fermerait
 --      des rendez-vous que personne n'a tenus. Une relance seule ne ferme rien.
@@ -36,8 +41,14 @@
 --    · « honore » ne vient QUE d'ici ou du débrief explicite : d'une action
 --      humaine posée après le rendez-vous.
 --    · Un résultat « À rappeler » ou « Intéressé » posé après le rendez-vous
---      vaut l'issue « intéressé, à rappeler » ; tout le reste vaut « suite
---      posée ».
+--      vaut l'issue « intéressé, à rappeler » ; un « Pas intéressé » vaut
+--      l'issue « pas intéressé », avec la MÊME conséquence que le débrief
+--      explicite : la fiche passe en Perdu, VERROUILLÉE, et ses relances
+--      ouvertes sont annulées (la raison est déjà exigée par le résultat
+--      d'appel et versée dans lost_reason) ; tout le reste vaut « suite posée ».
+--      Le miroir TypeScript de ce tableau est ISSUE_DU_RESULTAT
+--      (lib/crm/debrief.ts, npm run test:debrief) : l'un ne bouge pas sans
+--      l'autre.
 --
 -- 3. UN SEUL rendez-vous en attente par fiche (trigger sur meetings) :
 --    · poser ou reporter un rendez-vous clôt tout AUTRE rendez-vous passé non
@@ -81,8 +92,9 @@ alter table public.meetings
 
 comment on column public.meetings.debrief_issue is
   'Ce qu''a donné le rendez-vous. Débrief explicite : a_rappeler (intéressé, à rappeler), '
-  'proposition, signe, pas_interesse. Débrief implicite (027) : suite_posee, ou a_rappeler '
-  'si le résultat d''appel posé après lui était « À rappeler » / « Intéressé ». remplace : '
+  'proposition, signe, pas_interesse. Débrief implicite (027) : suite_posee, a_rappeler '
+  'si le résultat d''appel posé après lui était « À rappeler » / « Intéressé », '
+  'pas_interesse s''il était « Pas intéressé » (fiche en Perdu, verrouillée). remplace : '
   'clos par un rendez-vous plus récent sur la même fiche (statut annule). Null : clos sans '
   'issue dite (ancien débrief, annulation).';
 
@@ -102,14 +114,25 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare
   v_etape public.prospect_status;
   v_rdv   record;
+  v_issue text;
 begin
   if new.prospect_id is null or new.is_draft or new.meeting_id is not null
      or new.type = 'rendez_vous' then
     return new;
   end if;
-  -- Une action humaine qui atteste d'une suite : échange, résultat d'appel,
-  -- email envoyé. Une note de repérage ne ferme rien.
-  if not (new.is_exchange or new.outcome is not null or new.type = 'email') then
+  -- Ne pas avoir eu la personne ne prouve pas que le rendez-vous a eu lieu :
+  -- « Pas de réponse » et « Barrage » ne ferment rien. Écartés AVANT le test
+  -- d'échange — un barrage est un échange attesté.
+  if coalesce(new.outcome in ('sans_reponse', 'barrage'), false) then
+    return new;
+  end if;
+  -- Une action humaine qui atteste d'une suite : échange, résultat d'appel
+  -- (rappeler, interesse, refus), email envoyé. Une note de repérage ne ferme
+  -- rien. ⚠ `outcome in (…)` vaut NULL quand outcome est NULL, et `not NULL`
+  -- n'est pas vrai : sans le coalesce, une note de repérage fermait le RDV.
+  if not (coalesce(new.is_exchange, false)
+          or coalesce(new.outcome in ('rappeler', 'interesse', 'refus'), false)
+          or new.type = 'email') then
     return new;
   end if;
 
@@ -135,12 +158,34 @@ begin
     return new;
   end if;
 
+  v_issue := case
+               when new.outcome in ('rappeler', 'interesse') then 'a_rappeler'
+               when new.outcome = 'refus' then 'pas_interesse'
+               else 'suite_posee'
+             end;
+
   update public.meetings
      set status = 'honore',
          debriefed_at = now(),
-         debrief_issue = case when new.outcome in ('rappeler', 'interesse')
-                              then 'a_rappeler' else 'suite_posee' end
+         debrief_issue = v_issue
    where id = v_rdv.id;
+
+  -- « Pas intéressé » après le rendez-vous : la même conséquence que le
+  -- débrief explicite — Perdu, verrouillé (une décision humaine : c'est
+  -- l'humain qui a tapé le résultat), relances ouvertes annulées. La raison
+  -- est déjà sur la fiche (lost_reason, posée par le résultat d'appel).
+  if v_issue = 'pas_interesse' then
+    update public.prospects
+       set status = 'perdu',
+           status_locked = true,
+           status_locked_at = now(),
+           status_auto_reason = null,
+           status_auto_at = null
+     where id = new.prospect_id;
+    update public.tasks
+       set status = 'annule'
+     where prospect_id = new.prospect_id and status = 'a_faire';
+  end if;
 
   -- Une milliseconde AVANT l'action : dans la chronologie, le rendez-vous se
   -- clôt puis la suite arrive — et la « dernière action » de la carte reste
@@ -154,9 +199,14 @@ begin
     'RDV du ' || to_char(v_rdv.starts_at at time zone 'Europe/Brussels', 'DD/MM')
       || ' marqué comme tenu (suite posée le '
       || to_char(new.occurred_at at time zone 'Europe/Brussels', 'DD/MM') || ')',
-    'Une suite a été posée sur la fiche après le rendez-vous du '
-      || public.jour_heure_court(v_rdv.starts_at)
-      || ' : il est considéré comme tenu. La relance redevient la prochaine action.',
+    case when v_issue = 'pas_interesse'
+      then 'Un « Pas intéressé » a été posé après le rendez-vous du '
+        || public.jour_heure_court(v_rdv.starts_at)
+        || ' : il est considéré comme tenu, la fiche passe en Perdu et ses relances ouvertes sont annulées.'
+      else 'Une suite a été posée sur la fiche après le rendez-vous du '
+        || public.jour_heure_court(v_rdv.starts_at)
+        || ' : il est considéré comme tenu. La relance redevient la prochaine action.'
+    end,
     new.occurred_at - interval '1 millisecond',
     false,
     false,
@@ -248,6 +298,7 @@ comment on column public.prospects.next_action_at is
   'débriefé ; sinon, sa relance la plus proche. Un rendez-vous à venir est TOUJOURS la '
   'prochaine action : une relance datée avant lui reste une tâche (« À appeler ») mais ne '
   'le remplace jamais (024). Un rendez-vous passé le reste TANT QUE RIEN N''EST POSÉ APRÈS '
-  'LUI : un échange, un résultat d''appel ou un email le clôt (027). Une fiche gagnée ou '
+  'LUI : un échange, un résultat d''appel (ni « pas de réponse » ni « barrage ») ou un '
+  'email le clôt (027). Une fiche gagnée ou '
   'perdue ne réclame jamais rien : seuls ses rendez-vous À VENIR et ses relances ouvertes '
   'comptent (023). Calculée par prochaine_action_de, jamais écrite ailleurs.';

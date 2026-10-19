@@ -9,8 +9,12 @@
 --
 -- La règle : « Un rendez-vous passé non débriefé reste la prochaine action —
 -- tant que rien n'est posé après lui. » Seule une ACTIVITÉ humaine (échange
--- attesté, résultat d'appel, email envoyé) le clôt ; une relance seule ne
--- ferme rien (le suivi automatique re-date des relances tout seul).
+-- attesté, résultat d'appel « À rappeler » / « Intéressé » / « Pas
+-- intéressé », email envoyé) le clôt ; une relance seule ne ferme rien (le
+-- suivi automatique re-date des relances tout seul), ni un « Pas de réponse »
+-- ou un « Barrage » (ne pas avoir eu la personne ne prouve pas que le RDV a eu
+-- lieu — décision du 19/10). « Pas intéressé » vaut l'issue pas_interesse :
+-- fiche en Perdu, verrouillée, relances annulées.
 -- Et un seul rendez-vous en attente par fiche.
 --
 -- Ne dépend pas de la 026 : aucune assertion n'emploie 'a_rappeler' (la règle
@@ -60,7 +64,7 @@ declare
   m1 uuid; m2 uuid; m3 uuid; m4 uuid; m5 uuid; m6 uuid; m7 uuid; m8 uuid; m9 uuid;
   m10 uuid; m11 uuid; m12a uuid; m12b uuid; m13a uuid; m13b uuid; m13c uuid;
   m14a uuid; m14b uuid; m14c uuid; m15a uuid; m15b uuid; m16a uuid; m16b uuid;
-  m17 uuid; mperso uuid; mcs uuid;
+  m17 uuid; m19 uuid; m20 uuid; mperso uuid; mcs uuid;
   -- Pas de variable nommée comme un alias de requête (t, a, m) : 42702.
   pid uuid; tid uuid; i int; n int; v_err text;
 begin
@@ -146,7 +150,7 @@ begin
   -- 2. Résultat d'appel « À rappeler »
   insert into public.activities (prospect_id, author_id, type, outcome, occurred_at, is_exchange)
   values (p[2], collins, 'note', 'rappeler', now(), true);
-  -- 3. Résultat d'appel « Pas de réponse » (pas un échange, mais un résultat)
+  -- 3. Résultat d'appel « Pas de réponse » : ne prouve pas que le RDV a eu lieu
   insert into public.activities (prospect_id, author_id, type, outcome, occurred_at, is_exchange)
   values (p[3], collins, 'note', 'sans_reponse', now(), false);
   -- 4. Email envoyé (comme l'écrit crm-mail : type email, is_exchange par défaut)
@@ -171,12 +175,56 @@ begin
     pg_temp.rdv(m2) = 'honore/a_rappeler/true', pg_temp.rdv(m2));
   perform pg_temp.verifie('2. …la carte dit toujours « À rappeler »',
     (select last_outcome from public.prospect_action_state where prospect_id = p[2]) = 'rappeler');
-  perform pg_temp.verifie('3. résultat « Pas de réponse » → honore / suite_posee',
-    pg_temp.rdv(m3) = 'honore/suite_posee/true', pg_temp.rdv(m3));
+  perform pg_temp.verifie('3. résultat « Pas de réponse » : le RDV reste EN ATTENTE',
+    pg_temp.rdv(m3) = 'prevu/∅/false', pg_temp.rdv(m3));
+  perform pg_temp.verifie('3. …et la fiche dit toujours « à débriefer »',
+    pg_temp.na(p[3]) = 'rendez_vous @ ' || passe::text, pg_temp.na(p[3]));
   perform pg_temp.verifie('4. email envoyé → honore',
     pg_temp.rdv(m4) = 'honore/suite_posee/true', pg_temp.rdv(m4));
-  perform pg_temp.verifie('1-4. sans relance, la fiche n''a plus de prochaine action',
-    pg_temp.na(p[2]) = '∅ @ ∅' and pg_temp.na(p[3]) = '∅ @ ∅', pg_temp.na(p[2]));
+  perform pg_temp.verifie('2. sans relance, la fiche n''a plus de prochaine action',
+    pg_temp.na(p[2]) = '∅ @ ∅', pg_temp.na(p[2]));
+
+  -- 3b. Résultat d'appel « Barrage » (un échange attesté — on a eu le
+  --     standard) : ne prouve pas non plus que le RDV a eu lieu.
+  insert into public.meetings (owner_id, prospect_id, kind, title, starts_at, ends_at, created_by)
+  values (collins, p[19], 'prospect', 'RDV P19', passe, passe + interval '1 hour', collins) returning id into m19;
+  perform set_config('request.jwt.claims', json_build_object('sub', collins, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  insert into public.activities (prospect_id, author_id, type, outcome, subject, occurred_at, is_exchange)
+  values (p[19], collins, 'note', 'barrage', 'La secrétaire filtre', now(), true);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.verifie('3b. résultat « Barrage » (échange attesté) : le RDV reste EN ATTENTE',
+    pg_temp.rdv(m19) = 'prevu/∅/false', pg_temp.rdv(m19));
+
+  -- 3c. Résultat d'appel « Pas intéressé » après le RDV : issue pas_interesse,
+  --     fiche en Perdu VERROUILLÉE, relances annulées — comme le débrief
+  --     explicite. La raison, ResultatAppel l'exige et saveExchangeCore la
+  --     pose sur la fiche AVANT d'écrire l'activité : on rejoue cet ordre.
+  insert into public.meetings (owner_id, prospect_id, kind, title, starts_at, ends_at, created_by)
+  values (collins, p[20], 'prospect', 'RDV P20', passe, passe + interval '1 hour', collins) returning id into m20;
+  insert into public.tasks (prospect_id, title, due_at, assignee_id, created_by)
+  values (p[20], 'Relancer P20', relance, collins, collins) returning id into tid;
+  perform set_config('request.jwt.claims', json_build_object('sub', collins, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  update public.prospects set lost_reason = 'Bosse déjà avec un concurrent' where id = p[20];
+  insert into public.activities (prospect_id, author_id, type, outcome, subject, occurred_at, is_exchange)
+  values (p[20], collins, 'note', 'refus', 'Bosse déjà avec un concurrent', now(), true);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.verifie('3c. « Pas intéressé » après le RDV → honore / pas_interesse',
+    pg_temp.rdv(m20) = 'honore/pas_interesse/true', pg_temp.rdv(m20));
+  perform pg_temp.verifie('3c. …la fiche passe en Perdu, VERROUILLÉE',
+    (select status::text || '/' || status_locked::text from public.prospects where id = p[20]) = 'perdu/true',
+    (select status::text || '/' || status_locked::text from public.prospects where id = p[20]));
+  perform pg_temp.verifie('3c. …la raison posée par le résultat d''appel est gardée',
+    (select lost_reason from public.prospects where id = p[20]) = 'Bosse déjà avec un concurrent');
+  perform pg_temp.verifie('3c. …ses relances ouvertes sont annulées, plus rien à faire',
+    (select status::text from public.tasks where id = tid) = 'annule' and pg_temp.na(p[20]) = '∅ @ ∅',
+    (select status::text from public.tasks where id = tid) || ' ' || pg_temp.na(p[20]));
+  perform pg_temp.verifie('3c. …la ligne au journal dit que la fiche passe en Perdu',
+    (select count(*) from public.activities where prospect_id = p[20] and meeting_id = m20
+       and body like '%la fiche passe en Perdu%') = 1);
 
   -- 5. Chemin MCP / crm-mail : service_role (RLS contournée)
   insert into public.meetings (owner_id, prospect_id, kind, title, starts_at, ends_at, created_by)

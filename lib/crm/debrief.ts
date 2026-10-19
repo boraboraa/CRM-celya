@@ -161,6 +161,49 @@ export function sujetDebrief(issue: IssueDebrief, startsAt: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Le débrief IMPLICITE — miroir lisible du trigger SQL
+// ---------------------------------------------------------------------------
+
+/**
+ * Ce qu'une ligne de journal posée APRÈS un rendez-vous passé non débriefé
+ * fait de lui. La règle s'exécute EN SQL (`activities_debrief_implicite`,
+ * migration 027 — tous les écrivains y passent : écran, MCP, crm-mail, Janet) ;
+ * cette fonction en est la recopie, pour que la règle se lise et se teste
+ * sans base. Toute évolution se fait DES DEUX CÔTÉS — la recette
+ * supabase/recettes/027_corps.sql joue les mêmes cas.
+ *
+ * - « Pas de réponse » et « Barrage » ne prouvent pas que le RDV a eu lieu :
+ *   rien (décision de Bora, 18/10) — même un barrage attesté.
+ * - Ferment : un échange attesté, un résultat « À rappeler » / « Intéressé » /
+ *   « Pas intéressé », un email envoyé. Une note de repérage, un brouillon,
+ *   une activité rendez_vous ou une ligne déjà rattachée à un RDV : rien.
+ * - L'issue : « À rappeler » / « Intéressé » → a_rappeler (l'étape suit le
+ *   fait) ; « Pas intéressé » → pas_interesse, MÊMES effets que le débrief
+ *   explicite (`effetsDebrief("pas_interesse")` : Perdu verrouillé, relances
+ *   annulées) ; tout le reste → suite_posee.
+ *
+ * null : la ligne ne ferme rien. (Les conditions de temps et d'étape — RDV
+ * commencé avant la ligne, fiche ni gagnée ni perdue, RDV de prospect — sont
+ * celles de `rdvADebriefer`, plus bas.)
+ */
+export function issueImplicite(ligne: {
+  type: string;
+  outcome?: string | null;
+  isExchange?: boolean | null;
+  isDraft?: boolean | null;
+  meetingId?: string | null;
+}): IssueTenue | "suite_posee" | null {
+  if (ligne.isDraft || ligne.meetingId || ligne.type === "rendez_vous") return null;
+  if (ligne.outcome === "sans_reponse" || ligne.outcome === "barrage") return null;
+  const resultatQuiFerme =
+    ligne.outcome === "rappeler" || ligne.outcome === "interesse" || ligne.outcome === "refus";
+  if (!(ligne.isExchange || resultatQuiFerme || ligne.type === "email")) return null;
+  if (ligne.outcome === "rappeler" || ligne.outcome === "interesse") return "a_rappeler";
+  if (ligne.outcome === "refus") return "pas_interesse";
+  return "suite_posee";
+}
+
+// ---------------------------------------------------------------------------
 // La zone « Rendez-vous à débriefer » — ce qui attend une issue
 // ---------------------------------------------------------------------------
 

@@ -24,7 +24,7 @@ ligne « plan gratuit » de ce fichier était fausse, corrigée dans Coordonnée
 
 **Au 18 octobre**, les migrations **`026`** (étape « À rappeler ») et **`027`**
 (débrief implicite, un seul RDV en attente par fiche) sont écrites et
-recettées (027 : 50 OK), **pas appliquées**. Ordre : `026` seule, puis `027`,
+recettées (027 : **57 OK, 0 faute** le 19/10), **pas appliquées**. Ordre : `026` seule, puis `027`,
 puis Vercel — voir « Débriefer là où on travaille ». Elles ne dépendent pas de
 la `025`.
 
@@ -705,7 +705,8 @@ faux, signée de qui a posé le RDV). Trigger `meetings_prochaine_action`.
   débriefer », jamais en ambre. C'est le seul garde-fou contre une fiche qui
   disparaît quand on oublie de débriefer — **ne pas l'affaiblir**. ⚠ **Depuis
   la `027` (18/10) : TANT QUE RIEN N'EST POSÉ APRÈS LUI** — un échange, un
-  résultat d'appel ou un email le clôt (une relance seule, non). Voir
+  résultat d'appel (ni « pas de réponse » ni « barrage ») ou un email le clôt
+  (une relance seule, non). Voir
   « Débriefer là où on travaille ».
 - **Un RDV clos (honoré / annulé) sans suite laisse la fiche SANS prochaine
   action** : ses relances d'avant ont été clôturées à la pose. Elle sort de
@@ -913,13 +914,29 @@ l'humain qui tape l'issue, comme un clic sur l'étape.
 
 **2. Le débrief IMPLICITE — en SQL, trigger sur `activities` et SEULEMENT sur
 `activities`** (`activities_debrief_implicite`, 027). Une action humaine posée
-sur la fiche APRÈS le début du RDV — échange attesté, résultat d'appel (même
-« pas de réponse »), email envoyé — le clôt en `honore`, avec une ligne au
-journal « RDV du 29/09 marqué comme tenu (suite posée le 15/10) », datée **une
-milliseconde avant** l'action (la « dernière action » de la carte reste celle
-de l'humain). La relance redevient la prochaine action. Un résultat « À
-rappeler » ou « Intéressé » vaut l'issue `a_rappeler` (donc l'étape « À
-rappeler ») ; tout le reste vaut `suite_posee`.
+sur la fiche APRÈS le début du RDV — échange attesté, résultat d'appel « À
+rappeler » / « Intéressé » / « Pas intéressé », email envoyé — le clôt en
+`honore`, avec une ligne au journal « RDV du 29/09 marqué comme tenu (suite
+posée le 15/10) », datée **une milliseconde avant** l'action (la « dernière
+action » de la carte reste celle de l'humain). La relance redevient la
+prochaine action. Un résultat « À rappeler » ou « Intéressé » vaut l'issue
+`a_rappeler` (donc l'étape « À rappeler ») ; **« Pas intéressé » vaut
+`pas_interesse`, avec les effets du débrief explicite** : fiche en **Perdu,
+verrouillée**, relances ouvertes annulées (la raison, `ResultatAppel` l'a déjà
+exigée et versée dans `lost_reason`) ; tout le reste vaut `suite_posee`.
+- **« Pas de réponse » et « Barrage » ne ferment RIEN** (décision de Bora,
+  19/10) : ils ne prouvent pas que le RDV a eu lieu — un barrage, même compté
+  comme échange, non plus. Écartés AVANT le test d'échange.
+- La règle s'exécute en SQL ; sa recopie lisible est `issueImplicite`
+  (`lib/crm/debrief.ts`), jouée par `test:debrief` sur les mêmes cas que la
+  recette. **Toute évolution se fait des deux côtés.**
+- ⚠ **Le piège NULL, trouvé par la recette le 19/10** : `new.outcome in (…)`
+  vaut NULL quand `outcome` est NULL, et `not (faux or NULL or faux)` vaut
+  NULL — le `return` était sauté, **une note de repérage fermait le RDV**
+  (51 OK, 6 fautes au premier passage). Toute condition sur une colonne
+  nullable dans un `if not (…)` passe par `coalesce(…, false)`.
+- Janet (« jamais Perdu ») : sans recouvrement en pratique — elle n'appelle que
+  des fiches « À appeler », qui n'ont pas de RDV en attente.
 - **PAS de trigger sur `tasks` — décision de Bora, et c'est le point à ne pas
   « compléter »** : le suivi CRM automatique re-date des relances tout seul
   (Alain docteur, 21/09) ; il fermerait des rendez-vous que personne n'a tenus.
@@ -956,7 +973,10 @@ l'agenda du jour, avant les relances en retard), avec les mêmes boutons que la
 fiche. Sa liste vient de `rdvADebriefer` (`lib/crm/debrief.ts`) : jamais un RDV
 perso (le « Rdv Ephec »), jamais une fiche close, **un seul RDV par fiche** (le
 plus récent). « Passé » = **a commencé**, comme en base. L'outil MCP `a_faire`
-renvoie la même liste (`rdv_a_debriefer`).
+renvoie la même liste (`rdv_a_debriefer`). **Et chaque ligne de relance** dont
+la fiche a un tel RDV offre « Débriefer le RDV du 29/09 à 10h » (le même
+`DebriefRdv`) **à la place de « Résultat »**, comme la carte de la fiche
+(`TaskWithProspect.rdv_a_debriefer`, tiré de la même liste).
 
 **5. Le libellé sous l'étape suit le fait du JOUR** (`raisonAffichee`,
 `libelleFaitRdv`) : « un rendez-vous a eu lieu le 29 sept. 2026, en attente de
@@ -988,11 +1008,14 @@ fiche contre une base sans la 027. Les deux sont **additives** et
 **indépendantes de la `025`**. Réversible : supprimer les deux triggers (les
 colonnes peuvent rester) ; la valeur d'enum reste, inerte.
 
-**Recette** : `supabase/recettes/027_assembler.sh`, **50 OK, 0 faute** le
-18/10, en transaction annulée contre la production, production revérifiée
-intacte (aucune colonne, aucun trigger, aucune fiche de sonde, 86 fiches). Elle
-couvre les cinq gestes qui ferment (écran ET service_role), les huit qui ne
-ferment rien (**dont la relance seule, posée / re-datée / cochée**), le RDV
+**Recette** : `supabase/recettes/027_assembler.sh`, **57 OK, 0 faute** le
+19/10 (50 le 18/10 avant la correction « pas de réponse / barrage / refus »),
+en transaction annulée contre la production, production revérifiée intacte
+(aucune colonne, aucun trigger, aucune fiche de sonde, 86 fiches, 15 RDV).
+Elle couvre les gestes qui ferment (écran ET service_role), « Pas intéressé »
+→ Perdu verrouillé avec relances annulées, ceux qui ne ferment rien (**pas de
+réponse, barrage, la relance seule posée / re-datée / cochée**, repérage,
+brouillon…), le RDV
 posé par Bora fermé par la note de Collins, Rémi refusé, les doublons, la pose
 et le report qui remplacent, et **rejoue Carrosserie carsystem**. Côté
 TypeScript : **`npm run test:debrief`** (issues, zone, étape « À rappeler »,

@@ -40,4 +40,24 @@ test("captures des écrans", async ({ page }, info) => {
     await page.screenshot({ path: `${dir}/${nom}-ecran.png` });
     await page.screenshot({ path: `${dir}/${nom}-page.png`, fullPage: true });
   }
+
+  // Les feuilles du téléphone — seulement là où elles existent (pas « avant »).
+  await page.goto(`/dashboard?${p}`);
+  await page.waitForLoadState("networkidle");
+  const plus = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Nouveau prospect" });
+  if (await plus.count()) {
+    await plus.click();
+    await page.getByRole("dialog").waitFor();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${dir}/ajout-rapide-ecran.png` });
+  }
+  await page.goto(`/prospects?${p}`);
+  await page.waitForLoadState("networkidle");
+  const filtres = page.getByRole("button", { name: /^Filtres/ });
+  if (await filtres.count()) {
+    await filtres.click();
+    await page.getByRole("dialog").waitFor();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${dir}/filtres-ecran.png` });
+  }
 });

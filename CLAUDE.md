@@ -8,11 +8,14 @@ contexte acquis : ne le redemande pas.
 ## État au 19 octobre 2026 — chantier mobile
 
 **Le compte `recette-epuration@celya.test` est SUPPRIMÉ** (19/10, demande de
-Bora, via `crm-admin` `delete_user` : 0 fiche, 0 ligne rattachée). Deux comptes
-de test le temps du chantier mobile : `mobile-commercial@celya.test` et
-`mobile-admin@celya.test` (« ZZ Test mobile … »), leurs fiches « ZZ Test mobile »
-aux numéros **fictifs** (`+32 000 …`) — **à supprimer à la fin du chantier**,
-avec tout ce qui leur est rattaché. Voir « Le téléphone d'abord ».
+Bora, via `crm-admin` `delete_user` : 0 fiche, 0 ligne rattachée). Les deux
+comptes de test du chantier mobile ont servi puis ont été retirés le 19/10 :
+toutes leurs fiches « ZZ Test mobile » (numéros fictifs `+32 000 …`), RDV,
+relances et notes sont supprimés, la base est revenue à ses **86 fiches** ;
+`mobile-commercial@celya.test` est supprimé. **`mobile-admin@celya.test` reste,
+DÉSACTIVÉ et sans aucune ligne rattachée** — un admin ne peut pas se supprimer
+lui-même par `crm-admin`, et `delete` en SQL bloque l'outil MCP (piège connu) :
+**à supprimer depuis `/equipe`**. Voir « Le téléphone d'abord ».
 
 ## État au 8 octobre 2026
 

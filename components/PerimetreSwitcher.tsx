@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Perimetre } from "@/lib/crm/perimetre";
 import { ChoixMembrePerimetre } from "@/components/ChoixMembrePerimetre";
+import { PucePerimetre } from "@/components/PucePerimetre";
 
 /**
  * Le sélecteur de périmètre — « Moi », les autres, « Toute l'équipe ».
@@ -33,17 +34,14 @@ import { ChoixMembrePerimetre } from "@/components/ChoixMembrePerimetre";
  * COMPACT (18/10) : « Moi » · « Toute l'équipe » en boutons, les personnes
  * dans un menu déroulant — neuf noms en ligne débordaient de l'écran.
  *
+ * TÉLÉPHONE (sous `lg`, 19/10) : replié en UNE puce (« Toute l'équipe ▾ »)
+ * qui ouvre la feuille du bas — les mêmes liens, calculés une fois par
+ * `optionsPerimetre`. Sur /prospects, la puce cède la place à la feuille
+ * « Filtres », qui reçoit les mêmes options (`puceMobile={false}`).
+ *
  * Composant serveur, sans état : le périmètre EST l'URL.
  */
-export function PerimetreSwitcher({
-  role,
-  viewerId,
-  perimetre,
-  membres,
-  basePath,
-  searchParams = {},
-  peutElargir = false,
-}: {
+type PropsPerimetre = {
   role: string;
   viewerId: string;
   perimetre: Perimetre;
@@ -58,7 +56,31 @@ export function PerimetreSwitcher({
    * encadrant. Calculé par `peutElargir` (lib/crm/perimetre.ts), jamais ici.
    */
   peutElargir?: boolean;
-}) {
+};
+
+/** Un choix du sélecteur : un lien déjà construit (des chaînes seulement). */
+export type OptionPerimetre = {
+  href: string;
+  label: string;
+  actif: boolean;
+  /** Une personne (le menu déroulant), plutôt que « Moi » / « Toute l'équipe ». */
+  personne: boolean;
+};
+
+/**
+ * Les choix du sélecteur, ou null quand il ne doit RIEN montrer — calculés à
+ * un seul endroit pour la version ordinateur, la puce du téléphone et la
+ * feuille « Filtres » de /prospects.
+ */
+export function optionsPerimetre({
+  role,
+  viewerId,
+  perimetre,
+  membres,
+  basePath,
+  searchParams = {},
+  peutElargir = false,
+}: PropsPerimetre): OptionPerimetre[] | null {
   if (role !== "admin" && !peutElargir) return null;
 
   const href = (valeur: "moi" | "equipe" | string) => {
@@ -79,41 +101,68 @@ export function PerimetreSwitcher({
   // c'est le sélecteur mensonger qu'on refuse à un simple commercial.
   if (role !== "admin" && autres.length === 0) return null;
 
-  const boutons: { cle: string; label: string; actif: boolean }[] = [
+  return [
     {
-      cle: "moi",
+      href: href("moi"),
       label: "Moi",
       actif:
         perimetre.mode === "moi" ||
         (perimetre.mode === "membre" && perimetre.id === viewerId),
+      personne: false,
     },
-    { cle: "equipe", label: "Toute l'équipe", actif: perimetre.mode === "equipe" },
+    {
+      href: href("equipe"),
+      label: "Toute l'équipe",
+      actif: perimetre.mode === "equipe",
+      personne: false,
+    },
+    // Le nom complet dans le menu : deux « Collins » se distinguent ; le
+    // prénom seul suffisait quand ils étaient trois.
+    ...autres.map((m) => ({
+      href: href(m.id),
+      label: m.full_name?.trim() || m.email,
+      actif: perimetre.mode === "membre" && perimetre.id === m.id,
+      personne: true,
+    })),
   ];
-  // Le nom complet dans le menu : deux « Collins » se distinguent ; le
-  // prénom seul suffisait quand ils étaient trois.
-  const personnes = autres.map((m) => ({
-    href: href(m.id),
-    label: m.full_name?.trim() || m.email,
-    actif: perimetre.mode === "membre" && perimetre.id === m.id,
-  }));
+}
+
+export function PerimetreSwitcher({
+  puceMobile = true,
+  ...props
+}: PropsPerimetre & {
+  /** Téléphone : la puce repliée (false sur /prospects, où la feuille « Filtres » la porte). */
+  puceMobile?: boolean;
+}) {
+  const options = optionsPerimetre(props);
+  if (!options) return null;
+  const boutons = options.filter((o) => !o.personne);
+  const personnes = options.filter((o) => o.personne);
 
   return (
-    <div className="flex flex-wrap items-center gap-0.5 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
-      {boutons.map((o) => (
-        <Link
-          key={o.cle}
-          href={href(o.cle)}
-          aria-current={o.actif ? "true" : undefined}
-          className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
-            o.actif
-              ? "bg-white/[0.09] text-slate-100 ring-1 ring-white/15"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          {o.label}
-        </Link>
-      ))}
-      {personnes.length > 0 && <ChoixMembrePerimetre options={personnes} />}
-    </div>
+    <>
+      {puceMobile && (
+        <div className="lg:hidden">
+          <PucePerimetre options={options} />
+        </div>
+      )}
+      <div className="hidden flex-wrap items-center gap-0.5 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10 lg:flex">
+        {boutons.map((o) => (
+          <Link
+            key={o.href}
+            href={o.href}
+            aria-current={o.actif ? "true" : undefined}
+            className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+              o.actif
+                ? "bg-white/[0.09] text-slate-100 ring-1 ring-white/15"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            {o.label}
+          </Link>
+        ))}
+        {personnes.length > 0 && <ChoixMembrePerimetre options={personnes} />}
+      </div>
+    </>
   );
 }

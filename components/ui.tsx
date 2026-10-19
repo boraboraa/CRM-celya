@@ -68,7 +68,9 @@ export type IconeNom =
   | "equipe"
   | "reglages"
   | "loupe"
-  | "suivant";
+  | "suivant"
+  | "points"
+  | "sortie";
 
 /** Le combiné, réutilisé par « téléphone barré ». */
 const COMBINE = (
@@ -100,6 +102,16 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
     <>
       <path d="M2.8 8h10" />
       <path d="M9.4 4.4 13 8l-3.6 3.6" />
+    </>
+  ),
+  /** « Plus » — trois points, l'onglet des écrans qui ne sont pas de terrain. */
+  points: <path d="M3.4 8h.01M8 8h.01M12.6 8h.01" strokeWidth={2.4} />,
+  /** Se déconnecter : la porte et la flèche qui en sort. */
+  sortie: (
+    <>
+      <path d="M6.2 13.2H3.6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1h2.6" />
+      <path d="M7 8h6.4" />
+      <path d="M10.6 5.2 13.4 8l-2.8 2.8" />
     </>
   ),
   retour: (
@@ -440,20 +452,39 @@ export function PageHeader({
   title,
   subtitle,
   action,
+  compactMobile = false,
 }: {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  /**
+   * Téléphone (sous `lg`) : le titre sur UNE ligne, sans sous-titre ni
+   * action — le premier écran appartient au travail, pas à l'en-tête. L'action
+   * habituelle (« Nouveau prospect ») est déjà dans la barre du bas.
+   */
+  compactMobile?: boolean;
 }) {
   return (
-    <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-50">
+    <div
+      className={`flex flex-wrap items-end justify-between gap-4 ${
+        compactMobile ? "mb-4 lg:mb-7" : "mb-7"
+      }`}
+    >
+      <div className="min-w-0">
+        <h1
+          className={`font-display font-semibold tracking-tight text-slate-50 ${
+            compactMobile ? "truncate text-xl lg:text-2xl" : "text-2xl"
+          }`}
+        >
           {title}
         </h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-400">{subtitle}</p>}
+        {subtitle && (
+          <p className={`mt-1 text-sm text-slate-400 ${compactMobile ? "hidden lg:block" : ""}`}>
+            {subtitle}
+          </p>
+        )}
       </div>
-      {action}
+      {action && (compactMobile ? <div className="hidden lg:block">{action}</div> : action)}
     </div>
   );
 }

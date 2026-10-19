@@ -78,6 +78,8 @@ const STYLE: Record<
 
 /** Ce qu'on montre d'emblée ; le reste se déplie d'un clic. */
 const APERCU = 10;
+/** Sur téléphone (sous `lg`), cinq : le fil passe sous la carte et « Agir ». */
+const APERCU_MOBILE = 5;
 
 /**
  * CHRONOLOGIE — les échanges du plus récent au plus ancien, chaque événement
@@ -103,6 +105,7 @@ export function Timeline({
   const [tout, setTout] = useState(false);
   const visibles = tout ? entries : entries.slice(0, APERCU);
   const restantes = entries.length - visibles.length;
+  const restantesMobile = tout ? 0 : Math.max(0, entries.length - APERCU_MOBILE);
 
   if (entries.length === 0) {
     return (
@@ -122,10 +125,15 @@ export function Timeline({
           className="absolute bottom-2 left-[7px] top-2 w-px bg-gradient-to-b from-celya-blue/30 via-white/[0.08] to-transparent"
         />
 
-        {visibles.map((entry) => {
+        {visibles.map((entry, i) => {
           const style = STYLE[entry.kind];
+          // De la 6e à la 10e : visibles sur ordinateur, repliées sur téléphone.
+          // Un seul rendu, la largeur décide (pas d'écart d'hydratation).
           return (
-            <li key={entry.key} className="relative">
+            <li
+              key={entry.key}
+              className={`relative ${!tout && i >= APERCU_MOBILE ? "hidden lg:block" : ""}`}
+            >
               {/* La pastille sur le fil. */}
               <span
                 aria-hidden
@@ -187,11 +195,20 @@ export function Timeline({
         })}
       </ol>
 
+      {restantesMobile > 0 && (
+        <button
+          type="button"
+          onClick={() => setTout(true)}
+          className="btn-ghost mt-3 min-h-[44px] w-full px-4 py-2 text-xs lg:hidden"
+        >
+          Voir plus ({restantesMobile})
+        </button>
+      )}
       {restantes > 0 && (
         <button
           type="button"
           onClick={() => setTout(true)}
-          className="btn-ghost mt-3 w-full px-4 py-2 text-xs"
+          className="btn-ghost mt-3 hidden w-full px-4 py-2 text-xs lg:flex"
         >
           Voir les {restantes} entrée{restantes > 1 ? "s" : ""} précédente
           {restantes > 1 ? "s" : ""}

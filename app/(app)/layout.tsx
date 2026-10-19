@@ -4,15 +4,15 @@ import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/ui";
 import { NavLinks } from "@/components/Nav";
+import { BarreOnglets } from "@/components/BarreOnglets";
+import { AjoutRapide } from "@/components/AjoutRapide";
 import { BoutonRecherche, RechercheGlobale } from "@/components/RechercheGlobale";
-import { NAV_ITEMS, ADMIN_ITEM, APPELS_IA_ITEM, ACCOUNT_ITEM } from "@/lib/nav";
+import { navOrdinateur, ongletsMobiles } from "@/lib/nav";
 
-function SignOutButton({ full = false }: { full?: boolean }) {
+function SignOutButton() {
   return (
-    <form action="/auth/signout" method="post" className={full ? "w-full" : ""}>
-      <button className={`btn-ghost ${full ? "w-full" : "px-3 py-2 text-xs"}`}>
-        Se déconnecter
-      </button>
+    <form action="/auth/signout" method="post" className="w-full">
+      <button className="btn-ghost w-full">Se déconnecter</button>
     </form>
   );
 }
@@ -29,8 +29,7 @@ export default async function AppLayout({
 
   if (!me || !me.is_active) redirect("/acces-refuse");
 
-  const items =
-    me.role === "admin" ? [...NAV_ITEMS, ADMIN_ITEM, APPELS_IA_ITEM] : NAV_ITEMS;
+  const items = navOrdinateur(me.role);
 
   return (
     <div className="flex min-h-screen">
@@ -62,29 +61,39 @@ export default async function AppLayout({
               </span>
             </span>
           </Link>
-          <SignOutButton full />
+          <SignOutButton />
         </div>
       </aside>
 
       {/* Contenu */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Barre mobile */}
-        <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-space/85 px-4 py-3 backdrop-blur lg:hidden">
-          <div className="mb-3 flex items-center justify-between">
-            <Link href="/dashboard">
-              <Logo />
+        {/* En-tête mobile — compact (19/10) : le logo, la loupe et l'avatar
+            qui mène au compte. La navigation est descendue sous le pouce
+            (BarreOnglets) ; « Se déconnecter » ne prend plus la meilleure
+            place de l'écran, il vit dans « Compte » (et « Plus » pour l'admin). */}
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-white/[0.06] bg-space/85 px-4 py-1.5 backdrop-blur lg:hidden">
+          <Link href="/dashboard" className="py-1.5">
+            <Logo />
+          </Link>
+          <div className="flex items-center gap-1">
+            <BoutonRecherche compact />
+            <Link
+              href="/compte"
+              aria-label="Mon compte"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-white/[0.06]"
+            >
+              <Avatar name={me.full_name ?? email} />
             </Link>
-            <div className="flex items-center gap-2">
-              <BoutonRecherche compact />
-              <SignOutButton />
-            </div>
           </div>
-          <NavLinks items={[...items, ACCOUNT_ITEM]} orientation="horizontal" />
         </header>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
+        {/* Sous `lg`, la marge du bas laisse la place à la barre d'onglets. */}
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:px-8 lg:py-9">
           {children}
         </main>
+        <BarreOnglets onglets={ongletsMobiles(me.role)} />
+        {/* L'ajout rapide, UNE fois : le « ＋ » et le raccourci d'application l'ouvrent. */}
+        <AjoutRapide />
         {/* La fenêtre de recherche, UNE fois : les deux boutons l'ouvrent. */}
         <RechercheGlobale />
       </div>

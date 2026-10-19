@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   poserRendezVousAction,
   deplacerRendezVousAction,
+  cloturerRendezVousAction,
 } from "@/app/actions";
+import { FeuilleBas } from "@/components/FeuilleBas";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
-import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { heureCourte, isoToLocalInput, localInputToISO } from "@/lib/time";
 import { phraseAnnulees } from "@/lib/crm/prochaineAction";
 import { fmtDateTime } from "@/lib/constants";
+import { lienTel } from "@/lib/crm/telephone";
 import { Icone } from "@/components/ui";
 
 export type AgendaProspect = {
@@ -74,13 +78,25 @@ function topDe(local: string): number {
  * « Personnel »). Glisser-déposer une carte → deplacerRendezVousAction, en
  * optimiste. Aucune logique métier ici : tout passe par les server actions,
  * qui délèguent à lib/crm/agenda.ts.
+ *
+ * TÉLÉPHONE (sous `sm`, 19/10) : en vue Jour, la LISTE des rendez-vous du jour
+ * (heure, société, lieu, 📞) prend la place de la grille — repliée derrière
+ * « Grille horaire » ; on change de jour d'un balayage ou par les flèches.
+ * « ＋ RDV » ouvre la création dans la feuille du bas (même panneau, même
+ * `poserRendezVousAction`, qui refuse un rendez-vous sans heure) ; toucher un
+ * rendez-vous ouvre sa feuille : Reporter (`deplacerRendezVousAction`) ou
+ * Annuler (`cloturerRendezVousAction`, issue « annulé » — le chemin de
+ * l'outil MCP). Le glisser-déposer reste sur ordinateur.
  */
 export function AgendaGrid({
+  navigation,
   jours,
   aujourdHui,
   meetings,
   prospects,
 }: {
+  /** Les liens du jour (ou de la semaine) précédent et suivant — le balayage. */
+  navigation: { precedent: string; suivant: string };
   /** Les jours affichés, « YYYY-MM-DD » (Bruxelles). */
   jours: string[];
   aujourdHui: string;
@@ -92,14 +108,35 @@ export function AgendaGrid({
     meetings,
     (
       liste: AgendaMeeting[],
-      patch: { id: string; starts_at: string; ends_at: string }
+      patch: { id: string; starts_at?: string; ends_at?: string; status?: string }
     ) =>
       liste.map((m) =>
         m.id === patch.id
-          ? { ...m, starts_at: patch.starts_at, ends_at: patch.ends_at, status: "reporte" }
+          ? {
+              ...m,
+              starts_at: patch.starts_at ?? m.starts_at,
+              ends_at: patch.ends_at ?? m.ends_at,
+              status: patch.status ?? "reporte",
+            }
           : m
       )
   );
+  const router = useRouter();
+  /** Sous `sm` : les panneaux passent dans la feuille du bas. */
+  const [telephone, setTelephone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const maj = () => setTelephone(mq.matches);
+    maj();
+    mq.addEventListener("change", maj);
+    return () => mq.removeEventListener("change", maj);
+  }, []);
+  /** Téléphone : le rendez-vous dont la feuille est ouverte. */
+  const [detail, setDetail] = useState<string | null>(null);
+  const [report, setReport] = useState("");
+  const [grille, setGrille] = useState(false);
+  const [confirmerAnnulation, setConfirmerAnnulation] = useState(false);
+  const toucher = useRef<{ x: number; y: number } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string>();
   const [info, setInfo] = useState<string>();
@@ -179,6 +216,59 @@ export function AgendaGrid({
     setMode(null);
   }
 
+  /** « ＋ RDV » (téléphone) : le jour affiché, à la prochaine heure pleine. */
+  function nouveauRdv() {
+    const jour = jours[0];
+    let h = 9;
+    if (jour === aujourdHui) h = Math.min(Math.max(new Date().getHours() + 1, H_DEBUT), H_FIN - 1);
+    setErreur(undefined);
+    setInfo(undefined);
+    setCreation({ local: `${jour}T${pad(h)}:00` });
+    setMode(null);
+  }
+
+  /** Téléphone : reporter le rendez-vous de la feuille. */
+  function reporter(m: AgendaMeeting) {
+    const startsISO = localInputToISO(report);
+    if (!startsISO || report.length < 16) return;
+    const dureeMs = new Date(m.ends_at).getTime() - new Date(m.starts_at).getTime();
+    setErreur(undefined);
+    setInfo(undefined);
+    setDetail(null);
+    startTransition(async () => {
+      deplacer({
+        id: m.id,
+        starts_at: startsISO,
+        ends_at: new Date(new Date(startsISO).getTime() + dureeMs).toISOString(),
+      });
+      const res = await deplacerRendezVousAction({ id: m.id, startsAt: report });
+      if (res?.error) setErreur(res.error);
+      else {
+        const avis = [
+          res?.conflit
+            ? `Déplacé — mais ce créneau chevauche « ${res.conflit.title} » (${fmtDateTime(
+                res.conflit.starts_at
+              )}).`
+            : null,
+          phraseAnnulees(res?.annulees),
+        ].filter(Boolean);
+        if (avis.length > 0) setInfo(avis.join(" "));
+      }
+    });
+  }
+
+  /** Téléphone : annuler — le chemin de l'outil MCP (issue « annulé »). */
+  function annuler(m: AgendaMeeting) {
+    setErreur(undefined);
+    setInfo(undefined);
+    setDetail(null);
+    startTransition(async () => {
+      deplacer({ id: m.id, status: "annule" });
+      const res = await cloturerRendezVousAction({ id: m.id, issue: "annule" });
+      if (res?.error) setErreur(res.error);
+    });
+  }
+
   function poser() {
     if (!creation) return;
     if (mode === "prospect" && !choisi) return;
@@ -249,41 +339,19 @@ export function AgendaGrid({
   }
 
   const heures = Array.from({ length: H_FIN - H_DEBUT }, (_, i) => H_DEBUT + i);
+  // Téléphone, vue Jour : la liste du jour, et le rendez-vous de la feuille.
+  const jourSeul = jours.length === 1;
+  const duJourListe = jourSeul
+    ? vue
+        .filter((m) => isoToLocalInput(m.starts_at).slice(0, 10) === jours[0])
+        .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+    : [];
+  const enFeuille = vue.find((m) => m.id === detail) ?? null;
 
-  return (
-    <>
-      {erreur && (
-        <p
-          role="alert"
-          className="mb-3 rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300 ring-1 ring-rose-400/20"
-        >
-          {erreur}
-        </p>
-      )}
-      {info && (
-        <p className="mb-3 flex items-start gap-2 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300 ring-1 ring-amber-400/20">
-          <Icone nom="alerte" className="mt-0.5 h-3.5 w-3.5" />
-          {info}
-        </p>
-      )}
-
-      {/* ---------- Le panneau de création ---------- */}
-      {creation && (
-        <div className="card mb-4 space-y-3 p-5 ring-1 ring-celya-blue/30">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-slate-100">
-              Nouveau rendez-vous
-            </p>
-            <button
-              type="button"
-              onClick={fermerPanneau}
-              className="btn-link text-xs"
-            >
-              <Icone nom="croix" className="h-3 w-3" />
-              Annuler
-            </button>
-          </div>
-
+  // Le contenu du panneau de création — UN rendu, posé dans la carte
+  // (ordinateur) ou dans la feuille du bas (téléphone).
+  const contenuCreation = creation && (
+        <>
           {/* Première question : avec un prospect, ou personnel ? */}
           {mode === null ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -326,7 +394,7 @@ export function AgendaGrid({
                     <button
                       type="button"
                       onClick={() => setChoisi(null)}
-                      className="text-xs text-slate-500 hover:text-slate-300"
+                      className="min-h-[44px] text-xs text-slate-500 hover:text-slate-300 sm:min-h-0"
                     >
                       changer
                     </button>
@@ -346,7 +414,7 @@ export function AgendaGrid({
                           key={p.id}
                           type="button"
                           onClick={() => setChoisi(p)}
-                          className="rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.09] hover:text-slate-100"
+                          className="min-h-[44px] rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.09] hover:text-slate-100 sm:min-h-0"
                         >
                           {p.company_name}
                           {p.contact_name ? ` · ${p.contact_name}` : ""}
@@ -371,18 +439,35 @@ export function AgendaGrid({
               )}
 
               <div className="flex flex-wrap items-end gap-3">
+                {/* Le jour et l'heure, deux champs : sans heure, le bouton
+                    reste éteint (et le serveur refuserait de toute façon). */}
                 <div>
                   <label className="label" htmlFor="rdv-date">
-                    Date et heure
+                    Jour
                   </label>
                   <input
                     id="rdv-date"
-                    type="datetime-local"
-                    value={creation.local}
+                    type="date"
+                    value={creation.local.slice(0, 10)}
                     onChange={(e) =>
-                      setCreation({ local: e.target.value })
+                      setCreation({ local: `${e.target.value}T${creation.local.slice(11, 16)}` })
                     }
-                    className="input w-auto py-1.5 text-xs"
+                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:min-h-0"
+                  />
+                </div>
+                <div>
+                  <label className="label" htmlFor="rdv-heure">
+                    Heure
+                  </label>
+                  <input
+                    id="rdv-heure"
+                    type="time"
+                    step={900}
+                    value={creation.local.slice(11, 16)}
+                    onChange={(e) =>
+                      setCreation({ local: `${creation.local.slice(0, 10)}T${e.target.value}` })
+                    }
+                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:min-h-0"
                   />
                 </div>
                 <div>
@@ -393,7 +478,7 @@ export function AgendaGrid({
                     id="rdv-duree"
                     value={duree}
                     onChange={(e) => setDuree(Number(e.target.value))}
-                    className="input w-auto py-1.5 text-xs"
+                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:min-h-0"
                   >
                     {[30, 60, 90, 120].map((d) => (
                       <option key={d} value={d}>
@@ -415,7 +500,7 @@ export function AgendaGrid({
                         ? "Adresse, visio… (vide : l'adresse de la fiche)"
                         : "Adresse, visio…"
                     }
-                    className="input py-1.5 text-xs"
+                    className="input min-h-[44px] py-1.5 text-xs sm:min-h-0"
                   />
                 </div>
                 <button
@@ -426,18 +511,254 @@ export function AgendaGrid({
                     creation.local.length < 16 ||
                     (mode === "prospect" && !choisi)
                   }
-                  className="btn-primary"
+                  className="btn-primary min-h-[48px] w-full sm:min-h-0 sm:w-auto"
                 >
                   {pending ? "Enregistrement…" : "Poser le rendez-vous"}
                 </button>
               </div>
             </div>
           )}
+        </>
+  );
+
+  return (
+    <>
+      {erreur && (
+        <p
+          role="alert"
+          className="mb-3 rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300 ring-1 ring-rose-400/20"
+        >
+          {erreur}
+        </p>
+      )}
+      {info && (
+        <p className="mb-3 flex items-start gap-2 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300 ring-1 ring-amber-400/20">
+          <Icone nom="alerte" className="mt-0.5 h-3.5 w-3.5" />
+          {info}
+        </p>
+      )}
+
+      {/* ---------- Le panneau de création — sur téléphone, dans la feuille ---------- */}
+      <FeuilleBas
+        ouvert={Boolean(creation) && telephone}
+        onFermer={fermerPanneau}
+        titre="Nouveau rendez-vous"
+      >
+        {contenuCreation}
+      </FeuilleBas>
+      {creation && !telephone && (
+        <div className="card mb-4 space-y-3 p-5 ring-1 ring-celya-blue/30">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-100">
+              Nouveau rendez-vous
+            </p>
+            <button
+              type="button"
+              onClick={fermerPanneau}
+              className="btn-link text-xs"
+            >
+              <Icone nom="croix" className="h-3 w-3" />
+              Annuler
+            </button>
+          </div>
+
+          {contenuCreation}
         </div>
       )}
 
+      {/* ---------- Téléphone, vue Jour : la liste du jour ---------- */}
+      {jourSeul && (
+        <div
+          className="mb-3 sm:hidden"
+          // Balayer à gauche : le jour suivant ; à droite : le précédent.
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            toucher.current = { x: t.clientX, y: t.clientY };
+          }}
+          onTouchEnd={(e) => {
+            const debut = toucher.current;
+            toucher.current = null;
+            if (!debut) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - debut.x;
+            if (Math.abs(dx) < 60 || Math.abs(t.clientY - debut.y) > 40) return;
+            router.push(dx < 0 ? navigation.suivant : navigation.precedent);
+          }}
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">
+              {duJourListe.length === 0
+                ? "Aucun rendez-vous ce jour-là."
+                : `${duJourListe.length} rendez-vous`}
+            </p>
+            <button type="button" onClick={nouveauRdv} className="btn-primary min-h-[44px] px-4 text-sm">
+              <Icone nom="plus" className="h-4 w-4" />
+              RDV
+            </button>
+          </div>
+          {duJourListe.length > 0 && (
+            <ul className="card divide-y divide-white/[0.05]" aria-label="Rendez-vous du jour">
+              {duJourListe.map((m) => {
+                const tel = lienTel(m.prospect?.phone);
+                return (
+                  <li key={m.id} className="flex items-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReport("");
+                        setConfirmerAnnulation(false);
+                        setDetail(m.id);
+                      }}
+                      aria-haspopup="dialog"
+                      className={`flex min-h-[60px] min-w-0 flex-1 items-center gap-3 px-4 py-2 text-left ${
+                        m.status === "annule" ? "opacity-60" : ""
+                      }`}
+                    >
+                      <span className="w-14 shrink-0 text-sm font-semibold tabular-nums text-blue-300">
+                        {heureCourte(isoToLocalInput(m.starts_at).slice(11, 16))}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block truncate text-sm font-medium text-slate-100 ${
+                            m.status === "annule" ? "line-through" : ""
+                          }`}
+                        >
+                          {m.prospect?.company_name ?? m.title}
+                        </span>
+                        <span className="block truncate text-xs text-slate-400">
+                          {[m.prospect?.contact_name, m.location].filter(Boolean).join(" · ") ||
+                            (m.kind === "perso" ? "Personnel" : "—")}
+                        </span>
+                      </span>
+                    </button>
+                    {tel && (
+                      <a
+                        href={tel}
+                        aria-label={`Appeler ${m.prospect?.company_name ?? ""}`}
+                        className="mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-celya-blue active:bg-white/[0.06]"
+                      >
+                        <Icone nom="telephone" className="h-4 w-4" />
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <button
+            type="button"
+            onClick={() => setGrille((g) => !g)}
+            aria-expanded={grille}
+            className="btn-link mt-1 min-h-[44px] text-xs"
+          >
+            Grille horaire
+            <Icone nom="chevron" className={`h-3 w-3 transition ${grille ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      )}
+
+      {/* ---------- Téléphone : la feuille d'un rendez-vous ---------- */}
+      <FeuilleBas
+        ouvert={enFeuille !== null}
+        onFermer={() => setDetail(null)}
+        titre={enFeuille?.prospect?.company_name ?? enFeuille?.title ?? "Rendez-vous"}
+      >
+        {enFeuille && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-200">
+              {fmtDateTime(enFeuille.starts_at)} → {heureCourte(isoToLocalInput(enFeuille.ends_at).slice(11, 16))}
+              {enFeuille.status === "annule" && <span className="ml-2 text-rose-300">Annulé</span>}
+              {enFeuille.status === "honore" && <span className="ml-2 text-emerald-300">Tenu</span>}
+              {enFeuille.status === "reporte" && <span className="ml-2 text-slate-400">Reporté</span>}
+            </p>
+            {enFeuille.prospect?.contact_name && (
+              <p className="text-xs text-slate-400">{enFeuille.prospect.contact_name}</p>
+            )}
+            {enFeuille.location && (
+              <BoutonsMaps valeur={enFeuille.location} ville={enFeuille.prospect?.city} />
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              {lienTel(enFeuille.prospect?.phone) && (
+                <a href={lienTel(enFeuille.prospect?.phone)!} className="btn-primary min-h-[48px]">
+                  <Icone nom="telephone" className="h-4 w-4" />
+                  Appeler
+                </a>
+              )}
+              {enFeuille.prospect && (
+                <Link
+                  href={`/prospects/${enFeuille.prospect.id}`}
+                  prefetch={false}
+                  onClick={() => setDetail(null)}
+                  className="btn-ghost min-h-[48px]"
+                >
+                  Ouvrir la fiche
+                </Link>
+              )}
+            </div>
+            {enFeuille.canEdit &&
+              enFeuille.status !== "annule" &&
+              enFeuille.status !== "honore" && (
+                <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                  <div>
+                    <label className="label" htmlFor="rdv-report">
+                      Reporter au
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="rdv-report"
+                        type="datetime-local"
+                        step={900}
+                        value={report}
+                        onChange={(e) => setReport(e.target.value)}
+                        className="input min-h-[44px] min-w-0 flex-1"
+                      />
+                      <button
+                        type="button"
+                        disabled={pending || report.length < 16}
+                        onClick={() => reporter(enFeuille)}
+                        className="btn-ghost min-h-[44px] shrink-0 px-3.5 text-sm"
+                      >
+                        Reporter
+                      </button>
+                    </div>
+                  </div>
+                  {/* Annuler est définitif : on le demande deux fois. */}
+                  {confirmerAnnulation ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => annuler(enFeuille)}
+                        className="btn-danger min-h-[44px] flex-1"
+                      >
+                        Confirmer l&apos;annulation
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmerAnnulation(false)}
+                        className="btn-link min-h-[44px] px-2 text-xs"
+                      >
+                        Garder
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmerAnnulation(true)}
+                      className="btn-link min-h-[44px] text-xs text-rose-300"
+                    >
+                      Annuler le rendez-vous
+                    </button>
+                  )}
+                </div>
+              )}
+          </div>
+        )}
+      </FeuilleBas>
+
       {/* ---------- La grille ---------- */}
-      <div className="card overflow-x-auto p-0">
+      {/* Téléphone, vue Jour : repliée derrière « Grille horaire ». */}
+      <div className={`card overflow-x-auto p-0 ${jourSeul && !grille ? "hidden sm:block" : ""}`}>
         <div className="flex min-w-[680px]">
           {/* Colonne des heures */}
           <div
@@ -609,7 +930,7 @@ export function AgendaGrid({
                             )}
                             {m.prospect?.phone && (
                               <a
-                                href={`tel:${m.prospect.phone.replace(/\s/g, "")}`}
+                                href={lienTel(m.prospect.phone) ?? undefined}
                                 className="text-celya-blue hover:underline"
                               >
                                 {m.prospect.phone}
@@ -642,7 +963,7 @@ export function AgendaGrid({
         </div>
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="mt-3 hidden text-xs text-slate-500 sm:block">
         Cliquez sur une plage vide pour poser un rendez-vous ; faites glisser
         une carte pour la déplacer. Un rendez-vous annulé reste visible, barré.
       </p>

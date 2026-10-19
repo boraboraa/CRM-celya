@@ -89,3 +89,49 @@ export function correspond(
   if (!d || !p.phone) return false;
   return new RegExp(d.split("").join("[^0-9]*")).test(p.phone);
 }
+
+// ---------------------------------------------------------------------------
+// Les DOUBLONS de l'ajout rapide (19/10) — la même recherche que ⌘K, lancée sur
+// le nom puis sur le numéro avant de créer. On ne bloque pas une société au
+// nom voisin (deux garages « Dupont » existent) ; on prévient, et un nom ou un
+// numéro IDENTIQUE se dit « Existe déjà ».
+// ---------------------------------------------------------------------------
+
+/** « Garage Dupont SRL », « garage-dupont » → « garagedupont » (formes juridiques retirées). */
+export function cleSociete(nom: string | null | undefined): string {
+  return (nom ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\b(srl|sprl|sa|sas|sarl|bv|bvba|nv|asbl|scrl|snc|eurl)\b/g, " ")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export type Doublon<T> = { fiche: T; raison: "telephone" | "nom" | "proche" };
+
+/**
+ * Les fiches trouvées par la recherche, rangées : même numéro d'abord, puis
+ * même nom, puis les noms voisins (au plus `max`). Une fiche n'apparaît
+ * qu'une fois. Le numéro compare les chiffres sans préfixe (chiffresTelephone).
+ */
+export function doublonsProbables<
+  T extends { id: string; company_name: string; phone?: string | null },
+>(saisie: { nom: string; telephone?: string | null }, trouvees: T[], max = 3): Doublon<T>[] {
+  const nom = cleSociete(saisie.nom);
+  const tel = chiffresTelephone(saisie.telephone);
+  const vus = new Set<string>();
+  const out: Doublon<T>[] = [];
+  for (const f of trouvees) {
+    if (vus.has(f.id)) continue;
+    vus.add(f.id);
+    const memeTel = tel !== null && chiffresTelephone(f.phone) === tel;
+    const cle = cleSociete(f.company_name);
+    const memeNom = nom.length > 0 && cle === nom;
+    const proche = nom.length >= 3 && (cle.includes(nom) || nom.includes(cle)) && cle.length > 0;
+    if (memeTel) out.push({ fiche: f, raison: "telephone" });
+    else if (memeNom) out.push({ fiche: f, raison: "nom" });
+    else if (proche) out.push({ fiche: f, raison: "proche" });
+  }
+  const rang = { telephone: 0, nom: 1, proche: 2 } as const;
+  return out.sort((a, b) => rang[a.raison] - rang[b.raison]).slice(0, max);
+}

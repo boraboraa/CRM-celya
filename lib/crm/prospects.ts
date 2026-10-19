@@ -8,34 +8,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeStatus } from "@/lib/constants";
 import { findDuplicates, normalizeBelgianPhone, type DuplicateHit } from "./dedup";
-import { ADRESSE_MAX } from "./maps";
 import type { Viewer } from "./access";
 
-export type NewProspectInput = {
-  company_name?: string | null;
-  contact_name?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  website?: string | null;
-  sector?: string | null;
-  /** Adresse libre OU lien Google Maps collé — stockée telle quelle. */
-  address?: string | null;
-  city?: string | null;
-  status?: string | null;
-  source?: string | null;
-  value_estimate?: number | null;
-  /** Probabilité de conclure en % (0–100). null = non renseignée. */
-  probability?: number | null;
-  /** « none » → vivier non assigné · absent/null → assigné à l'auteur. */
-  owner_id?: string | null;
-  notes?: string | null;
-};
-
-/** Ramène une probabilité à un entier 0–100, ou null. */
-export function cleanProbability(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.min(100, Math.max(0, Math.round(value)));
-}
+// La ligne et la lecture du formulaire vivent dans un module pur, testé
+// (ligneProspect.ts) ; ré-exportées ici pour les appelants existants.
+export { cleanProbability, type NewProspectInput } from "./ligneProspect";
+import { ligneProspect, cleanProbability, type NewProspectInput } from "./ligneProspect";
 
 export type CreateProspectResult = {
   error?: string;
@@ -88,32 +66,9 @@ export async function createProspectCore(
     if (duplicates.length > 0) return { duplicates };
   }
 
-  const owner = input.owner_id;
   const { data, error } = await supabase
     .from("prospects")
-    .insert({
-      company_name: company,
-      contact_name: trimOrNull(input.contact_name, 120),
-      email,
-      phone,
-      website: trimOrNull(input.website),
-      sector: trimOrNull(input.sector, 80),
-      address: trimOrNull(input.address, ADRESSE_MAX),
-      city: trimOrNull(input.city, 80),
-      status: normalizeStatus(trimOrNull(input.status)),
-      source: trimOrNull(input.source),
-      value_estimate:
-        typeof input.value_estimate === "number" && Number.isFinite(input.value_estimate)
-          ? input.value_estimate
-          : null,
-      probability: cleanProbability(input.probability),
-      // Vivier fermé : « none » ne vaut plus « personne » mais « moi ». Le
-      // trigger en base rattraperait un null de toute façon (migration 015),
-      // mais mieux vaut que le propriétaire soit posé ici, sciemment.
-      owner_id: owner === "none" ? userId : (trimOrNull(owner) ?? userId),
-      notes: trimOrNull(input.notes, 4000),
-      created_by: userId,
-    })
+    .insert(ligneProspect({ ...input, phone }, userId))
     .select("id")
     .single();
 

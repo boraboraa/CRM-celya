@@ -7,6 +7,7 @@ import {
 } from "@/app/actions";
 import { RACCOURCIS_RELANCE } from "@/lib/constants";
 import { Icone } from "@/components/ui";
+import { ChampExtensible } from "@/components/ChampExtensible";
 import {
   ISSUES_TENUES,
   ISSUE_CHIP,
@@ -123,15 +124,18 @@ export function DebriefRdv({
 
   return (
     <div className={`space-y-2 transition-opacity ${pending ? "opacity-60" : ""}`}>
-      <input
+      {/* Une ligne au départ, qui grandit avec la dictée. */}
+      <ChampExtensible
         value={compteRendu}
-        onChange={(e) => setCompteRendu(e.target.value)}
+        onChange={setCompteRendu}
         placeholder="Compte rendu en une ligne (facultatif)"
         aria-label="Compte rendu du rendez-vous (facultatif)"
         className="input py-1.5 text-xs"
       />
 
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Ce qu'a donné le rendez-vous">
+      {/* Téléphone : les quatre issues en grille 2 × 2 — une seule hauteur,
+          aucune issue seule sur sa ligne. */}
+      <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap" role="group" aria-label="Ce qu'a donné le rendez-vous">
         {ISSUES_TENUES.map((issue) => (
           <button
             key={issue}
@@ -143,7 +147,7 @@ export function DebriefRdv({
                 : undefined
             }
             onClick={() => choisir(issue)}
-            className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-3 text-xs font-medium ring-1 transition ${ISSUE_CHIP[issue]} ${
+            className={`inline-flex min-h-[48px] items-center justify-center gap-1.5 rounded-xl px-2.5 text-center text-xs font-medium leading-tight ring-1 transition sm:min-h-[44px] sm:justify-start sm:px-3 sm:text-left ${ISSUE_CHIP[issue]} ${
               ouverte === issue ? "ring-2" : ""
             }`}
           >
@@ -200,7 +204,7 @@ export function DebriefRdv({
           <button
             type="submit"
             disabled={pending || !raison.trim()}
-            className="btn-ghost min-h-[40px] px-3 text-xs"
+            className="btn-ghost min-h-[44px] px-3 text-xs"
           >
             Confirmer
           </button>
@@ -215,7 +219,7 @@ export function DebriefRdv({
             setReport(false);
           }}
           aria-expanded={pasEuLieu}
-          className="btn-link text-xs"
+          className="btn-link min-h-[44px] text-xs"
         >
           N&apos;a pas eu lieu
         </button>
@@ -226,7 +230,7 @@ export function DebriefRdv({
               disabled={pending}
               onClick={() => setReport((r) => !r)}
               aria-expanded={report}
-              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-white/[0.04] px-2.5 text-[11px] font-medium text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.08]"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-white/[0.04] px-2.5 text-[11px] font-medium text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.08]"
             >
               <Icone nom="report" className="h-3 w-3" />
               Reporter
@@ -235,7 +239,7 @@ export function DebriefRdv({
               type="button"
               disabled={pending}
               onClick={() => envoyer("annule")}
-              className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium ring-1 transition ${ISSUE_CHIP.annule}`}
+              className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium ring-1 transition ${ISSUE_CHIP.annule}`}
             >
               <Icone nom="croix" className="h-3 w-3" />
               Annulé
@@ -246,7 +250,7 @@ export function DebriefRdv({
                 autoFocus
                 onChange={(e) => reporter(e.target.value)}
                 aria-label="Nouvelle date du rendez-vous"
-                className="min-h-[40px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
+                className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
               />
             )}
           </>

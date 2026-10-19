@@ -19,6 +19,7 @@ export function FiltresProspects({
   tri,
   etapes,
   avecTri,
+  seulementRecherche = false,
 }: {
   q: string;
   statut: string;
@@ -26,6 +27,11 @@ export function FiltresProspects({
   /** [valeur, libellé] — des chaînes seulement (frontière serveur → client). */
   etapes: [string, string][];
   avecTri: boolean;
+  /**
+   * Téléphone : la recherche seule, sans libellé — l'étape et le tri passent
+   * dans la feuille « Filtres ». Même champ, même délai, même URL.
+   */
+  seulementRecherche?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -55,6 +61,27 @@ export function FiltresProspects({
     return () => clearTimeout(t);
     // `aller` lit les paramètres du moment ; seule la frappe déclenche.
   }, [texte]);
+
+  if (seulementRecherche) {
+    return (
+      <div className="relative min-w-0 flex-1">
+        <input
+          id="q-mobile"
+          type="search"
+          enterKeyHint="search"
+          value={texte}
+          onChange={(e) => setTexte(e.target.value)}
+          className="input min-h-[44px]"
+          placeholder="Société, contact, téléphone…"
+          aria-label="Rechercher une fiche"
+          autoComplete="off"
+        />
+        {enCours && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">…</span>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-wrap items-end gap-3">

@@ -5,6 +5,18 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 19 octobre 2026 — chantier mobile
+
+**Le compte `recette-epuration@celya.test` est SUPPRIMÉ** (19/10, demande de
+Bora, via `crm-admin` `delete_user` : 0 fiche, 0 ligne rattachée). Les deux
+comptes de test du chantier mobile ont servi puis ont été retirés le 19/10 :
+toutes leurs fiches « ZZ Test mobile » (numéros fictifs `+32 000 …`), RDV,
+relances et notes sont supprimés, la base est revenue à ses **86 fiches** ;
+`mobile-commercial@celya.test` est supprimé. **`mobile-admin@celya.test` reste,
+DÉSACTIVÉ et sans aucune ligne rattachée** — un admin ne peut pas se supprimer
+lui-même par `crm-admin`, et `delete` en SQL bloque l'outil MCP (piège connu) :
+**à supprimer depuis `/equipe`**. Voir « Le téléphone d'abord ».
+
 ## État au 8 octobre 2026
 
 Relu en base le 08/10 : **neuf comptes actifs** — Bora (admin, 52 fiches), Rémi
@@ -1173,6 +1185,160 @@ large que l'écran, aucun défilement horizontal** aux deux tailles. La cause de
 l'icône : passer à `Icone` une `className` sans hauteur remplaçait sa taille par
 défaut — `Icone` garde désormais `h-3.5 w-3.5` tant qu'on ne donne pas de `h-`.
 
+### Le téléphone d'abord (chantier du 19 octobre — pour le 2 novembre)
+
+Les commerciaux (Nathan, Collins, Rémi, les étudiants du Sales Trophy à partir
+du 2 novembre) travaillent au téléphone, d'une main, entre deux visites. Le
+CRM était un écran d'ordinateur rétréci. Seuils, décidés par Bora : **la
+coquille et les listes en cartes sous `lg`** (là où la barre latérale n'est
+pas) ; **les réglages propres au téléphone sous `sm`** (vue Jour, grille 2 × 2).
+
+**Lot A — la coquille.** La navigation est EN BAS, sous le pouce
+(`components/BarreOnglets.tsx`) : À faire · Prospects · ＋ · Agenda pour un
+commercial, et « Plus » pour l'admin (Équipe, Appels IA, Compte, Se
+déconnecter). Les onglets sortent de **`ongletsMobiles(role)`** (`lib/nav.ts`),
+qui puise dans `NAV_ITEMS` — jamais une seconde liste (`npm run test:nav`).
+L'en-tête mobile n'a plus que le logo, la loupe et l'avatar (→ `/compte`) ;
+« Se déconnecter » vit sur `/compte` (et dans « Plus »). La recherche ⌘K prend
+tout l'écran sous `sm`. `viewportFit: "cover"` est INDISPENSABLE : sans lui,
+iOS laisse `env(safe-area-inset-bottom)` à 0 et la barre passe sous la barre
+d'accueil. Les champs `.input` font **16 px sur téléphone** : en dessous,
+Safari iOS zoome la page à chaque champ touché.
+
+**Lot B — lire vite.** Sous `lg` :
+- **À faire** : titre seul (`PageHeader compactMobile`), le périmètre replié en
+  UNE puce (`PucePerimetre`, les liens viennent de **`optionsPerimetre`** dans
+  `PerimetreSwitcher.tsx` — calculés une fois pour l'ordinateur, la puce et la
+  feuille « Filtres »). La zone débrief tient en **une ligne par RDV**, trois
+  puis « Voir les N » ; un tap ouvre la feuille du bas avec le MÊME
+  `DebriefRdv` (`DebriefList`, deux rendus CSS d'un seul état optimiste).
+  Chaque relance : le titre sur toute la largeur, puis UNE ligne d'actions —
+  Appeler (`tel:`), Résultat (ou « Débriefer le RDV »), la date (un tap déplie
+  la date et les raccourcis). La case à cocher garde son dessin de 20 px mais
+  répond sur 44.
+- **Prospects** : des CARTES (nom sur toute la ligne, étape + contact,
+  prochaine action + 📞, dernière action) ; le tableau reste sur ordinateur.
+  La recherche reste à l'écran, tout le reste passe dans la feuille
+  **« Filtres »** (`FeuilleFiltres`) ; les filtres posés restent visibles en
+  puces retirables. L'URL et les puces sortent de
+  **`lib/crm/filtresProspects.ts`** (`hrefProspects`, `filtresActifs`,
+  `npm run test:filtres`) — un filtre inconnu dans l'URL n'est jamais recopié.
+  Les colonnes : une étape à la fois (rangée d'étapes), l'étape d'une fiche se
+  change par le menu de sa carte — **absent sur la fiche d'un collègue**
+  (masquer, pas désactiver ; il s'affichait avant, et la base refusait).
+- **Fiche** : nom et contact, puis **« Appeler » et « Itinéraire » en gros**
+  (`lienTel`, `lib/crm/telephone.ts` — le seul constructeur de `tel:` du
+  projet ; `lienAller`, `lib/crm/maps.ts` : l'itinéraire, à défaut Maps) ;
+  l'adresse et la confiance repliées (`RepliMobile` : un seul DOM, replié sous
+  `lg`, ouvert au-dessus) ; les quatre issues du débrief en grille 2 × 2 sous
+  `sm` ; la chronologie à 5 entrées puis « Voir plus » (10 sur ordinateur, en
+  CSS, sans écart d'hydratation).
+
+**Lot D — saisir vite : l'ajout rapide** (`components/AjoutRapide.tsx`, le
+« ＋ » de la barre, UNE instance dans le layout, ouverte par l'événement
+`OUVRIR_AJOUT` ou `?ajout=1`). Trois champs — société (obligatoire, majuscule
+auto), contact, téléphone (`type="tel"`) — « 📍 Ma position », et « Ce qui
+s'est passé » lu par **`lireCeQuiSestPasse`** (`lib/crm/ajoutRapide.ts`, pur :
+la correspondance de `QuickNote`, écrite une seconde fois ICI seulement).
+Règles, décidées avec Bora le 19/10 :
+- **échange réel par défaut** ; l'option en un tap « Repéré, pas encore
+  contacté » en fait une note de repérage (`is_exchange` faux) : la fiche reste
+  « À appeler ». « pdr » = sans réponse ;
+- « rdv mardi 11h » pose un VRAI rendez-vous (`poserRendezVous` via
+  `saveExchangeCore`) ; **un rendez-vous sans jour ou sans heure n'est jamais
+  posé** : « Créer » est désactivé et l'écran dit ce qui manque, ou l'humain
+  choisit « Créer sans le rendez-vous » ;
+- **une seule ligne `prospects`** : `ligneProspect` + `entreeFormulaire`
+  (`lib/crm/ligneProspect.ts`) servent le formulaire complet, l'ajout rapide et
+  le MCP — toutes les colonnes, `null` si vide (`npm run test:ajout-rapide` le
+  vérifie clé par clé) ; responsable = soi, étape = les faits ;
+- **doublons** : la recherche ⌘K (RLS) sur le nom puis le numéro, rangée par
+  `doublonsProbables` (`lib/crm/recherche.ts` : même numéro, même nom, nom
+  voisin) → « Existe déjà — Ouvrir la fiche », et « Créer quand même » ;
+- **« Ma position »** : sans clé ni API, le téléphone ne donne que des
+  coordonnées — `address` reçoit un lien Maps de recherche
+  (`lienPosition`), relu par `coordonneesDe` / `estPositionGps` ; l'écran dit
+  **« 📍 Position GPS — adresse à compléter »**, JAMAIS « Lien Google Maps
+  reconnu » (décision de Bora), la fiche offre « Compléter l'adresse », et
+  `lienItineraire` trace l'itinéraire vers les coordonnées. Refusée : rien,
+  sans erreur ;
+- les champs courts (« Ce qui s'est passé », compte rendu du débrief)
+  grandissent avec la dictée (`ChampExtensible`) ; le bouton reste au-dessus
+  du clavier (pied de `FeuilleBas` + `visualViewport`).
+« Plus de champs » mène au formulaire complet, qui reste.
+
+**Lot C — l'agenda au téléphone.** **Vue Jour par défaut sur un téléphone**,
+décidée côté serveur d'après l'User-Agent (`vueAgendaParDefaut` /
+`estTelephone`, `lib/crm/agendaJour.ts` — une tablette garde la semaine, un
+`?vue=` explicite l'emporte toujours). Sous `sm`, en vue Jour, la **liste des
+rendez-vous du jour** (heure, société, lieu, 📞) prend la place de la grille,
+repliée derrière « Grille horaire » ; on change de jour par les flèches (44 px)
+ou d'un **balayage**. « ＋ RDV » ouvre le panneau de création dans la feuille
+du bas — le MÊME panneau que sur ordinateur (`contenuCreation`, un seul rendu),
+avec **le jour et l'heure en deux champs** (sans heure, « Poser » reste éteint ;
+`poserRendezVousAction` refuserait de toute façon). Toucher un rendez-vous
+ouvre sa feuille : Appeler, Ouvrir la fiche, Maps, **Reporter**
+(`deplacerRendezVousAction`) et **Annuler**, en deux temps
+(`cloturerRendezVousAction`, issue « annulé » — le chemin de l'outil MCP
+`deplacer_rendez_vous(annuler)`). Le glisser-déposer reste sur ordinateur.
+`jourCourt` / `heureCourte` (« mar. 21/10 », « 11h ») vivent dans
+`lib/time.ts`.
+
+**Lot E — comme une app.** `app/manifest.ts` (« Celya CRM », `standalone`,
+`start_url: /dashboard`, couleurs Celya, raccourci « Nouveau prospect » →
+`/dashboard?ajout=1`, que `AjoutRapide` lit puis efface de l'URL) ; les icônes
+sont **générées** par `next/og` (`app/icon.tsx` → `/icon/192`, `/icon/512`,
+`app/apple-icon.tsx` → `/apple-icon`, dessin `components/IconeApp.tsx` — aucun
+binaire dans le dépôt, fond plein pour `maskable`) ; `metadata.appleWebApp`
++ `apple-mobile-web-app-capable` (Next 15 n'émet plus que la balise sans
+préfixe). ⚠ **Le manifeste et les icônes sont dans `PUBLIC_PATHS`** du
+middleware : le navigateur les charge SANS cookie, une redirection vers
+`/login` casserait l'installation. Pas de service worker (décidé : rien hors
+ligne dans ce chantier). Note : `/favicon.ico` répond 401 depuis toujours —
+la route du connecteur MCP (`app/[transport]`) l'attrape ; sans gravité, les
+navigateurs suivent désormais les `<link rel="icon">` générés.
+
+**Relancer le banc** : il suffit des deux comptes de test (créés depuis
+`/equipe` — un commercial, un admin — si ceux du chantier ont été supprimés)
+et de leurs identifiants en `E2E_*`. Le projet `connexion` **recrée à chaque
+lancement** leurs fiches « ZZ Test mobile » (`tests/mobile/donnees.ts`, dates
+relatives au jour : une relance en retard, quatre RDV à débriefer, un RDV
+aujourd'hui), sous LEUR session — la RLS s'applique, rien d'autre n'est
+touché. `CAPTURES_DIR=… npx playwright test captures --project=iphone-commercial
+--project=iphone-admin` produit les captures à 390 px (l'admin en périmètre
+« moi » : aucune fiche réelle à l'image).
+
+⚠ **Le banc local et la navigation « même page, autres paramètres »** (19/10) :
+sur `next start` en local, un `router.push` de `/prospects` vers
+`/prospects?statut=…` (ou `/dashboard` → `/dashboard?perimetre=…`) **ne
+s'applique pas toujours** quand la page a des résultats — la requête RSC part,
+répond 200, et l'URL ne bouge pas. Reproduit **sur `main`** (donc antérieur au
+chantier), et **pas en production** : contre
+`celya-accounting-app.vercel.app`, avec le compte de test, 4 navigations sur 4
+s'appliquent en une seconde. Les tests du banc vérifient donc l'URL que porte
+un lien, puis chargent cette URL — ils ne cliquent pas un lien qui ne change
+que les paramètres de la page courante.
+
+**`components/FeuilleBas.tsx` — UNE feuille du bas pour tout le mobile.** Trois
+choses qu'on oublierait en la refaisant : le **portail** vers `body` (un
+`.card` porte un `backdrop-filter`, qui fait de lui le repère des `fixed`
+qu'il contient — une feuille ouverte depuis une ligne se serait collée dans la
+carte) ; `visualViewport` (le clavier iOS recouvre l'écran sans le réduire :
+la feuille remonte de sa hauteur) ; la zone sûre en bas.
+
+**Le banc : `npm run test:mobile`** (Playwright, `playwright.config.ts`,
+`tests/mobile/`). Le seul test du dépôt qui demande un serveur lancé
+(`npm run build && npm start`) et la base : trois tailles (390 × 844,
+360 × 800, 1280 × 900) × deux rôles, identifiants des comptes de test en
+variables d'environnement (`E2E_*`, voir la config). Il échoue
+automatiquement si une page est plus large que l'écran (et nomme les éléments
+qui dépassent) ou si une cible fait moins de 44 px. Les tests qui écrivent
+créent leurs propres fiches « ZZ Test mobile e2e — … » et les retirent.
+⚠ Piège du banc : `pkill -f "next start"` tue aussi le shell qui le lance (le
+motif est dans sa propre ligne de commande), et un ancien serveur resté sur le
+port 3000 sert de vieux fichiers CSS → la page s'affiche SANS style et toutes
+les mesures sont fausses. Arrêter le serveur par son PID.
+
 **Ouvrir une fiche plus vite (18 octobre).** Trois chemins, une seule règle de
 recherche (`lib/crm/recherche.ts`, `npm run test:recherche`) :
 - **Recherche globale** sur tous les écrans — ⌘K / Ctrl+K, « / », ou le bouton
@@ -2322,6 +2488,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
+`npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
 `npm run test:appels`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
@@ -2334,7 +2501,9 @@ d'une panne à 100 % des pages. **`npm run lint` n'est PAS configuré** : le scr
 dépôt n'a aucune configuration ESLint et `next lint` ouvre alors un assistant
 interactif qui installe des dépendances — il bloque une session non
 interactive. Ne pas en ajouter une au passage : ce serait une décision d'outil,
-pas une correction.
+pas une correction. Et pour tout ce qui touche l'écran :
+**`npm run test:mobile`** (serveur lancé, comptes de test — voir « Le
+téléphone d'abord »).
 
 ---
 

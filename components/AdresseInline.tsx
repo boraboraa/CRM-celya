@@ -5,6 +5,7 @@ import { setProspectAddressAction } from "@/app/actions";
 import { AdresseField } from "@/components/AdresseField";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { Icone } from "@/components/ui";
+import { estPositionGps } from "@/lib/crm/maps";
 
 /**
  * L'adresse EN TÊTE DE FICHE — le seul point d'entrée visible.
@@ -47,7 +48,8 @@ export function AdresseInline({
   const [pending, startTransition] = useTransition();
 
   function ouvrir() {
-    setValeur(vue);
+    // Une position GPS se COMPLÈTE : le champ s'ouvre vide, la rue remplace le point.
+    setValeur(estPositionGps(vue) ? "" : vue);
     setErreur(undefined);
     setOuvert(true);
   }
@@ -77,7 +79,15 @@ export function AdresseInline({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         {vue ? (
-          <BoutonsMaps valeur={vue} ville={ville} />
+          <>
+            <BoutonsMaps valeur={vue} ville={ville} />
+            {/* Une position GPS attend sa vraie adresse : le geste est ici. */}
+            {estPositionGps(vue) && !ouvert && (
+              <button type="button" onClick={ouvrir} className="btn-link min-h-[44px] text-xs">
+                Compléter l&apos;adresse
+              </button>
+            )}
+          </>
         ) : (
           !ouvert && (
             <button
@@ -113,7 +123,7 @@ export function AdresseInline({
               marcheraient dessus. */}
           <AdresseField
             name="adresse-entete"
-            defaultValue={vue}
+            defaultValue={estPositionGps(vue) ? "" : vue}
             ville={ville}
           />
           <div className="flex flex-wrap items-center gap-2">

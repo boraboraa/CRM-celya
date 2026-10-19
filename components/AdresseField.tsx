@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
-import { estLienMaps, adressePrecise } from "@/lib/crm/maps";
+import { estLienMaps, estPositionGps, adressePrecise } from "@/lib/crm/maps";
 
 /**
  * Le champ d'adresse — UN SEUL champ, pour une adresse libre OU un lien Google
@@ -52,7 +52,9 @@ export function AdresseField({
   }, [villeInputId]);
 
   const texte = valeur.trim();
-  const lien = estLienMaps(texte);
+  // Une position GPS est aussi un lien Maps — mais ce n'est pas une adresse :
+  // BoutonsMaps le dit (« Position GPS — adresse à compléter »), pas ici.
+  const lien = estLienMaps(texte) && !estPositionGps(texte);
   const imprecis = texte.length > 0 && !adressePrecise(texte, villeVive);
 
   return (

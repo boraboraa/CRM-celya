@@ -5,6 +5,7 @@ import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/ui";
 import { NavLinks } from "@/components/Nav";
 import { BarreOnglets } from "@/components/BarreOnglets";
+import { AjoutRapide } from "@/components/AjoutRapide";
 import { BoutonRecherche, RechercheGlobale } from "@/components/RechercheGlobale";
 import { navOrdinateur, ongletsMobiles } from "@/lib/nav";
 
@@ -91,6 +92,8 @@ export default async function AppLayout({
           {children}
         </main>
         <BarreOnglets onglets={ongletsMobiles(me.role)} />
+        {/* L'ajout rapide, UNE fois : le « ＋ » et le raccourci d'application l'ouvrent. */}
+        <AjoutRapide />
         {/* La fenêtre de recherche, UNE fois : les deux boutons l'ouvrent. */}
         <RechercheGlobale />
       </div>

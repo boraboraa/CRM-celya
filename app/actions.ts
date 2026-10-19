@@ -19,6 +19,7 @@ import {
   unlockConfidencePatch,
   isConfidenceLevel,
 } from "@/lib/crm/confidence";
+import { entreeFormulaire } from "@/lib/crm/ligneProspect";
 import { createProspectCore } from "@/lib/crm/prospects";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
@@ -89,30 +90,60 @@ export async function createProspectAction(fd: FormData) {
   // Passe par le cœur partagé (même insertion que le connecteur MCP). Le
   // formulaire ne force ni dédup ni normalisation « +32 » : la saisie manuelle
   // est conservée telle quelle (la dédup a déjà été proposée à l'extraction).
+  // La lecture du formulaire est celle de l'ajout rapide (ligneProspect.ts) :
+  // un champ absent vaut null, la ligne insérée a toujours les mêmes clés.
   const result = await createProspectCore(
     supabase,
     userId,
-    {
-      company_name: str(fd, "company_name"),
-      contact_name: str(fd, "contact_name"),
-      email: str(fd, "email"),
-      phone: str(fd, "phone"),
-      website: str(fd, "website"),
-      sector: str(fd, "sector"),
-      address: str(fd, "address"),
-      city: str(fd, "city"),
-      status: str(fd, "status"),
-      source: str(fd, "source"),
-      value_estimate: num(fd, "value_estimate"),
-      owner_id: str(fd, "owner_id"),
-      notes: str(fd, "notes"),
-    }
+    entreeFormulaire((k) => fd.get(k))
   );
 
   if (result.error) throw new Error(result.error);
 
   revalidatePath("/prospects");
   redirect(`/prospects/${result.id}`);
+}
+
+/**
+ * L'AJOUT RAPIDE du téléphone (19/10) : société, contact, téléphone, une
+ * adresse ou une position — et « ce qui s'est passé », déjà lu par
+ * `lireCeQuiSestPasse` (lib/crm/ajoutRapide.ts) dans le navigateur, comme la
+ * note de la fiche.
+ *
+ * Deux chemins EXISTANTS, rien de nouveau : la fiche par `createProspectCore`
+ * (la même lecture de formulaire que le formulaire complet — un ajout rapide
+ * est indiscernable d'une fiche créée à la main), puis l'échange par
+ * `saveExchangeCore` (même journal, même rendez-vous, même relance, même
+ * étape suivant les faits — `saveExchangeCore` refuse lui-même un
+ * rendez-vous sans heure). Responsable = soi, étape jamais demandée.
+ *
+ * La fiche existe dès la première étape : si l'échange échoue, on le dit et
+ * on renvoie quand même vers la fiche, où le geste se refait.
+ */
+export async function ajoutRapideAction(input: {
+  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address", string>>;
+  echange: Omit<SaveExchangeInput, "prospectId"> | null;
+}): Promise<{ id?: string; error?: string; erreurEchange?: string }> {
+  const { supabase, userId } = await currentUserId();
+  if (!input.champs.company_name?.trim()) return { error: "Le nom de la société est requis." };
+
+  const fiche = await createProspectCore(
+    supabase,
+    userId,
+    entreeFormulaire((k) => input.champs[k as keyof typeof input.champs] ?? null)
+  );
+  if (fiche.error || !fiche.id) return { error: fiche.error ?? "La fiche n'a pas pu être créée." };
+
+  let erreurEchange: string | undefined;
+  if (input.echange?.note?.trim()) {
+    const res = await saveExchangeCore(supabase, userId, { ...input.echange, prospectId: fiche.id });
+    if (res.error) erreurEchange = res.error;
+    if (input.echange.type === "rendez_vous") revalidatePath("/agenda");
+  }
+
+  revalidatePath("/prospects");
+  revalidatePath("/dashboard");
+  return { id: fiche.id, erreurEchange };
 }
 
 export async function updateProspectAction(fd: FormData) {

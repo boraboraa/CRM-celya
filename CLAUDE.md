@@ -1231,6 +1231,39 @@ Safari iOS zoome la page à chaque champ touché.
   `sm` ; la chronologie à 5 entrées puis « Voir plus » (10 sur ordinateur, en
   CSS, sans écart d'hydratation).
 
+**Lot D — saisir vite : l'ajout rapide** (`components/AjoutRapide.tsx`, le
+« ＋ » de la barre, UNE instance dans le layout, ouverte par l'événement
+`OUVRIR_AJOUT` ou `?ajout=1`). Trois champs — société (obligatoire, majuscule
+auto), contact, téléphone (`type="tel"`) — « 📍 Ma position », et « Ce qui
+s'est passé » lu par **`lireCeQuiSestPasse`** (`lib/crm/ajoutRapide.ts`, pur :
+la correspondance de `QuickNote`, écrite une seconde fois ICI seulement).
+Règles, décidées avec Bora le 19/10 :
+- **échange réel par défaut** ; l'option en un tap « Repéré, pas encore
+  contacté » en fait une note de repérage (`is_exchange` faux) : la fiche reste
+  « À appeler ». « pdr » = sans réponse ;
+- « rdv mardi 11h » pose un VRAI rendez-vous (`poserRendezVous` via
+  `saveExchangeCore`) ; **un rendez-vous sans jour ou sans heure n'est jamais
+  posé** : « Créer » est désactivé et l'écran dit ce qui manque, ou l'humain
+  choisit « Créer sans le rendez-vous » ;
+- **une seule ligne `prospects`** : `ligneProspect` + `entreeFormulaire`
+  (`lib/crm/ligneProspect.ts`) servent le formulaire complet, l'ajout rapide et
+  le MCP — toutes les colonnes, `null` si vide (`npm run test:ajout-rapide` le
+  vérifie clé par clé) ; responsable = soi, étape = les faits ;
+- **doublons** : la recherche ⌘K (RLS) sur le nom puis le numéro, rangée par
+  `doublonsProbables` (`lib/crm/recherche.ts` : même numéro, même nom, nom
+  voisin) → « Existe déjà — Ouvrir la fiche », et « Créer quand même » ;
+- **« Ma position »** : sans clé ni API, le téléphone ne donne que des
+  coordonnées — `address` reçoit un lien Maps de recherche
+  (`lienPosition`), relu par `coordonneesDe` / `estPositionGps` ; l'écran dit
+  **« 📍 Position GPS — adresse à compléter »**, JAMAIS « Lien Google Maps
+  reconnu » (décision de Bora), la fiche offre « Compléter l'adresse », et
+  `lienItineraire` trace l'itinéraire vers les coordonnées. Refusée : rien,
+  sans erreur ;
+- les champs courts (« Ce qui s'est passé », compte rendu du débrief)
+  grandissent avec la dictée (`ChampExtensible`) ; le bouton reste au-dessus
+  du clavier (pied de `FeuilleBas` + `visualViewport`).
+« Plus de champs » mène au formulaire complet, qui reste.
+
 ⚠ **Le banc local et la navigation « même page, autres paramètres »** (19/10) :
 sur `next start` en local, un `router.push` de `/prospects` vers
 `/prospects?statut=…` (ou `/dashboard` → `/dashboard?perimetre=…`) **ne
@@ -2411,7 +2444,8 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
-`npm run test:nav`, `npm run test:appels`, `npm run test:appels-live`,
+`npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
+`npm run test:appels`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
 sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,

@@ -99,6 +99,50 @@ function lireUrl(valeur: string): { url: URL | null; absolue: boolean } {
   }
 }
 
+// ---------------------------------------------------------------------------
+// La position GPS (« 📍 Ma position » de l'ajout rapide, 19/10). Sans clé ni
+// API, le téléphone ne donne que des COORDONNÉES, jamais une rue : on les
+// range dans `address` sous la forme d'un lien Maps de recherche, qu'on sait
+// relire. L'écran dit « Position GPS — adresse à compléter », jamais « lien
+// reconnu » : ce n'est pas une adresse, c'est un point.
+// ---------------------------------------------------------------------------
+
+/** Un nombre décimal de degrés, borné. */
+const DEGRES = /^-?\d{1,3}(\.\d+)?$/;
+
+/** Le lien Maps d'une position (6 décimales : ~10 cm, assez). null hors bornes. */
+export function lienPosition(lat: number, lng: number): string | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lng.toFixed(6)}`;
+}
+
+/**
+ * Les coordonnées d'une valeur produite par `lienPosition` (ou d'un lien Maps
+ * de recherche équivalent) ; null pour tout le reste — adresse, lien court,
+ * lien d'un lieu nommé. Le juge de l'hôte reste `estHoteMaps`.
+ */
+export function coordonneesDe(
+  valeur: string | null | undefined
+): { lat: number; lng: number } | null {
+  const v = (valeur ?? "").trim();
+  if (!v) return null;
+  const { url } = lireUrl(v);
+  if (!url || !estHoteMaps(url)) return null;
+  const q = url.searchParams.get("query");
+  if (!q) return null;
+  const parties = q.split(",").map((x) => x.trim());
+  if (parties.length !== 2 || !parties.every((x) => DEGRES.test(x))) return null;
+  const [lat, lng] = parties.map(Number);
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+/** La valeur est-elle une position GPS (et pas une adresse) ? */
+export function estPositionGps(valeur: string | null | undefined): boolean {
+  return coordonneesDe(valeur) !== null;
+}
+
 /** Comparaison souple : minuscules, sans accents (« Eghezée » ≡ « eghezee »). */
 function plie(s: string): string {
   return s
@@ -171,7 +215,8 @@ export function lienMaps(
  * null pour un lien Maps — notamment un lien court `maps.app.goo.gl`, dont on
  * ne peut PAS extraire la destination sans le résoudre (donc sans réseau, donc
  * sans clé). Le bouton ne s'affiche alors simplement pas : Maps propose
- * l'itinéraire au tap suivant.
+ * l'itinéraire au tap suivant. Seule exception : une POSITION GPS
+ * (`lienPosition`), dont les coordonnées sont la destination.
  */
 export function lienItineraire(
   valeur: string | null | undefined,
@@ -179,6 +224,12 @@ export function lienItineraire(
 ): string | null {
   const v = (valeur ?? "").trim();
   if (!v) return null;
+
+  // Une position GPS, elle, nomme sa destination : ses coordonnées.
+  const point = coordonneesDe(v);
+  if (point) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${point.lat},${point.lng}`;
+  }
 
   const { url, absolue } = lireUrl(v);
   if (url) return null; // une URL ne nomme pas une destination exploitable

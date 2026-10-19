@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { ongletActif, type NavItem, type OngletMobile } from "@/lib/nav";
 import { Icone } from "@/components/ui";
 import { FeuilleBas } from "@/components/FeuilleBas";
+import { OUVRIR_AJOUT } from "@/lib/crm/ajoutRapide";
 
 const ONGLET =
   "flex min-h-[56px] min-w-[44px] flex-1 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium leading-none transition active:scale-[0.98]";
@@ -33,18 +34,21 @@ export function BarreOnglets({ onglets }: { onglets: OngletMobile[] }) {
         <div className="mx-auto flex max-w-lg items-stretch gap-1 px-2 py-1">
           {onglets.map((o) => {
             if (o.type === "ajout") {
+              // L'ajout rapide (AjoutRapide, dans le layout) — une feuille,
+              // pas une page : on ne quitte pas l'écran où l'on était.
               return (
-                <Link
+                <button
                   key="ajout"
-                  href="/prospects/nouveau"
+                  type="button"
+                  onClick={() => window.dispatchEvent(new Event(OUVRIR_AJOUT))}
                   aria-label="Nouveau prospect"
+                  aria-haspopup="dialog"
                   className={`${ONGLET} text-slate-300`}
                 >
                   <span className="grid h-9 w-11 place-items-center rounded-xl bg-celya-blue text-white">
                     <Icone nom="plus" className="h-5 w-5" />
                   </span>
-                  <span className="sr-only">Ajouter</span>
-                </Link>
+                </button>
               );
             }
             if (o.type === "plus") {

@@ -11,6 +11,9 @@
 
 import {
   lienAller,
+  lienPosition,
+  coordonneesDe,
+  estPositionGps,
   estLienMaps,
   requeteMaps,
   lienMaps,
@@ -174,6 +177,23 @@ verifie("adresse → itinéraire", lienAller(eghezee)?.itineraire, true);
 verifie("lien collé → ouvrir dans Maps", lienAller(court), { href: court, itineraire: false });
 verifie("rien → rien", lienAller(""), null);
 verifie("javascript: → rien", lienAller("javascript:alert(1)"), null);
+
+// --- La position GPS (« Ma position ») : un point, pas une adresse ---------
+const gps = lienPosition(50.4669, 4.8675);
+verifie("position → lien de recherche", gps, "https://www.google.com/maps/search/?api=1&query=50.466900,4.867500");
+verifie("position relue", coordonneesDe(gps), { lat: 50.4669, lng: 4.8675 });
+verifie("position → c'est un GPS", estPositionGps(gps), true);
+verifie("position → itinéraire vers les coordonnées", lienItineraire(gps), "https://www.google.com/maps/dir/?api=1&destination=50.4669,4.8675");
+verifie("position → « Y aller » est un itinéraire", lienAller(gps)?.itineraire, true);
+verifie("position → ouvrir dans Maps garde le lien", lienMaps(gps), gps);
+verifie("position hors bornes → rien", lienPosition(91, 4), null);
+verifie("position NaN → rien", lienPosition(Number.NaN, 4), null);
+verifie("une adresse n'est pas un GPS", estPositionGps(eghezee), false);
+verifie("un lien court n'est pas un GPS", estPositionGps(court), false);
+verifie("un lien de lieu nommé n'est pas un GPS", estPositionGps("https://www.google.com/maps/search/?api=1&query=Garage+Alpha"), false);
+verifie("le sosie d'hôte n'est pas un GPS", estPositionGps("https://maps.google.com.evil.com/maps/search/?api=1&query=50.4,4.8"), false);
+verifie("un sosie n'obtient aucun itinéraire", lienItineraire("https://maps.google.com.evil.com/maps/search/?api=1&query=50.4,4.8"), null);
+verifie("coordonnées hors bornes dans un lien → rien", coordonneesDe("https://www.google.com/maps/search/?api=1&query=95.1,4.8"), null);
 
 if (echecs > 0) {
   console.error(`\n${echecs} vérification(s) en échec.`);

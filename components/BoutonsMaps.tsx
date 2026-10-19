@@ -1,4 +1,4 @@
-import { lienMaps, lienItineraire } from "@/lib/crm/maps";
+import { lienMaps, lienItineraire, estPositionGps } from "@/lib/crm/maps";
 import { Icone } from "@/components/ui";
 
 /**
@@ -53,6 +53,14 @@ export function BoutonsMaps({
 
   return (
     <span className={`inline-flex flex-wrap items-center gap-1.5 ${className}`}>
+      {/* « Ma position » (ajout rapide) : des coordonnées, pas une adresse —
+          on le DIT, plutôt que de laisser croire qu'une rue a été saisie. */}
+      {!compact && estPositionGps(texte) && (
+        <span className="inline-flex items-center gap-1 text-xs text-amber-200/90">
+          <Icone nom="epingle" className="h-3 w-3" />
+          Position GPS — adresse à compléter
+        </span>
+      )}
       <a
         href={ouvrir}
         target="_blank"

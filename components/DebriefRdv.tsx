@@ -7,6 +7,7 @@ import {
 } from "@/app/actions";
 import { RACCOURCIS_RELANCE } from "@/lib/constants";
 import { Icone } from "@/components/ui";
+import { ChampExtensible } from "@/components/ChampExtensible";
 import {
   ISSUES_TENUES,
   ISSUE_CHIP,
@@ -123,9 +124,10 @@ export function DebriefRdv({
 
   return (
     <div className={`space-y-2 transition-opacity ${pending ? "opacity-60" : ""}`}>
-      <input
+      {/* Une ligne au départ, qui grandit avec la dictée. */}
+      <ChampExtensible
         value={compteRendu}
-        onChange={(e) => setCompteRendu(e.target.value)}
+        onChange={setCompteRendu}
         placeholder="Compte rendu en une ligne (facultatif)"
         aria-label="Compte rendu du rendez-vous (facultatif)"
         className="input py-1.5 text-xs"

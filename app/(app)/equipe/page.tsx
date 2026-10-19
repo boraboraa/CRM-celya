@@ -149,9 +149,19 @@ export default async function TeamPage({
         subtitle="Qui est en ordre de marche, et ce que chacun produit."
       />
 
-      <div className="mb-7 max-w-3xl">
-        <CreateUserForm />
-      </div>
+      {/* Créer un accès — replié (18/10) : le formulaire occupait tout le haut
+          de page et les cartes des commerciaux commençaient sous la ligne de
+          flottaison. On vient ici voir l'équipe bien plus souvent qu'y créer
+          un compte. */}
+      <details className="group mb-6 max-w-3xl">
+        <summary className="btn-ghost inline-flex cursor-pointer list-none text-xs">
+          <Icone nom="plus" className="h-3.5 w-3.5" />
+          Créer un accès
+        </summary>
+        <div className="mt-3">
+          <CreateUserForm />
+        </div>
+      </details>
 
       {/* ---- Bandeau : période + alerte de configuration ---- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -228,6 +238,30 @@ export default async function TeamPage({
                   </span>
                 </div>
               </div>
+
+              {/* -- Ses fiches, en un clic (18/10) : la page Équipe ne menait
+                  nulle part. Le périmètre visé est celui de l'admin, validé
+                  par lirePerimetre comme toute URL. -- */}
+              {u.is_active && (
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <Link
+                    href={`/prospects?perimetre=${isMe ? "moi" : u.user_id}`}
+                    prefetch={false}
+                    className="btn-link text-xs"
+                  >
+                    <Icone nom="dossier" className="h-3.5 w-3.5" />
+                    Voir ses prospects
+                  </Link>
+                  <Link
+                    href={`/prospects?perimetre=${isMe ? "moi" : u.user_id}&filtre=a_debriefer`}
+                    prefetch={false}
+                    className="btn-link text-xs"
+                  >
+                    <Icone nom="calendrier" className="h-3.5 w-3.5" />
+                    Ses RDV à débriefer
+                  </Link>
+                </div>
+              )}
 
               {/* -- État de la configuration -- */}
               <div className="mt-4 flex flex-wrap gap-2">

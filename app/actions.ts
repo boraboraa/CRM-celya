@@ -29,6 +29,8 @@ import {
   type MeetingConflit,
 } from "@/lib/crm/agenda";
 import type { RelanceAnnulee } from "@/lib/crm/prochaineAction";
+import { estIssueDebrief, type IssueDebrief } from "@/lib/crm/debrief";
+import { filtreRecherche } from "@/lib/crm/recherche";
 import { estTableAbsente } from "@/lib/crm/access";
 import { getSession } from "@/lib/auth";
 import {
@@ -606,6 +608,13 @@ export async function deleteEmailAction(fd: FormData): Promise<ActionState> {
 export async function createTaskAction(fd: FormData): Promise<ActionState> {
   const { supabase, userId } = await currentUserId();
 
+  // Une relance se pose sur une FICHE (18/10, migration 028) : le pense-bête
+  // libre fabriquait des relances orphelines, sans lien ni « Résultat ». La
+  // base le refuse aussi (23514) ; on le dit ici en clair, avant elle.
+  if (!str(fd, "prospect_id")) {
+    return { error: "Une relance se pose sur une fiche prospect — ouvrez la fiche pour la planifier." };
+  }
+
   const due =
     dateInputToISO(str(fd, "due_local")) ??
     localInputToISO(str(fd, "due_at")) ??
@@ -762,14 +771,23 @@ export async function deplacerRendezVousAction(input: {
 
 export async function cloturerRendezVousAction(input: {
   id: string;
-  resultat: "honore" | "annule";
+  /** L'issue (lib/crm/debrief.ts) — le débrief de la fiche et du tableau de bord. */
+  issue?: IssueDebrief | null;
+  /** L'ancien débrief sans issue — encore accepté. */
+  resultat?: "honore" | "annule";
   compteRendu?: string | null;
-  /** « Et ensuite ? » — FACULTATIF : « YYYY-MM-DD » (09:00 Bruxelles), ou null. */
+  /** « Pas intéressé » : la raison, exigée. */
+  raison?: string | null;
+  /** « Et ensuite ? » : « YYYY-MM-DD » (09:00 Bruxelles), ou null. Exigée pour « à rappeler ». */
   suite?: string | null;
 }): Promise<ActionState & { plusRien?: boolean }> {
   const session = await getSession();
   if (!session) redirect("/login");
   const supabase = await createClient();
+
+  if (input.issue != null && !estIssueDebrief(input.issue)) {
+    return { error: "Issue de rendez-vous inconnue." };
+  }
 
   let suite: { dueAt: string } | null = null;
   if (input.suite) {
@@ -780,8 +798,10 @@ export async function cloturerRendezVousAction(input: {
 
   const r = await cloturerRendezVous(supabase, session.userId, {
     id: input.id,
+    issue: input.issue ?? null,
     resultat: input.resultat,
     compteRendu: input.compteRendu,
+    raison: input.raison,
     suite,
     isAdmin: session.me?.role === "admin",
   });
@@ -789,6 +809,50 @@ export async function cloturerRendezVousAction(input: {
 
   revalidateAgenda(r.prospectId);
   return { plusRien: r.plusRien ?? false };
+}
+
+// =====================================================================
+// Recherche globale (en-tête, ⌘K ou « / »)
+// =====================================================================
+
+export type ResultatRecherche = {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  phone: string | null;
+  city: string | null;
+  status: ProspectStatus;
+};
+
+/**
+ * Les fiches qui correspondent au texte tapé — société, contact, email,
+ * ville, téléphone (lib/crm/recherche.ts, la même règle que /prospects).
+ * Client de l'UTILISATEUR, donc sous la RLS : chacun ne retrouve que ce qu'il
+ * voit déjà (commercial seul, porteur d'équipe, encadrant, admin). Aucun
+ * périmètre d'affichage ici : chercher une fiche, c'est chercher partout où
+ * l'on a le droit de regarder.
+ */
+export async function rechercherProspectsAction(
+  q: string
+): Promise<{ resultats: ResultatRecherche[]; error?: string }> {
+  const session = await getSession();
+  if (!session?.me?.is_active) return { resultats: [] };
+  const filtre = filtreRecherche(q);
+  if (!filtre) return { resultats: [] };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("prospects")
+    .select("id, company_name, contact_name, phone, city, status")
+    .or(filtre)
+    .order("company_name", { ascending: true })
+    .limit(8);
+  if (error) return { resultats: [], error: error.message };
+  return {
+    resultats: ((data ?? []) as ResultatRecherche[]).map((r) => ({
+      ...r,
+      status: normalizeStatus(r.status),
+    })),
+  };
 }
 
 // =====================================================================

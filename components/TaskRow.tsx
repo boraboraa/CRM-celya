@@ -5,10 +5,12 @@ import Link from "next/link";
 import { fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
 import { isoToLocalInput, localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
-import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
+import { infoRdvPrevu, jourHeureCourt } from "@/lib/crm/prochaineAction";
 import { ResultatAppel } from "@/components/ResultatAppel";
+import { DebriefRdv } from "@/components/DebriefRdv";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
+import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
 
 export type TaskWithProspect = {
   id: string;
@@ -38,6 +40,14 @@ export type TaskWithProspect = {
     next_action_at?: string | null;
     next_action_kind?: string | null;
   } | null;
+  /**
+   * Le rendez-vous PASSÉ de la fiche qui attend son issue (« À faire »
+   * seulement, tiré de `rdvADebriefer`). Présent : la ligne offre le débrief
+   * À LA PLACE de « Résultat », comme la carte de la fiche — un résultat
+   * d'appel n'a pas de sens tant qu'on ne sait pas ce qu'a donné le RDV.
+   * Des chaînes seulement : la ligne vit côté client.
+   */
+  rdv_a_debriefer?: { id: string; starts_at: string } | null;
   /**
    * La dernière action de la fiche (vue prospect_action_state), quand
    * l'appelant l'a chargée. C'est elle qui dit « Pas de réponse (3e fois) »
@@ -96,6 +106,12 @@ export function TaskRow({
   const overdue = !done && new Date(task.due_at).getTime() < Date.now();
   /** Le résultat d'appel se déplie EN PLACE — sans ouvrir la fiche. */
   const [resultatOuvert, setResultatOuvert] = useState(false);
+  /**
+   * Le débrief vient d'être envoyé : la ligne repasse à « Résultat » sans
+   * attendre le rendu serveur (et y revient seule si le serveur refuse).
+   */
+  const [debriefFait, setDebriefFait] = useState(false);
+  const rdvEnAttente = debriefFait ? null : task.rdv_a_debriefer ?? null;
   /** « À rappeler » vient d'être tapé : la ligne réclame une date. */
   const [pourQuand, setPourQuand] = useState(false);
 
@@ -128,7 +144,7 @@ export function TaskRow({
           ? "block"
           : compact
             ? "grid grid-cols-[auto_1fr] items-start"
-            : "flex flex-wrap items-start sm:flex-nowrap"
+            : "flex flex-wrap items-start lg:flex-nowrap"
       }`}
     >
       {!lecture && (
@@ -169,7 +185,10 @@ export function TaskRow({
           {!lecture && task.prospects && (
             <>
               <Link
-                href={`/prospects/${task.prospects.id}`}
+                // Ce lien n'existe que sur « À faire » (seul écran qui joint la
+                // fiche à ses relances) : il porte `depuis`, pour « Fiche
+                // suivante » (lib/crm/ficheSuivante.ts).
+                href={lienDepuisAFaire(task.prospects.id)}
                 prefetch={false}
                 className="text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
               >
@@ -245,7 +264,36 @@ export function TaskRow({
             C'est le geste qui manquait — après un appel, on ne navigue pas.
             Absent en lecture : sur la fiche, le résultat d'appel vit dans la
             carte PROCHAINE ACTION, et ici c'est le SEUL endroit où il tient. */}
-        {!lecture && !done && task.prospects && (
+        {!lecture && !done && task.prospects && rdvEnAttente && (
+          <div className="mt-2">
+            {resultatOuvert ? (
+              <div className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]">
+                <p className="mb-2 text-[11px] text-slate-400">
+                  Le rendez-vous du {jourHeureCourt(rdvEnAttente.starts_at)} attend son issue.
+                </p>
+                <DebriefRdv
+                  meetingId={rdvEnAttente.id}
+                  apres={(r) => {
+                    if (r.ok) {
+                      setDebriefFait(true);
+                      setResultatOuvert(false);
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setResultatOuvert(true)}
+                aria-expanded={resultatOuvert}
+                className="btn-link text-[11px]"
+              >
+                Débriefer le RDV du {jourHeureCourt(rdvEnAttente.starts_at)}
+              </button>
+            )}
+          </div>
+        )}
+        {!lecture && !done && task.prospects && !rdvEnAttente && (
           <div className="mt-2">
             {resultatOuvert ? (
               <ResultatAppel
@@ -268,9 +316,13 @@ export function TaskRow({
       </div>
 
       {!lecture && !done && (
+        // Sur un écran étroit, la date et les raccourcis passent SOUS le
+        // titre (18/10, 390 px) : à côté, ils l'écrasaient en une colonne de
+        // trois mots et faisaient défiler la ligne de côté. Alignés sur le
+        // titre (pl-8, la largeur de la case à cocher).
         <div
           className={`flex flex-wrap items-center gap-1 ${
-            compact ? "col-start-2 mt-2" : "shrink-0"
+            compact ? "col-start-2 mt-2" : "w-full pl-8 lg:w-auto lg:shrink-0 lg:pl-0"
           }`}
         >
           {/* « À rappeler » vient d'être enregistré : il ne manque plus que le

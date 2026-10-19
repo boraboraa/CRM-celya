@@ -18,6 +18,7 @@ import { openComposer } from "@/lib/crm/composer";
 import { infoRdvPrevu, jourLong, lienAgenda, PLUS_RIEN } from "@/lib/crm/prochaineAction";
 import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
+import { DebriefRdv } from "@/components/DebriefRdv";
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -236,9 +237,9 @@ export function NextActionCard({
 
       {meeting ? (
         <>
-          {/* Un rendez-vous d'agenda : il se déplace ou se clôt depuis
-              l'agenda et la zone « À débriefer » — pas d'un « marquer fait »
-              qui le ferait disparaître sans compte rendu. */}
+          {/* Un rendez-vous d'agenda : à venir, il se déplace depuis l'agenda ;
+              passé, il se DÉBRIEFE ICI — là où l'on travaille (18/10). Jamais
+              un « marquer fait » qui le ferait disparaître sans issue. */}
           <p className="mt-2 font-display text-lg font-semibold leading-snug text-slate-50">
             {meeting.title}
           </p>
@@ -267,16 +268,7 @@ export function NextActionCard({
           )}
           {aDebriefer && (
             <p className="mt-1 text-sm text-slate-300">
-              Il attend son débrief —{" "}
-              <Link
-                href="/dashboard"
-                prefetch={false}
-                className="text-celya-blue underline-offset-2 hover:underline"
-              >
-                «&nbsp;Rendez-vous à débriefer&nbsp;»
-              </Link>{" "}
-              du tableau de bord : ça s&apos;est fait, annulé ou reporté. C&apos;est
-              là que la suite se pose.
+              Qu&apos;a-t-il donné&nbsp;? Un tap suffit — la fiche suit.
             </p>
           )}
           {meeting.location && (
@@ -337,9 +329,21 @@ export function NextActionCard({
         </p>
       )}
 
+      {/* Le DÉBRIEF d'un rendez-vous passé, SOUS LE POUCE — le même composant
+          que la zone du tableau de bord, le même chemin serveur. Il remplace
+          les pastilles de résultat d'appel tant que le RDV attend son issue :
+          deux rangées de pastilles côte à côte, c'est une de trop. (Un appel
+          noté autrement après le RDV le clôt de toute façon — débrief
+          implicite, migration 027.) */}
+      {!lectureSeule && aDebriefer && meeting && (
+        <div className="mt-4 border-t border-white/[0.06] pt-3">
+          <DebriefRdv meetingId={meeting.id} />
+        </div>
+      )}
+
       {/* Le résultat de l'appel, SOUS LE POUCE — c'est ici qu'on arrive après
           avoir raccroché, pas dans un formulaire trois écrans plus bas. */}
-      {!lectureSeule && (
+      {!lectureSeule && !aDebriefer && (
         <div className="mt-4 border-t border-white/[0.06] pt-3">
           <ResultatAppel
             prospectId={prospectId}

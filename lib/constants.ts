@@ -11,6 +11,7 @@ export const STATUS_ORDER: ProspectStatus[] = [
   "a_appeler",
   "contacte",
   "rendez_vous",
+  "a_rappeler",
   "proposition",
   "gagne",
   "perdu",
@@ -20,6 +21,7 @@ export const STATUS_LABEL: Record<ProspectStatus, string> = {
   a_appeler: "À appeler",
   contacte: "Contacté",
   rendez_vous: "Rendez-vous",
+  a_rappeler: "À rappeler",
   proposition: "Proposition",
   gagne: "Gagné",
   perdu: "Perdu",
@@ -28,13 +30,16 @@ export const STATUS_LABEL: Record<ProspectStatus, string> = {
 /**
  * Une couleur franche par étape, la même partout où l'étape apparaît (badge,
  * bandeau de colonne, liseré de carte). Progression froid → chaud à mesure que
- * l'affaire avance — ardoise, cyan, bleu, ambre — puis le vert/rouge sémantique.
+ * l'affaire avance — ardoise, cyan, bleu, indigo, ambre — puis le vert/rouge
+ * sémantique. « À rappeler » est INDIGO avec la flèche de retour : il ne doit
+ * jamais se confondre avec « À appeler » (ardoise, téléphone).
  * Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir).
  */
 export const STATUS_CHIP: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-500/15 text-slate-300 ring-slate-400/25",
   contacte: "bg-cyan-500/15 text-cyan-300 ring-cyan-400/25",
   rendez_vous: "bg-blue-500/15 text-blue-300 ring-blue-400/25",
+  a_rappeler: "bg-indigo-500/15 text-indigo-300 ring-indigo-400/30",
   proposition: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
   gagne: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/25",
   perdu: "bg-rose-500/15 text-rose-300 ring-rose-400/25",
@@ -45,6 +50,7 @@ export const STATUS_ICON: Record<ProspectStatus, IconeNom> = {
   a_appeler: "telephone",
   contacte: "note",
   rendez_vous: "calendrier",
+  a_rappeler: "retour",
   proposition: "enveloppe",
   gagne: "coche",
   perdu: "croix",
@@ -55,6 +61,7 @@ export const STATUS_EDGE: Record<ProspectStatus, string> = {
   a_appeler: "border-l-slate-400/70",
   contacte: "border-l-cyan-400/80",
   rendez_vous: "border-l-blue-400/80",
+  a_rappeler: "border-l-indigo-400/80",
   proposition: "border-l-amber-400/80",
   gagne: "border-l-emerald-400/80",
   perdu: "border-l-rose-400/70",
@@ -62,7 +69,7 @@ export const STATUS_EDGE: Record<ProspectStatus, string> = {
 
 /**
  * Ramène n'importe quelle valeur de statut (y compris les anciennes, encore
- * possibles dans des données pas encore migrées) vers l'une des six étapes.
+ * possibles dans des données pas encore migrées) vers l'une des sept étapes.
  * Garde-fou permanent : l'affichage ne casse jamais sur un statut inconnu.
  */
 const LEGACY_STATUS: Record<string, ProspectStatus> = {

@@ -100,6 +100,13 @@ import {
   readProspectFacts,
 } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
+import { filtreRecherche } from "@/lib/crm/recherche";
+import {
+  ISSUE_LABEL,
+  estIssueDebrief,
+  rdvADebriefer,
+  type IssueDebrief,
+} from "@/lib/crm/debrief";
 import { applyEmailSentCadence } from "@/lib/crm/emailCadence";
 import {
   hasPlaceholder,
@@ -577,11 +584,13 @@ function register(server: McpServer) {
         q = q.not("next_action_at", "is", null).lte("next_action_at", end);
       }
       if (args.recherche) {
-        const t = safeSearch(args.recherche);
-        if (t)
-          q = q.or(
-            `company_name.ilike.%${t}%,contact_name.ilike.%${t}%,email.ilike.%${t}%,phone.ilike.%${t}%`
-          );
+        // La même règle que l'écran et la recherche globale
+        // (lib/crm/recherche.ts) : société, contact, email, ville, et le
+        // téléphone chiffre à chiffre (« 081 22 33 44 » retrouve
+        // « +32 81 22 33 44 »). La cloison (scopeProspects) est déjà posée
+        // sur `q` : ce `or` se combine avec elle, il ne l'élargit pas.
+        const filtre = filtreRecherche(args.recherche);
+        if (filtre) q = q.or(filtre);
       }
 
       const { data, error } = await q;
@@ -714,7 +723,7 @@ function register(server: McpServer) {
       const SELECT =
         "id, title, due_at, priority, prospect_id, assignee_id, prospects!inner(company_name, phone, owner_id)";
 
-      const [overdue, today] = await Promise.all([
+      const [overdue, today, rdvPasses] = await Promise.all([
         filtrerTaches(
           scopeJoinedProspects(
             admin
@@ -740,7 +749,55 @@ function register(server: McpServer) {
           per,
           viewer
         ).order("due_at", { ascending: true }).limit(100),
+        // Les rendez-vous qui attendent leur DÉBRIEF — comme en tête de
+        // l'écran « À faire » : de prospect, commencés, non débriefés. Les
+        // SIENS (débriefer écrit) ; l'admin en périmètre « equipe », tous —
+        // la même règle que la zone de l'écran (`aMoi`).
+        (per.mode === "equipe" && viewer.isAdmin
+          ? admin.from("meetings").select("id, owner_id, prospect_id, kind, title, starts_at, status, debriefed_at")
+          : admin
+              .from("meetings")
+              .select("id, owner_id, prospect_id, kind, title, starts_at, status, debriefed_at")
+              .eq("owner_id", viewer.userId))
+          .eq("kind", "prospect")
+          .in("status", ["prevu", "confirme", "reporte"])
+          .is("debriefed_at", null)
+          .lte("starts_at", new Date().toISOString())
+          .order("starts_at", { ascending: false })
+          .limit(50),
       ]);
+
+      // La même règle que l'écran (lib/crm/debrief.ts) : un seul RDV par
+      // fiche, jamais une fiche gagnée ou perdue.
+      type RdvRow = {
+        id: string;
+        owner_id: string;
+        prospect_id: string | null;
+        kind: string;
+        title: string;
+        starts_at: string;
+        status: string;
+        debriefed_at: string | null;
+      };
+      const passes = (rdvPasses.data ?? []) as RdvRow[];
+      const fichesRdv = new Map<string, { company_name: string; status: string }>();
+      const idsRdv = [...new Set(passes.map((m) => m.prospect_id).filter(Boolean) as string[])];
+      if (idsRdv.length > 0) {
+        const { data: f } = await admin
+          .from("prospects")
+          .select("id, company_name, status")
+          .in("id", idsRdv);
+        for (const p of (f ?? []) as { id: string; company_name: string; status: string }[]) {
+          fichesRdv.set(p.id, p);
+        }
+      }
+      const aDebriefer = rdvADebriefer(passes, (id) => fichesRdv.get(id)?.status).map((m) => ({
+        id: m.id,
+        titre: m.title,
+        debut: m.starts_at,
+        societe: m.prospect_id ? (fichesRdv.get(m.prospect_id)?.company_name ?? null) : null,
+        prospect_id: m.prospect_id,
+      }));
 
       type Row = Record<string, unknown> & {
         assignee_id?: string | null;
@@ -766,10 +823,14 @@ function register(server: McpServer) {
         a_moi: !relanceEnLecture(viewer, (t.assignee_id as string | null) ?? null),
       });
 
-      return json("À faire — relances en retard puis du jour.", {
+      return json(
+        "À faire — rendez-vous à débriefer (« debriefer_rendez_vous »), puis relances en retard et du jour.",
+        {
+        rdv_a_debriefer: aDebriefer,
         en_retard: ((overdue.data ?? []) as Row[]).filter(visible).map(shape),
         aujourd_hui: ((today.data ?? []) as Row[]).filter(visible).map(shape),
-      });
+        }
+      );
     }
   );
 
@@ -897,7 +958,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, proposition, gagne, perdu. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, a_rappeler (le rendez-vous a eu lieu, il faut rappeler la personne — ne pas confondre avec a_appeler), proposition, gagne, perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1537,6 +1598,66 @@ function register(server: McpServer) {
       if (r.conflit) {
         bits.push(
           `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`
+        );
+      }
+      return text(bits.join(" "));
+    }
+  );
+
+  // --- debriefer_rendez_vous -----------------------------------------------
+  // Le MÊME chemin que l'écran (cloturerRendezVous + lib/crm/debrief.ts) : un
+  // débrief fait par Claude est indiscernable d'un débrief fait à la main.
+  server.tool(
+    "debriefer_rendez_vous",
+    "Dit ce qu'a donné un rendez-vous PASSÉ (le débrief) : « a_rappeler » (intéressé, à rappeler — « rappeler_le » OBLIGATOIRE ; l'étape passe en « À rappeler »), « proposition » (proposition envoyée — l'étape passe en « Proposition »), « signe » (l'étape passe en « Gagné », verrouillée), « pas_interesse » (« raison » OBLIGATOIRE, versée en raison de perte ; l'étape passe en « Perdu », verrouillée, et les relances ouvertes sont annulées) ou « annule » (le rendez-vous n'a pas eu lieu ; pour le REPORTER, utilisez « deplacer_rendez_vous »). N'utilisez une issue QUE si l'utilisateur l'a dite : ne devinez jamais « signé » ou « pas intéressé ». S'il manque la date de rappel ou la raison, POSEZ LA QUESTION. Les rendez-vous à débriefer sont listés par « a_faire » (rdv_a_debriefer). Note : un échange, un résultat d'appel ou un email posé après le rendez-vous le clôt déjà tout seul (« tenu »).",
+    {
+      id: z.string().describe("Identifiant du rendez-vous (« a_faire » → rdv_a_debriefer, ou « agenda »)."),
+      issue: z
+        .enum(["a_rappeler", "proposition", "signe", "pas_interesse", "annule"])
+        .describe("Ce qu'a donné le rendez-vous."),
+      rappeler_le: z
+        .string()
+        .optional()
+        .describe("Pour « a_rappeler » (OBLIGATOIRE) ; facultatif pour « proposition » et « annule » : « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm »."),
+      raison: z.string().optional().describe("Pour « pas_interesse » : pourquoi, en une phrase (OBLIGATOIRE)."),
+      compte_rendu: z.string().optional().describe("Compte rendu en une ligne, versé au journal (facultatif)."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+
+      if (!estIssueDebrief(args.issue)) return fail("Issue inconnue.");
+      const issue = args.issue as IssueDebrief;
+
+      let suite: { dueAt: string } | null = null;
+      if (args.rappeler_le) {
+        const dueAt = dateInputToISO(args.rappeler_le);
+        if (!dueAt) {
+          return fail("« rappeler_le » invalide — attendu « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm ».");
+        }
+        suite = { dueAt };
+      }
+
+      // La cloison : `cloturerRendezVous` relit le RDV et refuse celui d'un
+      // autre (hors admin) avec le même message qu'un RDV inexistant.
+      const r = await cloturerRendezVous(admin, viewer.userId, {
+        id: args.id,
+        issue,
+        compteRendu: args.compte_rendu,
+        raison: args.raison,
+        suite,
+        isAdmin: viewer.isAdmin,
+      });
+      if (r.error) return fail(r.error);
+
+      const bits = [`✅ Rendez-vous « ${r.title} » débriefé : ${ISSUE_LABEL[issue].toLowerCase()}.`];
+      if (r.etape) bits.push(`Étape : ${STATUS_LABEL[r.etape]}.`);
+      if (r.ensuite) {
+        bits.push(`Prochaine action : « ${r.ensuite.title} » le ${fmtDateTime(r.ensuite.due_at)}.`);
+      } else if (r.plusRien) {
+        bits.push(
+          "⚠ Plus rien de prévu sur cette fiche : elle ne remontera plus dans « À faire ». Demandez à l'utilisateur s'il veut poser une suite."
         );
       }
       return text(bits.join(" "));

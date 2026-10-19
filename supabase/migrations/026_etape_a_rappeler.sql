@@ -1,0 +1,28 @@
+-- ============================================================
+-- 026 — Une étape « À rappeler » après le rendez-vous (18 octobre 2026)
+--
+-- L'enum s'arrêtait à rendez_vous → proposition : un rendez-vous tenu dont
+-- l'issue est « intéressé, à rappeler » n'avait nulle part où aller, et la
+-- fiche restait en « Rendez-vous » indéfiniment (10 fiches au 18/10).
+--
+--   a_appeler → contacte → rendez_vous → a_rappeler → proposition → gagne / perdu
+--
+-- La règle qui y fait entrer une fiche vit dans lib/crm/status.ts (un débrief
+-- « Intéressé — à rappeler », lu dans meetings.debrief_issue, migration 027).
+-- Le passage à la main (glisser-déposer, clic sur l'étape) verrouille comme
+-- toute autre étape.
+--
+-- SEULE dans sa migration, et c'est voulu : Postgres refuse d'utiliser une
+-- valeur d'enum dans la transaction qui l'a ajoutée (« unsafe use of new
+-- value »). La 027 et sa recette s'appliquent donc APRÈS celle-ci.
+--
+-- Additive et compatible avec le code en production : aucune ligne ne prend
+-- la valeur tant que le code du même lot n'est pas déployé, et l'affichage
+-- tolère de toute façon un statut inconnu (normalizeStatus).
+-- Indépendante de la 025 (appels IA) : elles s'appliquent dans n'importe quel
+-- ordre.
+-- Non réversible au sens strict (Postgres ne retire pas une valeur d'enum) ;
+-- inerte tant qu'aucune fiche ne la porte.
+-- ============================================================
+
+alter type public.prospect_status add value if not exists 'a_rappeler' before 'proposition';

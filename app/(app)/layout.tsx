@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
 import { Avatar } from "@/components/ui";
 import { NavLinks } from "@/components/Nav";
+import { BoutonRecherche, RechercheGlobale } from "@/components/RechercheGlobale";
 import { NAV_ITEMS, ADMIN_ITEM, APPELS_IA_ITEM, ACCOUNT_ITEM } from "@/lib/nav";
 
 function SignOutButton({ full = false }: { full?: boolean }) {
@@ -35,9 +36,14 @@ export default async function AppLayout({
     <div className="flex min-h-screen">
       {/* Sidebar — desktop */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-white/[0.06] bg-space-800/40 px-4 py-6 lg:flex">
-        <Link href="/dashboard" className="mb-8 px-2">
+        <Link href="/dashboard" className="mb-6 px-2">
           <Logo />
         </Link>
+
+        {/* Ouvrir une fiche de n'importe où : ⌘K, « / », ou ce bouton. */}
+        <div className="mb-6">
+          <BoutonRecherche />
+        </div>
 
         <NavLinks items={items} />
 
@@ -68,7 +74,10 @@ export default async function AppLayout({
             <Link href="/dashboard">
               <Logo />
             </Link>
-            <SignOutButton />
+            <div className="flex items-center gap-2">
+              <BoutonRecherche compact />
+              <SignOutButton />
+            </div>
           </div>
           <NavLinks items={[...items, ACCOUNT_ITEM]} orientation="horizontal" />
         </header>
@@ -76,6 +85,8 @@ export default async function AppLayout({
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
           {children}
         </main>
+        {/* La fenêtre de recherche, UNE fois : les deux boutons l'ouvrent. */}
+        <RechercheGlobale />
       </div>
     </div>
   );

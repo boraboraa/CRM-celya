@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSession, getPerimetreViewer } from "@/lib/auth";
+import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
 import { todayBounds } from "@/lib/time";
 import {
   PageHeader,
@@ -12,7 +12,6 @@ import {
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { ReplyCard, type ReplyCardEmail } from "@/components/ReplyCard";
-import { NouvelleRelanceLibre } from "@/components/NouvelleRelanceLibre";
 import { PerimetreSwitcher } from "@/components/PerimetreSwitcher";
 import { DebriefList, type DebriefMeeting } from "@/components/DebriefList";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
@@ -27,7 +26,9 @@ import {
 } from "@/lib/crm/lastAction";
 import { relanceEnLecture } from "@/lib/crm/access";
 import { ligneAgendaJour } from "@/lib/crm/agendaJour";
-import { ficheClose } from "@/lib/crm/prochaineAction";
+import { rdvADebriefer } from "@/lib/crm/debrief";
+import { lienDepuisAFaire, ordreAFaire } from "@/lib/crm/ficheSuivante";
+import { MemoireAFaire } from "@/components/FicheSuivante";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -62,6 +63,7 @@ type MeetingRow = {
   ends_at: string;
   location: string | null;
   status: string;
+  debriefed_at?: string | null;
 };
 
 /**
@@ -93,7 +95,7 @@ export default async function TodoPage({
   // la liste des porteurs (migration 020) — `cache()`é, donc une seule requête
   // par rendu, et zéro pour un admin.
   const viewer: PerimetreViewer = await getPerimetreViewer();
-  const perimetre = lirePerimetre(params, viewer);
+  const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
   const TASK_SELECT =
     "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind)";
@@ -208,14 +210,17 @@ export default async function TodoPage({
       .limit(30),
 
     // Rendez-vous passés jamais débriefés — la boucle qui manquait : rien ne
-    // demandait jamais ce qu'un rendez-vous avait donné.
+    // demandait jamais ce qu'un rendez-vous avait donné. De PROSPECT
+    // seulement : un RDV personnel ne réclame jamais de débrief (le « Rdv
+    // Ephec » du 18/10). « Passé » = a commencé, comme en base (027).
     filtrerProspects(
       supabase
         .from("meetings_visibles")
         .select(
-          "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status"
+          "id, owner_id, prospect_id, kind, title, starts_at, ends_at, location, status, debriefed_at"
         )
-        .lt("ends_at", new Date().toISOString())
+        .eq("kind", "prospect")
+        .lte("starts_at", new Date().toISOString())
         // « reporte » AUSSI : un rendez-vous reporté puis passé attend son
         // débrief comme les autres. Sans lui, tout RDV déplacé une fois
         // échappait à cette zone pour toujours (Garage Boetendael, 02/09 →
@@ -225,8 +230,8 @@ export default async function TodoPage({
       perimetre,
       viewer
     )
-      .order("ends_at", { ascending: false })
-      .limit(20),
+      .order("starts_at", { ascending: false })
+      .limit(50),
 
     // La colonne « Appels » (Janet) — ADMIN SEUL, et lue avec le reste : elle
     // ne retarde pas la page. Tolérante : migration 025 absente → indisponible,
@@ -342,15 +347,14 @@ export default async function TodoPage({
   }[]) {
     meetingProspects.set(p.id, p);
   }
-  // Une fiche gagnée ou perdue ne réclame jamais de débrief (migration 023) :
-  // sa fiche ne le dit plus, cette zone non plus — une source d'affichage qui
-  // contredirait la fiche serait pire que pas de filtre du tout. Le statut
-  // vient de la requête groupée ci-dessus ; le RDV perso (sans fiche) reste.
-  const debriefMeetings: DebriefMeeting[] = aDebriefer
-    .filter(
-      (m) => !m.prospect_id || !ficheClose(meetingProspects.get(m.prospect_id)?.status)
-    )
-    .map((m) => ({
+  // Ce qui attend une issue — la règle vit dans lib/crm/debrief.ts : jamais
+  // un RDV perso, jamais une fiche gagnée ou perdue (023 : sa fiche ne le dit
+  // plus, cette zone non plus), UN SEUL rendez-vous par fiche (le plus récent ;
+  // la base clôt les plus anciens « remplacés » dès qu'il est débriefé, 027).
+  const debriefMeetings: DebriefMeeting[] = rdvADebriefer(
+    aDebriefer,
+    (id) => meetingProspects.get(id)?.status
+  ).map((m) => ({
       id: m.id,
       title: m.title,
       starts_at: m.starts_at,
@@ -379,8 +383,21 @@ export default async function TodoPage({
   const relanceLue = (t: TaskWithProspect) =>
     relanceEnLecture(viewer, t.assignee_id);
 
-  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction);
-  const today = todayAll.filter(inZone1).map(avecDerniereAction);
+  // Une fiche dont le RDV passé attend son issue : sa ligne offre le débrief
+  // à la place de « Résultat », comme la carte de la fiche (même liste que la
+  // zone débrief — jamais un RDV perso, jamais une fiche close).
+  const rdvParFiche = new Map(
+    debriefMeetings
+      .filter((m) => m.prospect)
+      .map((m) => [m.prospect!.id, { id: m.id, starts_at: m.starts_at }])
+  );
+  const avecDebrief = (t: TaskWithProspect): TaskWithProspect => {
+    const rdv = t.prospect_id ? rdvParFiche.get(t.prospect_id) : undefined;
+    return rdv ? { ...t, rdv_a_debriefer: rdv } : t;
+  };
+
+  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
+  const today = todayAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
 
   // Le résultat du prédicat, pas le prédicat : `TaskList` est un composant
   // CLIENT, et une fonction ne traverse pas la frontière serveur → client
@@ -423,6 +440,16 @@ export default async function TodoPage({
       );
     });
 
+  // L'ordre des lignes de l'écran, pour « Fiche suivante » sur la fiche
+  // ouverte d'ici — exactement ce qui s'affiche, dans l'ordre des zones.
+  const ordre = ordreAFaire([
+    debriefMeetings.map((m) => m.prospect?.id),
+    overdue.map((t) => t.prospects?.id),
+    today.map((t) => t.prospects?.id),
+    waiting.map((p) => p.id),
+    replies.map((e) => e.prospects?.id),
+  ]);
+
   const firstName = session?.me?.full_name?.split(" ")[0];
   const nothingAtAll =
     overdue.length +
@@ -444,6 +471,8 @@ export default async function TodoPage({
           </Link>
         }
       />
+
+      <MemoireAFaire ids={ordre} />
 
       {/* La colonne « Appels » de Janet — admin seul. Sans elle (commercial,
           migration 025 absente), le contenu est rendu tel quel. */}
@@ -544,6 +573,30 @@ export default async function TodoPage({
           </section>
         )}
 
+        {/* ---------- Rendez-vous à débriefer — EN TÊTE depuis le 18/10.
+            Elle était la quatrième et dernière zone : 14 rendez-vous y
+            attendaient sous 17 relances en retard, et personne ne l'atteignait.
+            Un rendez-vous passé non débriefé RESTE ici tant que rien n'est
+            posé après lui (027) : c'est le seul rappel du produit, ne pas en
+            ajouter d'autre. Mêmes boutons d'issue que la fiche (DebriefRdv). */}
+        {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
+            débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
+            après le rafraîchissement — un démontage effacerait ce message. */}
+        <section
+          id="a-debriefer"
+          className={`scroll-mt-6 ${debriefMeetings.length > 0 ? "mb-8" : "mb-8 empty:hidden"}`}
+        >
+          {debriefMeetings.length > 0 && (
+            <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Rendez-vous à débriefer
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
+                {debriefMeetings.length}
+              </span>
+            </h2>
+          )}
+          <DebriefList meetings={debriefMeetings} />
+        </section>
+
         {nothingAtAll ? (
           <EmptyState
             title="Rien à faire aujourd'hui"
@@ -617,7 +670,7 @@ export default async function TodoPage({
                         />
                         <div className="min-w-0 flex-1">
                           <Link
-                            href={`/prospects/${p.id}`}
+                            href={lienDepuisAFaire(p.id)}
                             prefetch={false}
                             className="text-sm font-medium text-slate-100 underline-offset-2 hover:text-celya-blue hover:underline"
                           >
@@ -650,8 +703,6 @@ export default async function TodoPage({
           </div>
         )}
 
-        {/* Nouvelle relance libre (avec ou sans prospect) */}
-        <NouvelleRelanceLibre assigneeId={session?.userId ?? "none"} />
 
         {/* ---------- 3. Réponses reçues — agir maintenant ---------- */}
         <section className="mt-8">
@@ -685,23 +736,6 @@ export default async function TodoPage({
           )}
         </section>
 
-        {/* ---------- 4. Rendez-vous à débriefer — la boucle qui manquait.
-            Un rendez-vous passé non débriefé RESTE ici : c'est le seul rappel
-            du produit, ne pas en ajouter d'autre. ---------- */}
-        {/* Toujours monté, même vide : quand le DERNIER rendez-vous est
-            débriefé sans suite, la zone doit pouvoir dire « plus rien de prévu »
-            après le rafraîchissement — un démontage effacerait ce message. */}
-        <section className={debriefMeetings.length > 0 ? "mt-8" : "mt-8 empty:hidden"}>
-          {debriefMeetings.length > 0 && (
-            <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-              Rendez-vous à débriefer
-              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">
-                {debriefMeetings.length}
-              </span>
-            </h2>
-          )}
-          <DebriefList meetings={debriefMeetings} />
-        </section>
       </AvecColonneAppels>
     </>
   );

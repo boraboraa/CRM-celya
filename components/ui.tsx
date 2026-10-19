@@ -66,7 +66,9 @@ export type IconeNom =
   | "agenda"
   | "dossier"
   | "equipe"
-  | "reglages";
+  | "reglages"
+  | "loupe"
+  | "suivant";
 
 /** Le combiné, réutilisé par « téléphone barré ». */
 const COMBINE = (
@@ -86,6 +88,18 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
       <path d="M1.6 6.2h12.8v3.4H1.6z" />
       <path d="M5.4 6.2 3.2 9.6M9.4 6.2 7.2 9.6M13.4 6.2l-2.2 3.4" />
       <path d="M3.2 9.6v4.2M12.8 9.6v4.2" />
+    </>
+  ),
+  loupe: (
+    <>
+      <circle cx="7" cy="7" r="4.6" />
+      <path d="m10.4 10.4 3.8 3.8" />
+    </>
+  ),
+  suivant: (
+    <>
+      <path d="M2.8 8h10" />
+      <path d="M9.4 4.4 13 8l-3.6 3.6" />
     </>
   ),
   retour: (
@@ -231,6 +245,10 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
 /**
  * Le pictogramme d'un nom. Décoratif : le libellé à côté porte le sens,
  * l'icône est `aria-hidden`.
+ *
+ * Une `className` sans hauteur garde la taille par défaut : passer seulement
+ * « transition group-open:rotate-180 » laissait le SVG prendre toute la
+ * largeur — l'icône démesurée de « Plus d'options » sur mobile (18/10).
  */
 export function Icone({
   nom,
@@ -248,7 +266,7 @@ export function Icone({
       strokeWidth={1.6}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`shrink-0 ${className}`}
+      className={`shrink-0 ${/(^|\s)h-/.test(className) ? "" : "h-3.5 w-3.5 "}${className}`}
     >
       {TRACES[nom]}
     </svg>

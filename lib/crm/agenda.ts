@@ -9,7 +9,9 @@
  *                           journal, laisser l'étape suivre le fait ;
  *   · deplacerRendezVous  — reporter, en versant l'ancienne et la nouvelle
  *                           date au journal ;
- *   · cloturerRendezVous  — le DÉBRIEF : honoré ou annulé, avec compte rendu.
+ *   · cloturerRendezVous  — le DÉBRIEF : l'ISSUE du rendez-vous (à rappeler,
+ *                           proposition, signé, pas intéressé — ou annulé),
+ *                           avec compte rendu (lib/crm/debrief.ts).
  *
  * Deux invariants hérités de la règle des faits :
  *   · un rendez-vous a TOUJOURS une heure — pas de rendez-vous « toute la
@@ -21,7 +23,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { localInputToISO } from "@/lib/time";
 import { fmtDateTime } from "@/lib/constants";
-import { applyAutoStatus } from "@/lib/crm/status";
+import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
+import {
+  effetsDebrief,
+  manqueDebrief,
+  sujetDebrief,
+  type IssueDebrief,
+} from "@/lib/crm/debrief";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import type { ProspectStatus } from "@/lib/types";
@@ -441,6 +449,9 @@ export async function deplacerRendezVous(
       occurred_at: new Date().toISOString(),
       is_draft: false,
       is_exchange: false,
+      // Rattachée au RDV : une ligne qui parle du rendez-vous ne déclenche
+      // jamais le débrief implicite (027).
+      meeting_id: meeting.id,
     });
   }
 
@@ -460,13 +471,27 @@ export async function deplacerRendezVous(
 
 export type CloturerRendezVousInput = {
   id: string;
-  resultat: "honore" | "annule";
-  compteRendu?: string | null;
   /**
-   * « Et ensuite ? » — FACULTATIF. Une échéance (ISO UTC) : la relance ouverte
-   * la plus proche y est re-datée, à défaut une relance est créée — jamais de
-   * doublon. Absente : rien n'est posé ; la fiche garde ce qu'elle a (voir
-   * CLAUDE.md, « RDV clos sans suite »).
+   * L'ISSUE du débrief (lib/crm/debrief.ts) — le chemin de l'écran et de
+   * l'outil MCP `debriefer_rendez_vous`. Elle décide du statut du RDV, de
+   * l'étape et de ce qui est exigé (date pour « à rappeler », raison pour
+   * « pas intéressé »).
+   */
+  issue?: IssueDebrief | null;
+  /**
+   * L'ancien débrief sans issue (« ça s'est fait » / « annulé ») — encore
+   * accepté de l'outil MCP `deplacer_rendez_vous(annuler)`. Ignoré si `issue`
+   * est fourni.
+   */
+  resultat?: "honore" | "annule";
+  compteRendu?: string | null;
+  /** « Pas intéressé » : la raison, EXIGÉE, versée dans prospects.lost_reason. */
+  raison?: string | null;
+  /**
+   * « Et ensuite ? » — une échéance (ISO UTC) : la relance ouverte la plus
+   * proche y est re-datée, à défaut une relance est créée — jamais de
+   * doublon. EXIGÉE pour « à rappeler », offerte sinon, ignorée pour une
+   * issue qui ferme la fiche (signé, pas intéressé).
    */
   suite?: { dueAt: string } | null;
   /** Voir DeplacerRendezVousInput.isAdmin. */
@@ -479,6 +504,9 @@ export type CloturerRendezVousResult = {
   title?: string;
   prospectId?: string | null;
   resultat?: "honore" | "annule";
+  issue?: IssueDebrief | null;
+  /** L'étape après le débrief (décidée ou déduite des faits), si elle a bougé. */
+  etape?: ProspectStatus | null;
   /**
    * La prochaine relance de la fiche après le débrief (celle qu'on vient de
    * poser, ou celle qui existait) — ou null si la fiche n'en a plus.
@@ -497,45 +525,122 @@ export async function cloturerRendezVous(
   userId: string,
   input: CloturerRendezVousInput
 ): Promise<CloturerRendezVousResult> {
+  const issue: IssueDebrief | null =
+    input.issue ?? (input.resultat === "annule" ? "annule" : null);
+  if (!issue && input.resultat !== "honore") {
+    return { error: "Dites ce qu'a donné le rendez-vous." };
+  }
+  // Ce qui est exigé, au même endroit que l'écran : une date pour « à
+  // rappeler », une raison pour « pas intéressé ».
+  if (issue) {
+    const manque = manqueDebrief({
+      issue,
+      suite: input.suite?.dueAt ?? null,
+      raison: input.raison ?? null,
+    });
+    if (manque) return { error: manque };
+  }
+  const effets = issue ? effetsDebrief(issue) : null;
+  const statutRdv = effets?.statutRdv ?? "honore";
+
   const meeting = await litMeeting(supabase, userId, input.id, input.isAdmin === true);
   if ("error" in meeting) return meeting;
+  if (meeting.status === "honore" || meeting.status === "annule") {
+    return { error: "Ce rendez-vous est déjà débriefé." };
+  }
 
   const { error } = await supabase
     .from("meetings")
-    .update({ status: input.resultat, debriefed_at: new Date().toISOString() })
+    .update({
+      status: statutRdv,
+      debriefed_at: new Date().toISOString(),
+      debrief_issue: effets?.debriefIssue ?? null,
+    })
     .eq("id", meeting.id);
   if (error) return { error: error.message };
 
-  // Le compte rendu part au journal. « Honoré » = l'échange a réellement eu
-  // lieu (note ATTESTÉE) ; « annulé » = il n'a pas eu lieu (note simple).
   const compteRendu = input.compteRendu?.trim() || null;
-  if (meeting.prospect_id && compteRendu) {
-    await supabase.from("activities").insert({
-      prospect_id: meeting.prospect_id,
-      author_id: userId,
-      type: "note",
-      subject:
-        input.resultat === "honore"
-          ? `Compte rendu — ${meeting.title}`
-          : `Rendez-vous annulé — ${meeting.title}`,
-      body: compteRendu,
-      occurred_at: new Date().toISOString(),
-      is_draft: false,
-      is_exchange: input.resultat === "honore",
-    });
+  const raison = input.raison?.trim().slice(0, 300) || null;
+  let etape: ProspectStatus | null = null;
+
+  if (meeting.prospect_id) {
+    const { data: fiche } = await supabase
+      .from("prospects")
+      .select("status")
+      .eq("id", meeting.prospect_id)
+      .maybeSingle();
+    const close = fiche?.status === "gagne" || fiche?.status === "perdu";
+
+    // La fiche : la proposition (le FAIT qui mène à « Proposition »), ou
+    // l'étape DÉCIDÉE par l'issue (« Signé » → Gagné, « Pas intéressé » →
+    // Perdu, verrouillées comme un clic sur l'étape).
+    const patch: Record<string, unknown> = {};
+    if (effets?.proposition) patch.proposal_sent_at = new Date().toISOString();
+    if (effets?.etapeDecidee && !close) {
+      Object.assign(patch, manualStatusPatch(effets.etapeDecidee));
+      etape = effets.etapeDecidee;
+    }
+    if (issue === "pas_interesse" && raison) patch.lost_reason = raison;
+    if (Object.keys(patch).length > 0) {
+      const { error: e2 } = await supabase
+        .from("prospects")
+        .update(patch)
+        .eq("id", meeting.prospect_id);
+      if (e2) return { error: e2.message };
+    }
+
+    // Le journal — une ligne par débrief qui dit une issue : « Débrief du RDV
+    // du 29/09 à 10h : signé ». Attestée quand le rendez-vous a eu lieu ;
+    // rattachée au RDV (meeting_id), donc sans effet sur le débrief implicite.
+    const texte = [compteRendu, raison && issue === "pas_interesse" ? `Raison : ${raison}` : null]
+      .filter(Boolean)
+      .join("\n");
+    if (issue || compteRendu) {
+      await supabase.from("activities").insert({
+        prospect_id: meeting.prospect_id,
+        author_id: userId,
+        type: "note",
+        subject: issue
+          ? sujetDebrief(issue, meeting.starts_at)
+          : `Compte rendu — ${meeting.title}`,
+        body: texte || null,
+        outcome: effets?.outcome ?? null,
+        occurred_at: new Date().toISOString(),
+        is_draft: false,
+        is_exchange: statutRdv === "honore",
+        meeting_id: meeting.id,
+      });
+    }
   }
 
   // La suite — c'est ICI que la prochaine action se pose, si on la dit.
-  // Fiche gagnée / perdue : on ne pose plus rien.
+  // « Pas intéressé » : plus rien à relancer (même règle que l'étape Perdu de
+  // saveExchangeCore). « Signé » : rien n'est posé, rien n'est retiré.
   let ensuite: { title: string; due_at: string } | null = null;
   if (meeting.prospect_id) {
-    ensuite = await appliquerSuite(supabase, userId, meeting.prospect_id, input.suite);
+    if (effets?.annulerRelances) {
+      await supabase
+        .from("tasks")
+        .update({ status: "annule" })
+        .eq("prospect_id", meeting.prospect_id)
+        .eq("status", "a_faire");
+    } else {
+      ensuite = await appliquerSuite(
+        supabase,
+        userId,
+        meeting.prospect_id,
+        effets && !effets.suiteOfferte ? null : input.suite
+      );
+    }
   }
 
-  // Un débrief est un événement : l'étape et la confiance suivent (jamais
-  // bloquant, jamais par-dessus un verrou).
+  // Un débrief est un événement : l'étape suit les faits (jamais par-dessus
+  // un verrou, jamais en arrière) — sauf quand l'issue vient de la DÉCIDER.
   if (meeting.prospect_id) {
-    await applyAutoStatus(supabase, meeting.prospect_id);
+    if (!etape) {
+      const auto = await applyAutoStatus(supabase, meeting.prospect_id);
+      if (auto.changed) etape = auto.status ?? null;
+    }
     await recalcConfidence(supabase, meeting.prospect_id);
   }
 
@@ -559,7 +664,9 @@ export async function cloturerRendezVous(
     id: meeting.id,
     title: meeting.title,
     prospectId: meeting.prospect_id,
-    resultat: input.resultat,
+    resultat: statutRdv,
+    issue,
+    etape,
     ensuite,
     plusRien,
   };

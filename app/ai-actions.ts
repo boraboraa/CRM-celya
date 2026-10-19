@@ -462,6 +462,12 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
   } else if (statut === "gagne" || statut === "perdu") {
     statutReserve =
       "« Gagné » et « Perdu » ne s'obtiennent jamais automatiquement — à vous de confirmer.";
+  } else if (statut === "a_rappeler") {
+    // « À rappeler » suit le DÉBRIEF d'un rendez-vous (026/027), jamais un
+    // texte libre : le modèle ne la propose pas.
+    statut = null;
+    statutReserve =
+      "« À rappeler » vient du débrief d'un rendez-vous : utilisez « Intéressé — à rappeler » sur la carte du rendez-vous.";
   } else if (statut === "proposition") {
     statutReserve =
       "Cochez « j'ai envoyé une proposition » si le devis est bien parti : c'est ce geste qui fait foi.";

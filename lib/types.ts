@@ -1,12 +1,15 @@
 export type UserRole = "admin" | "commercial";
 
-/** Les six étapes d'un prospect, du panier d'entrée au client signé.
+/** Les sept étapes d'un prospect, du panier d'entrée au client signé.
  *  « À appeler » est une colonne (la liste des entreprises à démarcher),
- *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape. */
+ *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape.
+ *  « À rappeler » (migration 026) : le rendez-vous a eu lieu, il faut
+ *  rappeler la personne — ne pas confondre avec « À appeler ». */
 export type ProspectStatus =
   | "a_appeler"
   | "contacte"
   | "rendez_vous"
+  | "a_rappeler"
   | "proposition"
   | "gagne"
   | "perdu";

@@ -14,6 +14,9 @@
     "test:agenda": "node --experimental-strip-types lib/crm/agendaJour.test.ts",
     "test:frontiere": "node --experimental-strip-types lib/rsc-frontiere.test.ts",
     "test:prochaine-action": "node --experimental-strip-types lib/crm/prochaineAction.test.ts",
+    "test:debrief": "node --experimental-strip-types lib/crm/debrief.test.ts",
+    "test:recherche": "node --experimental-strip-types lib/crm/recherche.test.ts",
+    "test:fiche-suivante": "node --experimental-strip-types lib/crm/ficheSuivante.test.ts",
     "test:appels": "node --experimental-strip-types lib/appelsIa/regles.test.ts && node --experimental-strip-types lib/appelsIa/cycle.test.ts && node --experimental-strip-types lib/appelsIa/classement.test.ts && node --experimental-strip-types lib/appelsIa/ecriture.test.ts && node --experimental-strip-types lib/appelsIa/instructions.test.ts",
     "test:appels-live": "node --experimental-strip-types lib/appelsIa/faux-live.test.ts"
   },

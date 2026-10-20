@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { reglerAppelsAction } from "@/app/appels-ia-actions";
-import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { Aide, Retour } from "./commun";
 import { useFormulaire } from "./formulaire";
 
@@ -15,13 +14,10 @@ export type ReglagesFormulaire = {
   limite_compte_jour: number;
   duree_max_s: number;
   sonnerie_max_s: number;
-  numero_appelant: string | null;
-  gsm_test: string | null;
   trunk_url: string;
   voix: string;
   modele: string;
   modele_delegation: string;
-  mode_test: boolean;
 };
 
 /** Un groupe de champs, titré : la fenêtre, les plafonds, les numéros… */
@@ -58,6 +54,11 @@ function Champ({
  * de l'action et de la base ; les plafonds restent SOUS les limites du compte
  * Telnyx (contrainte en base) — l'écran le dit en ambre avant l'envoi, la base
  * refuserait de toute façon.
+ *
+ * Les deux numéros (appelant, GSM de test) n'y sont plus : ils vivent dans
+ * l'onglet « Numéro & test » ; les secrets, dans la section « Connexion » qui
+ * précède ce formulaire (`Replis`). Absents du
+ * formulaire, l'action ne les touche pas (elle ne lit que les champs présents).
  */
 export function Reglages({ r }: { r: ReglagesFormulaire }) {
   const { etat, onSubmit, enCours, ref } = useFormulaire(reglerAppelsAction);
@@ -67,8 +68,6 @@ export function Reglages({ r }: { r: ReglagesFormulaire }) {
   const [plafondJour, setPlafondJour] = useState(String(r.plafond_jour));
   const [limiteHeure, setLimiteHeure] = useState(String(r.limite_compte_heure));
   const [limiteJour, setLimiteJour] = useState(String(r.limite_compte_jour));
-  const [numero, setNumero] = useState(r.numero_appelant ? numeroLisible(r.numero_appelant) : "");
-  const [gsm, setGsm] = useState(r.gsm_test ? numeroLisible(r.gsm_test) : "");
 
   const depasseHeure = Number(plafondHeure) > Number(limiteHeure);
   const depasseJour = Number(plafondJour) > Number(limiteJour);
@@ -218,45 +217,7 @@ export function Reglages({ r }: { r: ReglagesFormulaire }) {
           <Aide>Celles de votre compte Telnyx. Les plafonds de Janet restent dessous : la base refuse sinon.</Aide>
         </Groupe>
 
-        <Groupe titre="Numéros">
-          <Champ id="numero_appelant" label="Numéro appelant">
-            <input
-              id="numero_appelant"
-              name="numero_appelant"
-              type="tel"
-              inputMode="tel"
-              autoComplete="off"
-              value={numero}
-              onChange={(e) => setNumero(e.target.value)}
-              placeholder="0480 …"
-              className="input"
-            />
-          </Champ>
-          <Aide attention={!numero.trim()}>
-            Le 0480 présenté aux prospects. Tant qu&apos;il est vide, le moteur refuse de composer.
-          </Aide>
-          <Champ id="gsm_test" label="GSM de test">
-            <input
-              id="gsm_test"
-              name="gsm_test"
-              type="tel"
-              inputMode="tel"
-              autoComplete="off"
-              value={gsm}
-              onChange={(e) => setGsm(e.target.value)}
-              placeholder="04xx xx xx xx"
-              className="input"
-            />
-          </Champ>
-          <Aide attention={!gsm.trim()}>
-            {r.mode_test
-              ? "Tant que le mode test est mis, tous les appels partent vers ce numéro."
-              : "Le numéro que vise l'appel de test (et tous les appels, en mode test)."}
-            {!gsm.trim() && " Vide : aucun appel de test possible."}
-          </Aide>
-        </Groupe>
-
-        <Groupe titre="Connexion et voix">
+        <Groupe titre="Trunk et voix">
           <Champ id="trunk_url" label="URL du trunk SIP">
             <input
               id="trunk_url"
@@ -306,7 +267,6 @@ export function Reglages({ r }: { r: ReglagesFormulaire }) {
         <button type="submit" disabled={enCours} className="btn-primary">
           {enCours ? "Enregistrement…" : "Enregistrer les réglages"}
         </button>
-        <span className="text-xs text-slate-500">Un numéro vidé est retiré.</span>
       </div>
     </form>
   );

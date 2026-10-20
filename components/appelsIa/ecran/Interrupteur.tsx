@@ -35,6 +35,7 @@ export function Interrupteur({
   texteNon,
   attentionSi,
   confirmation,
+  interdit,
 }: {
   champ: "actif" | "mode_test" | "inscription_auto";
   valeur: boolean;
@@ -46,6 +47,8 @@ export function Interrupteur({
   /** L'état qui s'écrit en ambre (le mode test mis, par exemple). */
   attentionSi?: boolean;
   confirmation?: { versValeur: boolean; texte: string; bouton: string } | null;
+  /** Basculer VERS cette valeur est refusé pour l'instant : l'écran dit pourquoi (le serveur refuse aussi). */
+  interdit?: { versValeur: boolean; texte: string } | null;
 }) {
   const [vue, appliquer] = useOptimistic(valeur);
   const [enCours, startTransition] = useTransition();
@@ -64,6 +67,10 @@ export function Interrupteur({
 
   function auClic() {
     const cible = !vue;
+    if (interdit && interdit.versValeur === cible) {
+      setErreur(interdit.texte);
+      return;
+    }
     if (confirmation && confirmation.versValeur === cible) {
       setDemande((d) => !d);
       return;

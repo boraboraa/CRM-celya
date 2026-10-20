@@ -5,6 +5,27 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 20 octobre 2026 — l'écran Appels IA rendu évident
+
+La `025` est **appliquée**, l'edge function `appels-ia-annexe` **déployée**, la
+chaîne tick → Next vérifiée. Réglés : numéro appelant et GSM de test ; **pas
+encore posés** : clé OpenAI, identifiant et mot de passe SIP. 0 campagne, 0 fiche
+en file, 0 appel (l'appel de test « bloqué » n'avait en fait jamais atteint le
+moteur : aucune ligne `appels_ia`).
+
+`/appels-ia` est refait en **trois onglets** (Numéro & test · Campagnes · Suivi),
+branche `claude/nifty-cray-jp3l9i`, un commit par lot — voir « L'écran en trois
+onglets » dans « Appels IA ». La migration **`029`** (`appels_ia_simuler_inscription`)
+est **écrite et recettée** (**23 OK, 0 faute** le 20/10), **pas appliquée** :
+Bora l'applique **avant la fusion** (le code tourne sans elle : l'assistant liste
+les fiches mais ne lance rien). Retouche du même jour, demandée par Bora avant la
+fusion : la connexion (clé OpenAI, identifiants SIP) quitte l'usage quotidien —
+elle vit dans « Réglages avancés → Connexion », posée UNE fois.
+
+**`mobile-admin@celya.test`** a été **réactivé** le 20/10 pour le banc de l'écran
+(mot de passe changé, jamais écrit dans le dépôt), puis **redésactivé** — il reste
+**à supprimer depuis `/equipe`**, comme avant.
+
 ## État au 19 octobre 2026 — chantier mobile
 
 **Le compte `recette-epuration@celya.test` est SUPPRIMÉ** (19/10, demande de
@@ -2267,12 +2288,8 @@ affirmait « personne n'a pu décrocher » même après un répondeur).
 
 ### Les écrans et le connecteur
 
-- **`/appels-ia`** (admin) : interrupteur général (né coupé), mode test (né mis),
-  état du moteur et sa raison, pause et sa cause, « Appel de test vers mon
-  GSM », inscription automatique et rattrapage annoncé, fenêtre, plafonds et
-  limites du compte, durée et sonnerie, numéro appelant, GSM de test, trunk,
-  secrets (écriture seule), les quatre scripts, campagnes, file, appels,
-  opposition.
+- **`/appels-ia`** (admin) : trois onglets — voir « L'écran en trois onglets »
+  juste après.
 - **Tableau de bord** : une seule colonne « Appels », admin seul, à droite (en
   tête sur GSM) — l'appel en cours et la file, appelés / joints / RDV du jour,
   le fil des derniers appels (un point de couleur, une ligne), un lien.
@@ -2284,6 +2301,140 @@ affirmait « personne n'a pu décrocher » même après un répondeur).
 - **MCP** (admin seul, vérifié en code) : `brief` optionnel sur `creer_prospect`
   et `importer_prospects` ; `ecrire_brief_appel` ; `mettre_en_campagne`
   (simulation d'abord) ; `etat_appels`.
+
+### L'écran en trois onglets (20 octobre — lots 1 à 4)
+
+Bora : « Ce n'est pas instinctif, on ne sait pas quand on lance. » Tout tenait sur
+une page qui défilait ; le bouton de test disait une seule raison ; **une campagne
+se créait avec un nom mais ne pouvait recevoir AUCUNE fiche depuis l'écran** ; et
+« lancer » n'existait pas. Désormais, `?onglet=` (liens rendus côté serveur,
+chacun avec son état ✓ / « à faire ») — sans paramètre, l'écran s'ouvre sur
+**« Campagnes » dès que le numéro appelant est réglé** (`ongletParDefaut`), sur
+« Numéro & test » sinon :
+
+**Bora est le seul utilisateur : la CONNEXION se pose UNE fois et ne doit plus
+apparaître au quotidien** (décision du 20/10, avant la fusion). Les trois secrets
+(clé OpenAI, identifiant et mot de passe SIP) vivent dans « **Réglages avancés →
+Connexion** » (`Replis`, `#connexion`), replié. Tant qu'un secret manque, UNE
+ligne discrète sous les onglets — « Connexion technique à finaliser (une seule
+fois) → » (`LIGNE_CONNEXION`) — mène à `?connexion=1#connexion`, qui déplie le
+panneau côté serveur (une ancre seule n'ouvre pas un `<details>` fermé). Les
+trois posés, plus rien n'en parle.
+
+1. **Numéro & test** (`?onglet=numero-test`) — trois choses, pas une de plus :
+   le **numéro appelant**, choisi d'un tap parmi les numéros que le CRM connaît
+   (`numerosProposes` : celui qui est réglé, `crm_users.phone` du compte, le GSM
+   de test — seuls les numéros belges appelables, sans doublon) ou saisi
+   (`ChoixNumero`) — ⚠ le CRM ne lit PAS la liste des numéros du compte Telnyx,
+   aucune API n'est branchée ; le **GSM de test** (`LigneControle`) ; et
+   **« Appeler mon GSM (test) »** : grisé, il dit **TOUT** ce qui manque
+   (`refusAppelTest`, connexion comprise, avec « Réglages avancés → Connexion »)
+   — et
+   `appelTestAction` refuse avec la même phrase AVANT de réserver quoi que ce
+   soit (sans secret, l'annexe échouait après coup et mettait le moteur en
+   pause). Suivi **en direct** (`SuiviAppel` : compose → sonne → en ligne →
+   terminé, route `/api/appels-ia/appel`, sondée toutes les 2 s par
+   `useSondage`), puis résultat et transcription ; un échec se dit sous le
+   bouton avec **la marche à suivre** (`marcheASuivre` : clé refusée, SIP sortant
+   non activé, identifiants SIP, crédit, trunk — lue sur les phrases de
+   `causeDe`). « Vérifier la connexion » sans composer : **reporté** (décision de
+   Bora, 20/10 — pas de nouvelle edge function ; le test suffit). Un appel de
+   test **décroché et terminé sans erreur** (`testReussi`, `lireTestReussi`)
+   clôt l'étape (✓ = numéro + GSM + test réussi, `etatsOnglets` ; la connexion
+   n'y compte pas, le test réussi la prouve) et propose « Lancer une campagne → ».
+2. **Campagnes** — un bandeau en UNE phrase (`phraseBandeau`, qui appelle
+   `refusMoteur` tel quel : « Janet appelle en ce moment : Garage X (2e essai) »,
+   « En pause : hors fenêtre / jour férié / plafond atteint, reprise … », « À
+   l'arrêt : interrupteur coupé », et ce que le moteur NE PRENDRA PAS : fiches
+   inscrites dans l'autre mode, campagne en pause), les deux interrupteurs, puis
+   **« Nouvelle campagne »** : l'assistant (`AssistantCampagne`, trois écrans —
+   nom, fiches, récapitulatif ; aussi « Ajouter des fiches » à une campagne
+   existante). Les fiches : filtres étape (« À appeler » par défaut) /
+   propriétaire / secteur (`secteurDe`) / ville / recherche (`correspond`, la
+   règle de ⌘K), tout sélectionner, et « 23 fiches peuvent être appelées,
+   4 écartées » avec la raison de chacune — **la règle en base**, jamais copiée
+   (voir 029). Chaque campagne en carte : progression **comptée en base**
+   (`head: true` — jamais une liste rapatriée, que la limite de 1 000 lignes de
+   PostgREST tronquerait), Pause / Reprendre, Ajouter des fiches, Terminer.
+3. **Suivi** — « En ce moment » (l'appel en cours en direct, à défaut le
+   dernier ; sans appel, l'état est sondé tant que Janet a de quoi appeler), la
+   file, les derniers appels avec la transcription **dépliable, lue à la
+   demande**, la liste d'opposition.
+
+Replié en bas de « Numéro & test » et de « Campagnes » (`Replis`) : les réglages
+avancés — d'abord la **Connexion** (les trois secrets), puis fenêtre, durées,
+plafonds, limites, « Trunk et voix », modèle ; **les deux numéros n'y sont plus**,
+ils vivent dans « Numéro & test » — et les scripts.
+L'inscription automatique devient une case de l'assistant (« Ajouter aussi
+automatiquement mes nouvelles fiches À appeler ») ; ses fiches vont dans la
+campagne système « Inscription automatique », en carte à part (décision de Bora).
+Le rattrapage disparaît de l'écran : la sélection de l'assistant le couvre.
+
+**« Lancer la campagne » est BLOQUÉ, avec la raison au-dessus du bouton, tant que
+le numéro appelant, la connexion ou un appel de test réussi manquent**
+(`refusLancement` — on prépare la campagne quand même, seul le dernier geste
+attend). Puis, dans cet ordre (`lancerCampagneAction`, qui revérifie
+`refusLancement` en premier) : la sélection revérifiée en base (aucune appelable → rien ne naît, pas de campagne
+vide) ; **le mode posé AVANT l'inscription** — une ligne de file garde le mode de
+son entrée : inscrire en test puis passer en réel laisserait des fiches que le
+moteur ne prendrait jamais ; la campagne (active) ; chaque fiche par
+`appels_ia_inscrire` (le chemin de la fiche et du MCP), par paquets de dix ;
+l'inscription automatique si cochée ; l'interrupteur général. Une confirmation
+(« Janet va commencer à appeler dès 9h30 en semaine, 8 appels par heure au
+plus. Lancer ? » — `phraseConfirmationLancement`, calculée côté serveur), et **une
+seconde pour le réel** (`CONFIRMATION_REEL` : annonce IA, liste d'opposition),
+toutes deux dans le pied, au-dessus du bouton (sur téléphone, on ne confirme pas
+une phrase hors de l'écran).
+
+**Le réel n'est possible qu'après un appel de test réussi** (décision de Bora,
+20/10) : l'écran grise l'option et le dit (`REFUS_REEL_SANS_TEST`), et
+`basculerAppelsAction("mode_test", false)` comme `lancerCampagneAction` le
+**revérifient côté serveur**.
+
+**Règles pures, un seul module** : `lib/appelsIa/ecran/` (imports relatifs, lu par
+la page, les composants ET les actions, toujours importé comme
+`@/lib/appelsIa/ecran`) — **`miseEnRoute.ts`** porte les numéros, la connexion,
+les onglets (`ONGLETS`, `lireOnglet`, `ongletParDefaut`, `etatsOnglets`), le refus
+du test et celui de « Lancer » ; `index.ts` le reste, et le ré-exporte.
+`npm run test:appels-ecran` (`lib/appelsIa/ecran/ecran.test.ts`, 659 cas) : les
+**32 combinaisons** des cinq éléments × test réussi ou non (ce qui manque, la
+connexion, l'onglet d'ouverture, l'état de « Numéro & test », le refus de
+lancer), les numéros proposés, la marche à suivre sur les phrases
+réelles de `causeDe`, la sélection, l'estimation (`min(plafond du jour, plafond
+horaire × heures de fenêtre)`), la confirmation, le bandeau (actif, hors
+fenêtre, vendredi soir → lundi, férié, pause, deux plafonds, numéro manquant
+AVANT la fenêtre — on lit l'ordre de `refusMoteur`, pas le nôtre —, autre mode,
+campagne en pause). `dureeLisible` y vit aussi (le suivi client s'en sert).
+
+**Migration `029`** (`029_simuler_inscription.sql`, **écrite, PAS appliquée**) :
+`appels_ia_simuler_inscription(uuid[])` → `(prospect_id, refus)`. La règle
+`appels_ia_refus_inscription` n'était exécutable QUE par le service_role (elle ne
+vérifie pas l'appelant : l'ouvrir à `authenticated` aurait laissé un commercial
+sonder n'importe quelle fiche) ; d'où une enveloppe **admin vérifiée, lecture
+seule**, qui l'appelle telle quelle — **pas de service_role dans Next**.
+Additive ; le code est tolérant (`PGRST202` → l'assistant liste les fiches,
+toutes « écartées », et ne lance rien). Recette
+`supabase/recettes/029_assembler.sh` : **23 OK, 0 faute** le 20/10, en
+transaction annulée contre la production, migration jouée verbatim (md5
+`09887679…` = fichier) — raisons ≡ fonction 025, admin seul (Collins et `anon`
+42501), aucune écriture par la simulation, « lancer » inscrit exactement les
+cochées acceptées, refuse les autres avec la MÊME raison, ne touche à aucune
+fiche hors sélection ; production revérifiée intacte (fonction absente, 86 fiches,
+0 campagne, 0 ligne de file).
+
+**Le banc** : `tests/mobile/appels-ia.spec.ts` (admin, 390 / 360 / 1280) se
+connecte lui-même et tourne avec `--no-deps` :
+`npx playwright test appels-ia --project=iphone-admin --project=android-admin
+--project=ordinateur-admin --no-deps`. ⚠ **Les secrets du Vault sont COMMUNS au
+projet** : un test qui « poserait » une clé factice écraserait la vraie. Le banc
+**remplit les champs sans jamais soumettre**, et le prouve (il compte les POST :
+zéro) ; l'assistant va jusqu'au récapitulatif, « Lancer » n'est jamais cliqué (et
+le banc vérifie qu'il est grisé AVEC sa raison tant que la connexion ou le test
+manquent). Il vérifie aussi l'onglet d'ouverture, que les secrets ne sont PAS sur
+« Numéro & test », et que la ligne « Connexion technique à finaliser » ouvre le
+panneau. Le test de l'assistant s'**ignore** tant que la 029 n'est pas appliquée
+(15 passés, 3 ignorés le 20/10 après la retouche ; les 3 passent contre une
+simulation factice locale).
 
 ### Le coût — ce n'est plus « zéro euro »
 
@@ -2489,7 +2640,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
-`npm run test:appels`, `npm run test:appels-live`,
+`npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
 sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,
@@ -3218,6 +3369,11 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
    refusé (23514) ; les rattacher, cocher ou supprimer reste possible (recette
    `supabase/recettes/028.sql`, **7 OK** le 18/10). La `028` est indépendante
    des autres.
+8quinquies. **Appliquer la migration `029`** (`appels_ia_simuler_inscription`)
+   **avant la fusion** de `claude/nifty-cray-jp3l9i` — additive, indépendante.
+   Vérifier après coup : la fonction existe, `authenticated` peut l'exécuter,
+   `anon` non. Puis, depuis `/equipe`, **supprimer `mobile-admin@celya.test`**
+   (redésactivé après le banc du 20/10).
 8ter. **Appliquer les migrations `026` puis `027`** (débrief des RDV, étape
    « À rappeler »), dans cet ordre et SÉPARÉMENT (la `026` seule : valeur
    d'enum), **avant** le déploiement du code du même lot — il lit

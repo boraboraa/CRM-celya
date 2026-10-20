@@ -10,20 +10,13 @@
  */
 
 import type { AppelResume } from "@/lib/appelsIa/lectures";
-import type { ReglagesAppels } from "@/lib/appelsIa/acces";
 import { STATUTS_ACTIFS } from "@/lib/appelsIa/acces";
-import { POINT_APPEL, STATUT_APPEL_LABEL } from "@/lib/appelsIa/libelles";
-import { numeroLisible } from "@/lib/appelsIa/numeros";
+import { POINT_APPEL } from "@/lib/appelsIa/libelles";
 import { ajouterJours, heureFr, jourCourt, jourHeureFr, partiesBruxelles } from "@/lib/appelsIa/calendrier";
 
-/** « 45 s », « 2 min », « 2 min 14 s ». */
-export function dureeLisible(s: number | null | undefined): string | null {
-  if (s === null || s === undefined || !Number.isFinite(s) || s < 0) return null;
-  if (s < 60) return `${Math.round(s)} s`;
-  const m = Math.floor(s / 60);
-  const r = Math.round(s % 60);
-  return r === 0 ? `${m} min` : `${m} min ${r} s`;
-}
+// « 45 s », « 2 min », « 2 min 14 s » : écrit une fois, dans le module pur de
+// l'écran (le suivi en direct, composant client, s'en sert aussi).
+export { dureeLisible } from "@/lib/appelsIa/ecran";
 
 /** Un instant PASSÉ : « aujourd'hui à 10h30 », « hier à 16h », « 06/10 à 9h45 ». */
 export function quandPasse(iso: string | null | undefined, maintenant: Date): string {
@@ -58,64 +51,4 @@ export function pointAppel(a: Pick<AppelResume, "statut" | "resultat" | "erreur_
   if (a.statut === "echec" || a.erreur_cote) return POINT_APPEL.echec;
   if (a.resultat && POINT_APPEL[a.resultat]) return POINT_APPEL[a.resultat];
   return POINT_APPEL.sans_reponse;
-}
-
-export type TonEtat = "marche" | "calme" | "attention";
-
-export type PhraseEtat = { ton: TonEtat; titre: string; detail: string | null };
-
-/**
- * L'état du moteur en UNE phrase. L'ordre suit celui de `refusMoteur` : ce qui
- * se dit d'abord est ce qui empêche d'abord.
- *
- *   · un appel en cours                     → « Appel en cours — … »
- *   · une pause (panne de notre côté)       → ambre, la cause est dans le bandeau
- *   · l'interrupteur coupé                  → calme : c'est l'état de naissance
- *   · hors de la fenêtre                    → calme : c'est la nuit, pas une panne
- *   · tout autre refus (numéro, plafonds…)  → ambre
- *   · rien ne l'empêche                     → en marche
- */
-export function phraseEtat(e: {
-  reglages: ReglagesAppels;
-  refus: string | null;
-  enCours: AppelResume | null;
-  fileTotal: number;
-}): PhraseEtat {
-  const { reglages: r, refus, enCours, fileTotal } = e;
-  if (enCours) {
-    const qui = enCours.societe ?? (enCours.prospect_id ? "une fiche" : "fiche fictive");
-    return {
-      ton: "marche",
-      titre: `Appel en cours — ${qui}`,
-      detail: `${STATUT_APPEL_LABEL[enCours.statut] ?? enCours.statut} · ${numeroLisible(enCours.numero_compose)}${
-        enCours.mode_test ? " (appel de test)" : ""
-      }`,
-    };
-  }
-  if (r.pause_cause) {
-    return {
-      ton: "attention",
-      titre: "En pause",
-      detail: "Plus rien ne part tant que la pause n'est pas levée.",
-    };
-  }
-  if (!r.actif) {
-    return {
-      ton: "calme",
-      titre: "À l'arrêt",
-      detail: "L'interrupteur général est coupé : Janet ne compose rien. L'appel de test reste possible.",
-    };
-  }
-  if (refus && refus.startsWith("Hors de la fenêtre")) {
-    return { ton: "calme", titre: "En attente de la fenêtre d'appel", detail: refus };
-  }
-  if (refus) return { ton: "attention", titre: "Le moteur ne compose pas", detail: refus };
-  if (fileTotal === 0) {
-    return { ton: "marche", titre: "En marche", detail: "La file est vide : rien à composer pour l'instant." };
-  }
-  return {
-    ton: "marche",
-    titre: "En marche",
-    detail: `Janet compose dès qu'une fiche de la file est prête — ${fileTotal} fiche${fileTotal > 1 ? "s" : ""} en file.`,
-  };
 }

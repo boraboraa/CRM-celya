@@ -7,6 +7,7 @@
  */
 
 import { Icone, type IconeNom } from "@/components/ui";
+import type { Replique } from "@/lib/appelsIa/ecran";
 
 /** Le titre d'une carte : petit, en capitales, comme « Créer un accès » sur /equipe. */
 export function TitreCarte({
@@ -135,5 +136,21 @@ export function PuceMode({ test }: { test: boolean }) {
     <span className={PUCE_MODE.reel} title="Appel réel : vers le numéro de la fiche">
       Réel
     </span>
+  );
+}
+
+/** Les répliques d'un appel : Janet en bleu, la personne au bout du fil en blanc. */
+export function ListeRepliques({ repliques }: { repliques: Replique[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {repliques.map((r, i) => (
+        <li key={i} className="break-words text-xs leading-relaxed">
+          <span className={r.qui === "janet" ? "font-medium text-blue-200" : "font-medium text-slate-200"}>
+            {r.qui === "janet" ? "Janet" : "Au bout du fil"} :
+          </span>{" "}
+          <span className="text-slate-300">{r.texte}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

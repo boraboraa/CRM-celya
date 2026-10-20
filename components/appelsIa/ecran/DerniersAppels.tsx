@@ -13,6 +13,7 @@ import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { OUTCOME_ICON, OUTCOME_TEXT, isCallOutcome } from "@/lib/constants";
 import { Icone } from "@/components/ui";
 import { PuceMode, Repliable } from "./commun";
+import { TranscriptionDepliable } from "./TranscriptionDepliable";
 import { dureeLisible, pointAppel, quandPasse } from "./format";
 
 const PREMIERS = 10;
@@ -105,6 +106,8 @@ function Appel({ a, maintenant }: { a: AppelResume; maintenant: Date }) {
             {a.erreur_message ? ` : ${a.erreur_message}` : "."}
           </p>
         )}
+
+        {!enCours && a.decroche_at && <TranscriptionDepliable appelId={a.id} />}
 
         <p className="mt-1 text-[11px] text-slate-600">Composé : {numeroLisible(a.numero_compose)}</p>
       </div>

@@ -22,7 +22,7 @@ import { depuisSaisie, fusionner, normaliserContenu, CHAMPS_LISTES, CHAMPS_SIMPL
 import { preparerBrief } from "@/lib/appelsIa/briefIA";
 import { partiesBruxelles } from "@/lib/appelsIa/calendrier";
 import { SECTEURS, type Secteur } from "@/lib/appelsIa/secteur";
-import { REFUS_REEL_SANS_TEST, SECRETS_JANET, refusAppelTest } from "@/lib/appelsIa/ecran";
+import { REFUS_REEL_SANS_TEST, SECRETS_JANET, refusAppelTest, refusLancement } from "@/lib/appelsIa/ecran";
 import { lireTestReussi } from "@/lib/appelsIa/lectures";
 import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { secteurDe } from "@/lib/appelsIa/secteur";
@@ -343,6 +343,8 @@ export type IssueLancement = EtatAction & {
 /**
  * « Lancer la campagne » — dans cet ordre, et l'écran le dit :
  *
+ *   0. ce qui doit être prêt : le numéro appelant, la connexion (les trois
+ *      secrets), un appel de test réussi (`refusLancement`) ;
  *   1. la sélection est revérifiée par la règle en base (rien ne part si
  *      aucune fiche ne peut être appelée : pas de campagne vide) ;
  *   2. le MODE est posé AVANT l'inscription — une ligne de file garde le mode
@@ -372,9 +374,23 @@ export async function lancerCampagneAction(e: {
   if (!e.campagneId && !nom) return { error: "Donnez un nom à la campagne." };
 
   const supabase = await createClient();
-  const { data: reg, error: er } = await supabase.from("appels_ia_reglages").select("mode_test, pause_cause").eq("id", 1).maybeSingle();
-  if (er || !reg) return { error: "Réglages illisibles : rien n'est lancé." };
-  const r = reg as { mode_test: boolean; pause_cause: string | null };
+  const [{ data: reg, error: er }, sec, reussi] = await Promise.all([
+    supabase.from("appels_ia_reglages").select("mode_test, pause_cause, numero_appelant, gsm_test").eq("id", 1).maybeSingle(),
+    supabase.rpc("appels_ia_secrets_poses"),
+    lireTestReussi(supabase),
+  ]);
+  if (er || !reg || sec.error) return { error: "Réglages illisibles : rien n'est lancé." };
+  const r = reg as { mode_test: boolean; pause_cause: string | null; numero_appelant: string | null; gsm_test: string | null };
+
+  // 0. Ce qui doit être prêt : le numéro appelant, la connexion, un test
+  //    réussi. La même phrase que l'écran (`refusLancement`), revérifiée ici.
+  const bloque = refusLancement({
+    numeroAppelant: r.numero_appelant,
+    gsmTest: r.gsm_test,
+    secretsPoses: ((sec.data ?? []) as { nom: string }[]).map((x) => x.nom),
+    testReussi: reussi,
+  });
+  if (bloque) return { error: bloque };
 
   // 1. La sélection, revérifiée.
   const sim = await simuler(supabase, ids);
@@ -383,9 +399,7 @@ export async function lancerCampagneAction(e: {
   if (appelables.length === 0) return { error: "Aucune des fiches cochées ne peut être appelée : rien n'est lancé." };
 
   // 2. Le mode, avant l'inscription.
-  if (e.reel && r.mode_test) {
-    if (!(await lireTestReussi(supabase))) return { error: REFUS_REEL_SANS_TEST };
-  }
+  //    (Le réel exige un test réussi : c'est déjà acquis à l'étape 0.)
   if (e.reel === r.mode_test) {
     const { error } = await supabase.from("appels_ia_reglages").update({ mode_test: !e.reel, maj_par: moi.id }).eq("id", 1);
     if (error) return { error: `Mode impossible à régler : ${error.message}` };

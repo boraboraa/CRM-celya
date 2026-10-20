@@ -15,7 +15,7 @@ function uuidDans(texte: string): string | null {
 }
 
 /**
- * « Appeler mon GSM (test) » — la dernière marche de la mise en route.
+ * « Appeler mon GSM (test) » — le cœur de l'onglet « Numéro & test ».
  *
  * Grisé, il dit TOUT ce qui manque (`refusAppelTest`, lib/appelsIa/ecran.ts —
  * la même phrase que l'action serveur, qui refuse de toute façon). Lancé, il
@@ -89,7 +89,7 @@ export function AppelTest({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-500/10 px-3.5 py-3 ring-1 ring-emerald-400/20">
           <p className="flex items-center gap-2 text-sm text-emerald-200">
             <Icone nom="coche" className="h-4 w-4" />
-            Mise en route terminée : Janet a déjà appelé votre GSM sans erreur.
+            Test réussi : Janet a déjà appelé votre GSM sans erreur.
           </p>
           <Link href="/appels-ia?onglet=campagnes" className="btn-primary px-3.5 py-2 text-sm">
             Lancer une campagne →

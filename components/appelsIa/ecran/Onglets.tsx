@@ -1,6 +1,7 @@
 /**
- * Les trois onglets de l'écran Appels IA — Mise en route, Campagnes, Suivi —
- * dans cet ordre, chacun avec son état (✓ fait, « à faire », ou un mot).
+ * Les trois onglets de l'écran Appels IA — Numéro & test, Campagnes, Suivi —
+ * dans cet ordre, chacun avec son état (✓ fait, « à faire », ou un mot). La
+ * liste, les libellés et les états vivent dans lib/appelsIa/ecran/miseEnRoute.ts.
  *
  * Des LIENS (`?onglet=`), rendus côté serveur : un onglet se partage, se
  * recharge et revient avec le bouton Retour, comme le sélecteur de périmètre.
@@ -9,24 +10,9 @@
 
 import Link from "next/link";
 import { Icone } from "@/components/ui";
+import { LIBELLE_ONGLET, ONGLETS, type EtatOnglet, type Onglet } from "@/lib/appelsIa/ecran";
 
-export const ONGLETS = ["mise-en-route", "campagnes", "suivi"] as const;
-export type Onglet = (typeof ONGLETS)[number];
-
-export function lireOnglet(brut: string | string[] | undefined, parDefaut: Onglet): Onglet {
-  const v = Array.isArray(brut) ? brut[0] : brut;
-  return (ONGLETS as readonly string[]).includes(v ?? "") ? (v as Onglet) : parDefaut;
-}
-
-const LIBELLE: Record<Onglet, string> = {
-  "mise-en-route": "Mise en route",
-  campagnes: "Campagnes",
-  suivi: "Suivi",
-};
-
-/** `fait` : ✓ ; `a_faire` : ambre ; `info` : neutre (un mot, un compte). Classes entières (règle JIT). */
-export type EtatOnglet = { ton: "fait" | "a_faire" | "info"; texte: string };
-
+/** Classes entières (règle JIT). */
 const PUCE: Record<EtatOnglet["ton"], string> = {
   fait: "inline-flex items-center gap-1 text-[11px] font-normal text-emerald-300",
   a_faire: "inline-flex items-center gap-1 text-[11px] font-normal text-amber-300",
@@ -53,7 +39,7 @@ export function OngletsAppels({ actuel, etats }: { actuel: Onglet; etats: Record
                 className={ONGLET[o === actuel ? "actif" : "inactif"]}
               >
                 <span className="truncate">
-                  <span className="text-slate-500">{i + 1}.</span> {LIBELLE[o]}
+                  <span className="text-slate-500">{i + 1}.</span> {LIBELLE_ONGLET[o]}
                 </span>
                 <span className={PUCE[e.ton]}>
                   {e.ton === "fait" && <Icone nom="coche" className="h-3 w-3" />}

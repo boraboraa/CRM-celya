@@ -74,6 +74,7 @@ export function AssistantCampagne({
   moiId,
   reglages: r,
   testReussi,
+  refusLancement,
   confirmationTest,
   confirmationReel,
 }: {
@@ -85,6 +86,12 @@ export function AssistantCampagne({
   moiId: string;
   reglages: ReglagesAssistant;
   testReussi: boolean;
+  /**
+   * Pourquoi « Lancer » est bloqué — le numéro appelant, la connexion, un test
+   * réussi (`refusLancement`) — ou null. On prépare la campagne quand même ;
+   * seul le dernier geste attend. L'action serveur refuse avec la même phrase.
+   */
+  refusLancement: string | null;
   /** Les phrases de confirmation, calculées côté serveur (elles dépendent de l'heure). */
   confirmationTest: string;
   confirmationReel: string;
@@ -417,7 +424,14 @@ export function AssistantCampagne({
   ) : (
     <div className="space-y-3">
       {/* La confirmation vit AU-DESSUS du bouton, dans le pied : sur téléphone,
-          on ne confirme jamais une phrase qu'on n'a pas sous les yeux. */}
+          on ne confirme jamais une phrase qu'on n'a pas sous les yeux. Le
+          refus aussi : un bouton grisé dit pourquoi, juste au-dessus de lui. */}
+      {etape === 3 && refusLancement && (
+        <p id="lancer-bloque" className="flex items-start gap-1.5 text-xs leading-relaxed text-amber-300">
+          <Icone nom="alerte" className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="min-w-0">{refusLancement}</span>
+        </p>
+      )}
       {confirmer === "lancer" && (
         <p role="alert" className="rounded-xl bg-celya-blue/10 px-3.5 py-3 text-sm leading-relaxed text-blue-100 ring-1 ring-blue-400/30">
           {reel ? confirmationReel : confirmationTest}
@@ -450,7 +464,7 @@ export function AssistantCampagne({
             Suivant →
           </button>
         ) : (
-          <button type="button" disabled={lancement || compte.appelables.length === 0} onClick={lancer} className="btn-primary">
+          <button type="button" disabled={lancement || compte.appelables.length === 0 || Boolean(refusLancement)} onClick={lancer} className="btn-primary">
             <Icone nom="telephone" className="h-4 w-4" />
             {lancement
               ? "Lancement…"

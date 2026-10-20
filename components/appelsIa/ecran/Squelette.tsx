@@ -1,7 +1,7 @@
 /**
  * La silhouette de l'écran Appels IA, pendant que le serveur lit la base :
- * les trois onglets, puis la liste de contrôle et l'appel de test (l'onglet
- * le plus souvent ouvert tant que la mise en route n'est pas faite). Module NEUTRE, rendu par app/(app)/appels-ia/loading.tsx.
+ * les trois onglets, puis deux cartes (la forme de « Numéro & test » comme de
+ * « Campagnes », à grands traits). Module NEUTRE, rendu par app/(app)/appels-ia/loading.tsx.
  */
 
 function Bloc({ className = "" }: { className?: string }) {

@@ -33,7 +33,7 @@ const TEXTE: Record<"faite" | "courante" | "avenir" | "echec", string> = {
  * (`marcheASuivre`, lib/appelsIa/ecran.ts) : clé refusée, SIP sortant non
  * activé, identifiants SIP refusés.
  *
- * Fini, il rafraîchit la page une fois : l'onglet « Mise en route » passe en ✓
+ * Fini, il rafraîchit la page une fois : l'onglet « Numéro & test » passe en ✓
  * après un test réussi, et la pause posée par le moteur s'affiche.
  */
 export function SuiviAppel({ initial }: { initial: AppelDetail }) {

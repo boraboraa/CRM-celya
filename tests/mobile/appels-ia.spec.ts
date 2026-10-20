@@ -2,7 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { ciblesTactiles, contexte, identifiants, pasDeDefilementHorizontal } from "./outils";
 
 /**
- * L'écran Appels IA (admin) — Mise en route → Campagnes → Suivi.
+ * L'écran Appels IA (admin) — Numéro & test → Campagnes → Suivi, et la
+ * connexion posée une fois dans les réglages avancés.
  *
  * AUCUN APPEL N'EST COMPOSÉ, RIEN N'EST ENREGISTRÉ. Les secrets du Vault sont
  * COMMUNS à tout le projet : un test qui « poserait » une clé factice
@@ -50,7 +51,7 @@ test("trois onglets dans l'ordre, chacun avec son état, ≥ 44 px", async ({ pa
   await expect(onglets).toBeVisible();
   const libelles = await onglets.getByRole("link").evaluateAll((els) => els.map((e) => (e.textContent ?? "").trim()));
   expect(libelles).toHaveLength(3);
-  expect(libelles[0]).toMatch(/^1\.\s*Mise en route/);
+  expect(libelles[0]).toMatch(/^1\.\s*Numéro & test/);
   expect(libelles[1]).toMatch(/^2\.\s*Campagnes/);
   expect(libelles[2]).toMatch(/^3\.\s*Suivi/);
   await ciblesTactiles(onglets);
@@ -65,38 +66,60 @@ test("trois onglets dans l'ordre, chacun avec son état, ≥ 44 px", async ({ pa
   }
 });
 
-test("mise en route : le test grisé dit TOUT ce qui manque, rien n'est enregistré", async ({ page }) => {
-  await page.goto("/appels-ia?onglet=mise-en-route");
+test("à l'ouverture : « Campagnes » dès que le numéro appelant est réglé", async ({ page }) => {
+  await page.goto("/appels-ia?onglet=numero-test");
+  const regle = await page.getByRole("radio", { checked: true }).count();
+  await page.goto("/appels-ia");
+  const onglets = page.getByRole("navigation", { name: "Étapes des appels IA" });
+  const attendu = regle > 0 ? /Campagnes/ : /Numéro & test/;
+  await expect(onglets.getByRole("link", { name: attendu })).toHaveAttribute("aria-current", "page");
+});
+
+test("numéro & test : rien que le numéro, le GSM et l'appel de test — le test grisé dit TOUT", async ({ page }) => {
+  await page.goto("/appels-ia?onglet=numero-test");
   const bouton = page.getByRole("button", { name: "Appeler mon GSM (test)" });
   await expect(bouton).toBeVisible();
+  await expect(page.getByRole("radiogroup", { name: "Numéro appelant" }).or(page.getByLabel("Autre numéro appelant"))).toBeVisible();
+  await expect(page.getByText("GSM de test", { exact: true })).toBeVisible();
+  // Les secrets NE sont PAS sur cet onglet (ils vivent, repliés, dans Réglages avancés → Connexion).
+  for (const s of ["Clé OpenAI", "Identifiant SIP", "Mot de passe SIP"]) {
+    await expect(page.getByLabel(s, { exact: true })).toBeHidden();
+  }
 
-  // Les lignes encore ouvertes sont celles qui manquent : la phrase sous le
-  // bouton doit les nommer TOUTES.
-  const manquantes = await page.locator("li:has(form) label").evaluateAll((els) => els.map((e) => (e.textContent ?? "").trim()));
-  const NOM: Record<string, string> = {
-    "Numéro appelant": "le numéro appelant",
-    "GSM de test": "le GSM de test",
-    "Clé OpenAI": "la clé OpenAI",
-    "Identifiant SIP": "l'identifiant SIP",
-    "Mot de passe SIP": "le mot de passe SIP",
-  };
-  if (manquantes.length === 0) {
-    test.info().annotations.push({ type: "info", description: "mise en route déjà complète : rien à griser" });
+  const ligne = page.getByRole("link", { name: /Connexion technique à finaliser \(une seule fois\)/ });
+  const connexionManque = (await ligne.count()) > 0;
+  if (connexionManque) {
+    await expect(bouton).toBeDisabled();
+    const phrase = (await page.locator("#appel-test-bloque").textContent()) ?? "";
+    expect(phrase).toContain("Réglages avancés → Connexion");
+    expect(phrase).toMatch(/Il manque .*(la clé OpenAI|l'identifiant SIP|le mot de passe SIP)/);
+  }
+  await pasDeDefilementHorizontal(page);
+});
+
+test("connexion : UNE ligne discrète tant qu'elle manque, qui ouvre le panneau — rien n'est enregistré", async ({ page }) => {
+  await page.goto("/appels-ia?onglet=campagnes");
+  const ligne = page.getByRole("link", { name: /Connexion technique à finaliser \(une seule fois\)/ });
+  if ((await ligne.count()) === 0) {
+    test.info().annotations.push({ type: "info", description: "connexion déjà posée : plus rien n'en parle" });
+    await expect(page.getByText(/Connexion technique/)).toHaveCount(0);
     return;
   }
-  await expect(bouton).toBeDisabled();
-  const phrase = (await page.locator("#appel-test-bloque").textContent()) ?? "";
-  for (const m of manquantes) expect(phrase, `« ${m} » doit être nommé`).toContain(NOM[m]);
+  await expect(ligne).toHaveCount(1);
+  await ligne.click();
+  await page.waitForURL(/connexion=1/);
+  const panneau = page.locator("#connexion");
+  await expect(panneau).toBeVisible();
 
-  // Les champs se REMPLISSENT (valeurs factices), mais rien n'est envoyé.
+  // Les secrets manquants se REMPLISSENT (valeurs factices), mais rien n'est
+  // envoyé : le Vault est commun, un secret factice écraserait le vrai.
   const suivi = compterPosts(page);
-  for (const m of manquantes) {
-    const champ = page.getByLabel(m, { exact: true });
-    await champ.fill(m.includes("Numéro") || m.includes("GSM") ? "0470 00 00 00" : "factice-test-jamais-envoye");
-  }
+  const champs = panneau.locator("input[type=password]");
+  const n = await champs.count();
+  expect(n, "au moins un secret à poser").toBeGreaterThan(0);
+  for (let i = 0; i < n; i++) await champs.nth(i).fill("factice-test-jamais-envoye");
   await page.waitForTimeout(500);
   expect(suivi.posts, "aucune server action ne doit partir").toEqual([]);
-  await expect(bouton).toBeDisabled();
   await pasDeDefilementHorizontal(page);
 });
 
@@ -125,7 +148,15 @@ test("campagnes : l'assistant jusqu'au récapitulatif, sans lancer", async ({ pa
   test.skip(await suivant.isDisabled(), "aucune fiche appelable dans la base de test");
   await suivant.click();
   await expect(zone.getByText("Durée estimée")).toBeVisible();
-  await expect(zone.getByRole("button", { name: "Lancer la campagne" })).toBeEnabled();
+  const lancer = zone.getByRole("button", { name: "Lancer la campagne" });
+  // Bloqué tant que la connexion ou un test réussi manquent — et il dit pourquoi.
+  const refus = zone.locator("#lancer-bloque");
+  if ((await refus.count()) > 0) {
+    await expect(lancer).toBeDisabled();
+    await expect(refus).toContainText(/connexion technique|appel de test réussi|numéro appelant/);
+  } else {
+    await expect(lancer).toBeEnabled();
+  }
   // On s'arrête là : « Lancer la campagne » n'est JAMAIS cliqué.
   await pasDeDefilementHorizontal(page);
 });

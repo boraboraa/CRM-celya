@@ -3,15 +3,16 @@ import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { lireAppel, lirePageAppels } from "@/lib/appelsIa/lectures";
 import { PageHeader, Icone } from "@/components/ui";
-import { EcranAppels, miseEnRoute } from "@/components/appelsIa/ecran/Ecran";
-import { lireOnglet } from "@/components/appelsIa/ecran/Onglets";
+import { EcranAppels } from "@/components/appelsIa/ecran/Ecran";
+import { lireOnglet, ongletParDefaut } from "@/lib/appelsIa/ecran";
 
 /**
- * Appels IA — l'écran de Janet, en trois onglets : « Mise en route » (les
- * numéros, les secrets, l'appel de test), « Campagnes » (créer, lancer) et
- * « Suivi » (l'appel en cours, la file, les derniers appels, l'opposition).
- * Sans `?onglet=`, l'écran s'ouvre sur la mise en route tant qu'elle n'est pas
- * complète, sur les campagnes ensuite.
+ * Appels IA — l'écran de Janet, en trois onglets : « Numéro & test » (le
+ * numéro appelant, le GSM de test, l'appel de test), « Campagnes » (créer,
+ * lancer) et « Suivi » (l'appel en cours, la file, les derniers appels,
+ * l'opposition). Sans `?onglet=`, l'écran s'ouvre sur « Campagnes » dès que
+ * le numéro appelant est réglé. La connexion (secrets) se pose une fois, dans
+ * les réglages avancés (`?connexion=1` les ouvre).
  *
  * ADMIN SEUL : un non-admin est renvoyé vers le tableau de bord, et chaque
  * action le revérifie côté serveur (masquer un lien n'a jamais interdit
@@ -65,18 +66,20 @@ export default async function AppelsIaPage({
   }
 
   // Les membres actifs : le filtre « propriétaire » de l'assistant de campagne.
-  const { data: equipe } = await supabase.from("crm_users").select("id, full_name, email").eq("is_active", true).order("full_name");
-  const membres = ((equipe ?? []) as { id: string; full_name: string | null; email: string }[]).map((u) => ({
-    id: u.id,
-    nom: u.full_name ?? u.email,
-  }));
+  // Son téléphone (le sien) : un numéro appelant proposé d'un tap.
+  const { data: equipe } = await supabase.from("crm_users").select("id, full_name, email, phone").eq("is_active", true).order("full_name");
+  const lus = (equipe ?? []) as { id: string; full_name: string | null; email: string; phone: string | null }[];
+  const membres = lus.map((u) => ({ id: u.id, nom: u.full_name ?? u.email }));
+  const telephoneProfil = lus.find((u) => u.id === session.userId)?.phone ?? null;
 
-  const onglet = lireOnglet(params.onglet, miseEnRoute(page, reglages).complete ? "campagnes" : "mise-en-route");
+  // « Campagnes » dès que le numéro appelant est réglé (ongletParDefaut).
+  const onglet = lireOnglet(params.onglet, ongletParDefaut({ numeroAppelant: reglages.numero_appelant }));
+  const connexionOuverte = params.connexion === "1";
   // L'appel à suivre en direct, détaillé (transcription) — seulement sur
-  // l'onglet qui le montre : le dernier appel de test sur « Mise en route »,
+  // l'onglet qui le montre : le dernier appel de test sur « Numéro & test »,
   // l'appel en cours (à défaut le dernier) sur « Suivi ».
   const aSuivre =
-    onglet === "mise-en-route" ? page.dernierTest : onglet === "suivi" ? (page.etat.enCours ?? page.appels[0] ?? null) : null;
+    onglet === "numero-test" ? page.dernierTest : onglet === "suivi" ? (page.etat.enCours ?? page.appels[0] ?? null) : null;
   const aSuivreDetail = aSuivre ? await lireAppel(supabase, aSuivre.id) : null;
 
   return (
@@ -91,6 +94,8 @@ export default async function AppelsIaPage({
         aSuivreDetail={aSuivreDetail}
         membres={membres}
         moiId={session.userId}
+        telephoneProfil={telephoneProfil}
+        connexionOuverte={connexionOuverte}
       />
     </>
   );

@@ -13,12 +13,14 @@ encore posés** : clé OpenAI, identifiant et mot de passe SIP. 0 campagne, 0 fi
 en file, 0 appel (l'appel de test « bloqué » n'avait en fait jamais atteint le
 moteur : aucune ligne `appels_ia`).
 
-`/appels-ia` est refait en **trois onglets** (Mise en route · Campagnes · Suivi),
+`/appels-ia` est refait en **trois onglets** (Numéro & test · Campagnes · Suivi),
 branche `claude/nifty-cray-jp3l9i`, un commit par lot — voir « L'écran en trois
 onglets » dans « Appels IA ». La migration **`029`** (`appels_ia_simuler_inscription`)
 est **écrite et recettée** (**23 OK, 0 faute** le 20/10), **pas appliquée** :
 Bora l'applique **avant la fusion** (le code tourne sans elle : l'assistant liste
-les fiches mais ne lance rien).
+les fiches mais ne lance rien). Retouche du même jour, demandée par Bora avant la
+fusion : la connexion (clé OpenAI, identifiants SIP) quitte l'usage quotidien —
+elle vit dans « Réglages avancés → Connexion », posée UNE fois.
 
 **`mobile-admin@celya.test`** a été **réactivé** le 20/10 pour le banc de l'écran
 (mot de passe changé, jamais écrit dans le dépôt), puis **redésactivé** — il reste
@@ -2307,12 +2309,27 @@ une page qui défilait ; le bouton de test disait une seule raison ; **une campa
 se créait avec un nom mais ne pouvait recevoir AUCUNE fiche depuis l'écran** ; et
 « lancer » n'existait pas. Désormais, `?onglet=` (liens rendus côté serveur,
 chacun avec son état ✓ / « à faire ») — sans paramètre, l'écran s'ouvre sur
-« Mise en route » tant qu'elle n'est pas complète, sur « Campagnes » ensuite :
+**« Campagnes » dès que le numéro appelant est réglé** (`ongletParDefaut`), sur
+« Numéro & test » sinon :
 
-1. **Mise en route** — une liste de contrôle, chaque ligne avec son champ EN PLACE
-   (`LigneControle`) : numéro appelant, GSM de test, clé OpenAI, identifiant et
-   mot de passe SIP (secrets en écriture seule). Puis **« Appeler mon GSM
-   (test) »** : grisé, il dit **TOUT** ce qui manque (`refusAppelTest`) — et
+**Bora est le seul utilisateur : la CONNEXION se pose UNE fois et ne doit plus
+apparaître au quotidien** (décision du 20/10, avant la fusion). Les trois secrets
+(clé OpenAI, identifiant et mot de passe SIP) vivent dans « **Réglages avancés →
+Connexion** » (`Replis`, `#connexion`), replié. Tant qu'un secret manque, UNE
+ligne discrète sous les onglets — « Connexion technique à finaliser (une seule
+fois) → » (`LIGNE_CONNEXION`) — mène à `?connexion=1#connexion`, qui déplie le
+panneau côté serveur (une ancre seule n'ouvre pas un `<details>` fermé). Les
+trois posés, plus rien n'en parle.
+
+1. **Numéro & test** (`?onglet=numero-test`) — trois choses, pas une de plus :
+   le **numéro appelant**, choisi d'un tap parmi les numéros que le CRM connaît
+   (`numerosProposes` : celui qui est réglé, `crm_users.phone` du compte, le GSM
+   de test — seuls les numéros belges appelables, sans doublon) ou saisi
+   (`ChoixNumero`) — ⚠ le CRM ne lit PAS la liste des numéros du compte Telnyx,
+   aucune API n'est branchée ; le **GSM de test** (`LigneControle`) ; et
+   **« Appeler mon GSM (test) »** : grisé, il dit **TOUT** ce qui manque
+   (`refusAppelTest`, connexion comprise, avec « Réglages avancés → Connexion »)
+   — et
    `appelTestAction` refuse avec la même phrase AVANT de réserver quoi que ce
    soit (sans secret, l'annexe échouait après coup et mettait le moteur en
    pause). Suivi **en direct** (`SuiviAppel` : compose → sonne → en ligne →
@@ -2323,7 +2340,8 @@ chacun avec son état ✓ / « à faire ») — sans paramètre, l'écran s'ouvr
    `causeDe`). « Vérifier la connexion » sans composer : **reporté** (décision de
    Bora, 20/10 — pas de nouvelle edge function ; le test suffit). Un appel de
    test **décroché et terminé sans erreur** (`testReussi`, `lireTestReussi`)
-   clôt l'étape et propose « Lancer une campagne → ».
+   clôt l'étape (✓ = numéro + GSM + test réussi, `etatsOnglets` ; la connexion
+   n'y compte pas, le test réussi la prouve) et propose « Lancer une campagne → ».
 2. **Campagnes** — un bandeau en UNE phrase (`phraseBandeau`, qui appelle
    `refusMoteur` tel quel : « Janet appelle en ce moment : Garage X (2e essai) »,
    « En pause : hors fenêtre / jour férié / plafond atteint, reprise … », « À
@@ -2343,16 +2361,20 @@ chacun avec son état ✓ / « à faire ») — sans paramètre, l'écran s'ouvr
    file, les derniers appels avec la transcription **dépliable, lue à la
    demande**, la liste d'opposition.
 
-Replié en bas de « Mise en route » et de « Campagnes » (`Replis`) : les réglages
-avancés (fenêtre, durées, plafonds, limites, trunk, voix, modèle — **les deux
-numéros n'y sont plus**, ils vivent dans la liste de contrôle) et les scripts.
+Replié en bas de « Numéro & test » et de « Campagnes » (`Replis`) : les réglages
+avancés — d'abord la **Connexion** (les trois secrets), puis fenêtre, durées,
+plafonds, limites, « Trunk et voix », modèle ; **les deux numéros n'y sont plus**,
+ils vivent dans « Numéro & test » — et les scripts.
 L'inscription automatique devient une case de l'assistant (« Ajouter aussi
 automatiquement mes nouvelles fiches À appeler ») ; ses fiches vont dans la
 campagne système « Inscription automatique », en carte à part (décision de Bora).
 Le rattrapage disparaît de l'écran : la sélection de l'assistant le couvre.
 
-**« Lancer la campagne », dans cet ordre** (`lancerCampagneAction`) : la
-sélection revérifiée en base (aucune appelable → rien ne naît, pas de campagne
+**« Lancer la campagne » est BLOQUÉ, avec la raison au-dessus du bouton, tant que
+le numéro appelant, la connexion ou un appel de test réussi manquent**
+(`refusLancement` — on prépare la campagne quand même, seul le dernier geste
+attend). Puis, dans cet ordre (`lancerCampagneAction`, qui revérifie
+`refusLancement` en premier) : la sélection revérifiée en base (aucune appelable → rien ne naît, pas de campagne
 vide) ; **le mode posé AVANT l'inscription** — une ligne de file garde le mode de
 son entrée : inscrire en test puis passer en réel laisserait des fiches que le
 moteur ne prendrait jamais ; la campagne (active) ; chaque fiche par
@@ -2369,9 +2391,15 @@ une phrase hors de l'écran).
 `basculerAppelsAction("mode_test", false)` comme `lancerCampagneAction` le
 **revérifient côté serveur**.
 
-**Règles pures, un seul module** : `lib/appelsIa/ecran.ts` (imports relatifs,
-lu par la page, les composants ET les actions) — `npm run test:appels-ecran` :
-les **32 combinaisons** de la mise en route, la marche à suivre sur les phrases
+**Règles pures, un seul module** : `lib/appelsIa/ecran/` (imports relatifs, lu par
+la page, les composants ET les actions, toujours importé comme
+`@/lib/appelsIa/ecran`) — **`miseEnRoute.ts`** porte les numéros, la connexion,
+les onglets (`ONGLETS`, `lireOnglet`, `ongletParDefaut`, `etatsOnglets`), le refus
+du test et celui de « Lancer » ; `index.ts` le reste, et le ré-exporte.
+`npm run test:appels-ecran` (`lib/appelsIa/ecran/ecran.test.ts`, 659 cas) : les
+**32 combinaisons** des cinq éléments × test réussi ou non (ce qui manque, la
+connexion, l'onglet d'ouverture, l'état de « Numéro & test », le refus de
+lancer), les numéros proposés, la marche à suivre sur les phrases
 réelles de `causeDe`, la sélection, l'estimation (`min(plafond du jour, plafond
 horaire × heures de fenêtre)`), la confirmation, le bandeau (actif, hors
 fenêtre, vendredi soir → lundi, férié, pause, deux plafonds, numéro manquant
@@ -2400,9 +2428,13 @@ connecte lui-même et tourne avec `--no-deps` :
 --project=ordinateur-admin --no-deps`. ⚠ **Les secrets du Vault sont COMMUNS au
 projet** : un test qui « poserait » une clé factice écraserait la vraie. Le banc
 **remplit les champs sans jamais soumettre**, et le prouve (il compte les POST :
-zéro) ; l'assistant va jusqu'au récapitulatif, « Lancer » n'est jamais cliqué. Le
-test de l'assistant s'**ignore** tant que la 029 n'est pas appliquée (9 passés,
-3 ignorés le 20/10 ; les 3 passent contre une simulation factice locale).
+zéro) ; l'assistant va jusqu'au récapitulatif, « Lancer » n'est jamais cliqué (et
+le banc vérifie qu'il est grisé AVEC sa raison tant que la connexion ou le test
+manquent). Il vérifie aussi l'onglet d'ouverture, que les secrets ne sont PAS sur
+« Numéro & test », et que la ligne « Connexion technique à finaliser » ouvre le
+panneau. Le test de l'assistant s'**ignore** tant que la 029 n'est pas appliquée
+(15 passés, 3 ignorés le 20/10 après la retouche ; les 3 passent contre une
+simulation factice locale).
 
 ### Le coût — ce n'est plus « zéro euro »
 

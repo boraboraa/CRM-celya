@@ -1,11 +1,14 @@
 /**
  * L'écran Appels IA, une fois les données lues — composant SERVEUR.
  *
- * TROIS ONGLETS, dans cet ordre : « Mise en route » (tant qu'elle n'est pas
- * complète, l'écran s'ouvre ici), « Campagnes » (créer et lancer), « Suivi »
+ * TROIS ONGLETS, dans cet ordre : « Numéro & test » (le numéro appelant, le
+ * GSM de test, l'appel de test — l'écran s'ouvre ici tant que le numéro
+ * appelant n'est pas réglé), « Campagnes » (créer et lancer), « Suivi »
  * (l'appel en cours, la file, les derniers appels, l'opposition). Ce qui ne
- * sert pas tous les jours — réglages avancés, scripts — est replié en bas de
- * « Mise en route » et de « Campagnes » (`Replis`).
+ * sert pas tous les jours — la CONNEXION (posée une fois), les réglages
+ * avancés, les scripts — est replié en bas de « Numéro & test » et de
+ * « Campagnes » (`Replis`) ; tant que la connexion manque, une seule ligne
+ * discrète y mène.
  *
  * La page (app/(app)/appels-ia/page.tsx) vérifie le rôle et lit la base ;
  * ici, on ne fait que mettre en forme. Les dates et « maintenant » sont
@@ -19,12 +22,18 @@ import type { ReglagesAppels } from "@/lib/appelsIa/acces";
 import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { enMinutes, heureFr, jourHeureFr } from "@/lib/appelsIa/calendrier";
 import {
-  elementsManquants,
+  connexionComplete,
+  etatsOnglets,
+  numerosProposes,
   phraseBandeau,
   phraseConfirmationLancement,
   refusAppelTest,
+  refusLancement,
   LIBELLE_ELEMENT,
+  LIGNE_CONNEXION,
+  SECRETS_JANET,
   type ElementMiseEnRoute,
+  type Onglet,
 } from "@/lib/appelsIa/ecran";
 import { fmtDate } from "@/lib/constants";
 import { EtatMoteur } from "./EtatMoteur";
@@ -38,31 +47,50 @@ import { Opposition } from "./Opposition";
 import { BandeauPause } from "./BandeauPause";
 import { LigneControle, type LigneControleVue } from "./LigneControle";
 import { EnDirect } from "./EnDirect";
-import { OngletsAppels, type EtatOnglet, type Onglet } from "./Onglets";
+import { OngletsAppels } from "./Onglets";
+import { ChoixNumero } from "./ChoixNumero";
 import { TitreCarte } from "./commun";
 
 const AIDE: Record<ElementMiseEnRoute, string> = {
-  numero_appelant: "Le numéro présenté aux prospects (le 0480). Sans lui, le moteur refuse de composer.",
+  numero_appelant: "Le numéro présenté aux prospects. Sans lui, le moteur refuse de composer.",
   gsm_test: "Votre GSM : en mode test, tous les appels partent vers lui, et rien n'est écrit sur les fiches.",
   openai_api_key: "La voix et la conversation de Janet (GPT-Live). Écriture seule : elle ne s'affiche plus jamais.",
   sip_identifiant: "L'identifiant de connexion du trunk SIP Telnyx (Voice → SIP Connections → Credentials).",
   sip_mot_de_passe: "Le mot de passe du même trunk. Écriture seule.",
 };
 
-/** Ce que l'écran sait de la mise en route — calculé une fois, lu par la page (onglet par défaut) et ici. */
+/**
+ * Ce que l'écran sait de la mise en route — calculé une fois (règles :
+ * lib/appelsIa/ecran/miseEnRoute.ts), lu par la page (onglet d'ouverture) et
+ * ici (onglets, ligne de connexion, appel de test, Lancer).
+ */
 export function miseEnRoute(page: PageAppels, r: ReglagesAppels) {
   const faits = {
     numeroAppelant: r.numero_appelant,
     gsmTest: r.gsm_test,
     secretsPoses: page.secrets.map((s) => s.nom),
   };
-  const manquants = elementsManquants(faits);
   return {
     faits,
-    manquants,
-    complete: manquants.length === 0 && page.testReussi,
+    connexion: connexionComplete(faits),
     bloque: refusAppelTest({ ...faits, appelEnCours: page.etat.enCours !== null }),
+    refusLancement: refusLancement({ ...faits, testReussi: page.testReussi }),
   };
+}
+
+/** Les trois lignes de la connexion (secrets) : posée et quand, ou à poser — jamais la valeur. */
+function lignesConnexion(page: PageAppels): LigneControleVue[] {
+  const poses = new Map(page.secrets.map((s) => [s.nom, s.pose_le]));
+  return SECRETS_JANET.map((e) => {
+    const le = poses.get(e);
+    return {
+      element: e,
+      genre: "secret",
+      libelle: LIBELLE_ELEMENT[e],
+      aide: AIDE[e],
+      fait: poses.has(e) ? (le ? `posé le ${fmtDate(le)}` : "posé") : null,
+    };
+  });
 }
 
 export function EcranAppels({
@@ -74,6 +102,8 @@ export function EcranAppels({
   aSuivreDetail,
   membres,
   moiId,
+  telephoneProfil,
+  connexionOuverte,
 }: {
   page: PageAppels;
   /** Les réglages, lus (la page ne rend l'écran que s'ils existent). */
@@ -83,39 +113,53 @@ export function EcranAppels({
   maintenant: Date;
   onglet: Onglet;
   /**
-   * L'appel à suivre, détaillé (transcription), ou null : sur « Mise en
-   * route », le dernier appel de test ; sur « Suivi », l'appel en cours, à
+   * L'appel à suivre, détaillé (transcription), ou null : sur « Numéro &
+   * test », le dernier appel de test ; sur « Suivi », l'appel en cours, à
    * défaut le dernier.
    */
   aSuivreDetail: AppelDetail | null;
   /** Les membres actifs : le filtre « propriétaire » de l'assistant de campagne. */
   membres: { id: string; nom: string }[];
   moiId: string;
+  /** Le téléphone du compte de l'admin (`crm_users.phone`) : un numéro appelant proposé. */
+  telephoneProfil: string | null;
+  /** `?connexion=1` : « Réglages avancés → Connexion » s'ouvre déplié. */
+  connexionOuverte: boolean;
 }) {
   const gsm = r.gsm_test ? numeroLisible(r.gsm_test) : null;
   const mer = miseEnRoute(page, r);
-
-  const campagnesActives = page.campagnes.filter((c) => !c.systeme && c.statut === "active").length;
-  const etats: Record<Onglet, EtatOnglet> = {
-    "mise-en-route": mer.complete
-      ? { ton: "fait", texte: "fait" }
-      : { ton: "a_faire", texte: mer.manquants.length ? `${mer.manquants.length} à régler` : "test à faire" },
-    campagnes:
-      campagnesActives > 0
-        ? { ton: "info", texte: `${campagnesActives} active${campagnesActives > 1 ? "s" : ""}` }
-        : { ton: "a_faire", texte: "à faire" },
-    suivi: page.etat.enCours
-      ? { ton: "info", texte: "en direct" }
-      : { ton: "info", texte: `${page.etat.jour.appeles} aujourd'hui` },
-  };
+  const etats = etatsOnglets({
+    numeroAppelant: r.numero_appelant,
+    gsmTest: r.gsm_test,
+    testReussi: page.testReussi,
+    campagnesActives: page.campagnes.filter((c) => !c.systeme && c.statut === "active").length,
+    appelEnCours: page.etat.enCours !== null,
+    appelesAujourdhui: page.etat.jour.appeles,
+  });
+  const replis = (
+    <Replis page={page} r={r} maintenant={maintenant} connexion={lignesConnexion(page)} connexionOuverte={connexionOuverte} />
+  );
 
   return (
     <>
       <OngletsAppels actuel={onglet} etats={etats} />
-      {onglet === "mise-en-route" && (
+      {/* UNE ligne, discrète, tant que la connexion manque ; ensuite plus rien
+          n'en parle. Le panneau vit sous « Numéro & test » et « Campagnes ». */}
+      {!mer.connexion && (
+        <p className="-mt-3 mb-5">
+          <a
+            href={`/appels-ia?onglet=${onglet === "suivi" ? "campagnes" : onglet}&connexion=1#connexion`}
+            className="inline-flex min-h-[44px] items-center gap-2 text-xs text-slate-400 transition hover:text-slate-100 sm:min-h-0"
+          >
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+            {LIGNE_CONNEXION} →
+          </a>
+        </p>
+      )}
+      {onglet === "numero-test" && (
         <div className="space-y-6">
-          <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} aSuivreDetail={aSuivreDetail} />
-          <Replis page={page} r={r} maintenant={maintenant} />
+          <OngletNumeroTest page={page} r={r} gsm={gsm} mer={mer} aSuivreDetail={aSuivreDetail} telephoneProfil={telephoneProfil} />
+          {replis}
         </div>
       )}
       {onglet === "campagnes" && (
@@ -127,6 +171,8 @@ export function EcranAppels({
           maintenant={maintenant}
           membres={membres}
           moiId={moiId}
+          refusLancement={mer.refusLancement}
+          replis={replis}
         />
       )}
       {onglet === "suivi" && <OngletSuivi page={page} r={r} maintenant={maintenant} enDirect={aSuivreDetail} />}
@@ -135,62 +181,42 @@ export function EcranAppels({
 }
 
 // ---------------------------------------------------------------------------
-// 1. Mise en route
+// 1. Numéro & test
 // ---------------------------------------------------------------------------
 
-function OngletMiseEnRoute({
+function OngletNumeroTest({
   page,
   r,
   gsm,
   mer,
   aSuivreDetail,
+  telephoneProfil,
 }: {
   page: PageAppels;
   r: ReglagesAppels;
   gsm: string | null;
   mer: ReturnType<typeof miseEnRoute>;
   aSuivreDetail: AppelDetail | null;
+  telephoneProfil: string | null;
 }) {
-  const poses = new Map(page.secrets.map((s) => [s.nom, s.pose_le]));
-  const lignes: LigneControleVue[] = (["numero_appelant", "gsm_test", "openai_api_key", "sip_identifiant", "sip_mot_de_passe"] as const).map(
-    (e) => {
-      if (e === "numero_appelant" || e === "gsm_test") {
-        const v = r[e];
-        return { element: e, genre: "numero", libelle: LIBELLE_ELEMENT[e], aide: AIDE[e], fait: v ? numeroLisible(v) : null };
-      }
-      const le = poses.get(e);
-      return {
-        element: e,
-        genre: "secret",
-        libelle: LIBELLE_ELEMENT[e],
-        aide: AIDE[e],
-        fait: poses.has(e) ? (le ? `posé le ${fmtDate(le)}` : "posé") : null,
-      };
-    }
-  );
-  const faits = lignes.filter((l) => l.fait).length;
-
+  const ligneGsm: LigneControleVue = {
+    element: "gsm_test",
+    genre: "numero",
+    libelle: LIBELLE_ELEMENT.gsm_test,
+    aide: AIDE.gsm_test,
+    fait: gsm,
+  };
   return (
     <div className="space-y-6">
       <section className="card p-4 sm:p-5">
-        <TitreCarte
-          icone="reglages"
-          aside={
-            <span className={faits === lignes.length ? "text-xs text-emerald-300" : "text-xs text-amber-300"}>
-              {faits} / {lignes.length}
-            </span>
-          }
-        >
-          Avant le premier appel
-        </TitreCarte>
-        <p className="mb-4 text-xs leading-relaxed text-slate-400">
-          De haut en bas. Chaque ligne se coche dès qu&apos;elle est enregistrée ; les secrets partent dans le
-          coffre-fort de Supabase (Vault) et ne s&apos;affichent plus jamais, ici ni ailleurs.
-        </p>
-        <ul className="divide-y divide-white/[0.06]">
-          {lignes.map((l) => (
-            <LigneControle key={l.element} l={l} />
-          ))}
+        <TitreCarte icone="telephone">Numéro appelant</TitreCarte>
+        <p className="mb-3 text-xs leading-relaxed text-slate-400">{AIDE.numero_appelant}</p>
+        <ChoixNumero
+          proposes={numerosProposes({ actuel: r.numero_appelant, profil: telephoneProfil, gsm: r.gsm_test })}
+          actuel={r.numero_appelant}
+        />
+        <ul className="mt-5 border-t border-white/[0.06] pt-4">
+          <LigneControle l={ligneGsm} />
         </ul>
       </section>
 
@@ -217,6 +243,8 @@ function OngletCampagnes({
   maintenant,
   membres,
   moiId,
+  refusLancement,
+  replis,
 }: {
   page: PageAppels;
   r: ReglagesAppels;
@@ -225,6 +253,9 @@ function OngletCampagnes({
   maintenant: Date;
   membres: { id: string; nom: string }[];
   moiId: string;
+  /** Pourquoi « Lancer » est bloqué (numéro, connexion, test réussi), ou null. */
+  refusLancement: string | null;
+  replis: React.ReactNode;
 }) {
   const debut = heureFr(enMinutes(r.fenetre_debut.slice(0, 5)));
   const fin = heureFr(enMinutes(r.fenetre_fin.slice(0, 5)));
@@ -265,6 +296,7 @@ function OngletCampagnes({
           progression: c.progression,
         }))}
         assistant={{
+          refusLancement,
           membres,
           moiId,
           testReussi: page.testReussi,
@@ -295,7 +327,7 @@ function OngletCampagnes({
         </section>
       )}
 
-      <Replis page={page} r={r} maintenant={maintenant} />
+      {replis}
     </div>
   );
 }

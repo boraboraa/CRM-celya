@@ -17,8 +17,9 @@ export type LigneControleVue = {
 };
 
 /**
- * Une ligne de la liste de contrôle de la mise en route : ✓ vert quand c'est
- * fait, sinon le champ OUVERT, juste là — pas dans une section plus bas.
+ * Une ligne à régler — le GSM de test (onglet « Numéro & test »), un secret
+ * (Réglages avancés → Connexion) : ✓ vert quand c'est fait, sinon le champ
+ * OUVERT, juste là.
  *
  * Un numéro passe par `reglerAppelsAction` avec ce seul champ (l'action ne
  * touche que les champs présents) ; un secret par `poserSecretAction` — ÉCRITURE

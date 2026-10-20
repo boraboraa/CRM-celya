@@ -66,6 +66,8 @@ export function Campagnes({
     moiId: string;
     reglages: ReglagesAssistant;
     testReussi: boolean;
+    /** Pourquoi « Lancer » est bloqué (numéro, connexion, test réussi), ou null. */
+    refusLancement: string | null;
     confirmationTest: string;
     confirmationReel: string;
   };

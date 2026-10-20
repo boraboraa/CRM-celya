@@ -55,8 +55,9 @@ function Champ({
  * Telnyx (contrainte en base) — l'écran le dit en ambre avant l'envoi, la base
  * refuserait de toute façon.
  *
- * Les deux numéros (appelant, GSM de test) n'y sont plus : ils vivent dans la
- * liste de contrôle de la mise en route, avec les secrets. Absents du
+ * Les deux numéros (appelant, GSM de test) n'y sont plus : ils vivent dans
+ * l'onglet « Numéro & test » ; les secrets, dans la section « Connexion » qui
+ * précède ce formulaire (`Replis`). Absents du
  * formulaire, l'action ne les touche pas (elle ne lit que les champs présents).
  */
 export function Reglages({ r }: { r: ReglagesFormulaire }) {
@@ -216,7 +217,7 @@ export function Reglages({ r }: { r: ReglagesFormulaire }) {
           <Aide>Celles de votre compte Telnyx. Les plafonds de Janet restent dessous : la base refuse sinon.</Aide>
         </Groupe>
 
-        <Groupe titre="Connexion et voix">
+        <Groupe titre="Trunk et voix">
           <Champ id="trunk_url" label="URL du trunk SIP">
             <input
               id="trunk_url"

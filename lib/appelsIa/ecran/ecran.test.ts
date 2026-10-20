@@ -1,13 +1,15 @@
 /**
  * L'écran « Appels IA » — ce qui se dit avant le clic, sans réseau ni base :
  *
- *   node --experimental-strip-types lib/appelsIa/ecran.test.ts
+ *   node --experimental-strip-types lib/appelsIa/ecran/ecran.test.ts
  *
  * (script npm : `npm run test:appels-ecran`).
  *
  * La phrase « ce qui manque » est jouée sur les 32 combinaisons des cinq
  * éléments de la mise en route : elle doit TOUT nommer, jamais seulement le
- * premier. La marche à suivre après un échec est lue sur les phrases que
+ * premier — et, sur les mêmes 32 (× test réussi ou non), la connexion,
+ * l'onglet d'ouverture, l'état des onglets et le refus de lancer
+ * (`miseEnRoute.ts`). La marche à suivre après un échec est lue sur les phrases que
  * produit `causeDe` lui-même (lib/appelsIa/causes.ts) — si une phrase change
  * là-bas, le test le voit ici.
  */
@@ -33,10 +35,19 @@ import {
   repliques,
   testReussi,
   type ElementMiseEnRoute,
-} from "./ecran.ts";
-import { causeDe } from "./causes.ts";
-import type { ReglagesMoteur } from "./regles.ts";
-import { verifie, vrai, bilan } from "./verifie.ts";
+  LIGNE_CONNEXION,
+  REFUS_REEL_SANS_TEST,
+  connexionComplete,
+  etatsOnglets,
+  lireOnglet,
+  numerosProposes,
+  ongletParDefaut,
+  refusLancement,
+  secretsManquants,
+} from "./index.ts";
+import { causeDe } from "../causes.ts";
+import type { ReglagesMoteur } from "../regles.ts";
+import { verifie, vrai, bilan } from "../verifie.ts";
 
 // ---------------------------------------------------------------- énumération
 verifie("énumérer : rien", enumerer([]), "");
@@ -72,9 +83,84 @@ for (let masque = 0; masque < 32; masque++) {
       ELEMENTS_MISE_EN_ROUTE.filter((e) => !attendus.includes(e)).every((e) => !phrase!.includes(NOM_ELEMENT[e])),
       phrase
     );
-    verifie(`combinaison ${masque} : le bouton refuse avec la même phrase`, refusAppelTest({ ...faits, appelEnCours: false }), phrase);
+    vrai(
+      `combinaison ${masque} : le bouton de test refuse en nommant le même manque`,
+      (refusAppelTest({ ...faits, appelEnCours: false }) ?? "").startsWith(phrase!),
+      refusAppelTest({ ...faits, appelEnCours: false })
+    );
+  }
+
+  // La connexion : les trois secrets, et eux seuls.
+  const secretsAbsents = attendus.filter((e) => e !== "numero_appelant" && e !== "gsm_test");
+  verifie(`combinaison ${masque} : secrets manquants`, secretsManquants(faits), secretsAbsents);
+  verifie(`combinaison ${masque} : connexion complète ⇔ trois secrets posés`, connexionComplete(faits), secretsAbsents.length === 0);
+  vrai(
+    `combinaison ${masque} : le test renvoie vers Connexion ⇔ un secret manque`,
+    (refusAppelTest({ ...faits, appelEnCours: false }) ?? "").includes("Réglages avancés → Connexion") === secretsAbsents.length > 0
+  );
+
+  // L'onglet d'ouverture : « Campagnes » dès que le numéro appelant est réglé
+  // — secrets posés ou non.
+  verifie(`combinaison ${masque} : onglet d'ouverture`, ongletParDefaut(faits), regle(0) ? "campagnes" : "numero-test");
+
+  for (const reussi of [false, true]) {
+    const refus = refusLancement({ ...faits, testReussi: reussi });
+    const bloque = !regle(0) || secretsAbsents.length > 0 || !reussi;
+    verifie(`combinaison ${masque}, test ${reussi ? "réussi" : "à faire"} : Lancer bloqué`, refus !== null, bloque);
+    if (refus) {
+      vrai(`combinaison ${masque}, test ${reussi} : le refus dit le numéro`, refus.includes("numéro appelant") === !regle(0), refus);
+      vrai(
+        `combinaison ${masque}, test ${reussi} : le refus nomme chaque secret absent`,
+        secretsAbsents.every((e) => refus.includes(NOM_ELEMENT[e])) && (secretsAbsents.length > 0) === refus.includes("connexion technique"),
+        refus
+      );
+      vrai(`combinaison ${masque}, test ${reussi} : le refus dit le test`, refus.includes("appel de test réussi") === !reussi, refus);
+    }
+    // L'onglet « Numéro & test » : les deux numéros et un test réussi — la connexion n'y compte pas.
+    const e = etatsOnglets({ ...faits, testReussi: reussi, campagnesActives: 0, appelEnCours: false, appelesAujourdhui: 0 });
+    verifie(
+      `combinaison ${masque}, test ${reussi} : onglet Numéro & test`,
+      e["numero-test"].ton,
+      regle(0) && regle(1) && reussi ? "fait" : "a_faire"
+    );
   }
 }
+
+// ---------------------------------------------------------------- les onglets
+verifie("onglets : libellé du premier", etatsOnglets({ numeroAppelant: null, gsmTest: null, testReussi: false, campagnesActives: 0, appelEnCours: false, appelesAujourdhui: 0 })["numero-test"], { ton: "a_faire", texte: "numéro à régler" });
+verifie("onglets : GSM à régler", etatsOnglets({ numeroAppelant: "x", gsmTest: null, testReussi: false, campagnesActives: 0, appelEnCours: false, appelesAujourdhui: 0 })["numero-test"].texte, "GSM à régler");
+verifie("onglets : test à faire", etatsOnglets({ numeroAppelant: "x", gsmTest: "y", testReussi: false, campagnesActives: 0, appelEnCours: false, appelesAujourdhui: 0 })["numero-test"].texte, "test à faire");
+verifie("onglets : campagnes actives", etatsOnglets({ numeroAppelant: "x", gsmTest: "y", testReussi: true, campagnesActives: 2, appelEnCours: false, appelesAujourdhui: 0 }).campagnes, { ton: "info", texte: "2 actives" });
+verifie("onglets : aucune campagne active", etatsOnglets({ numeroAppelant: "x", gsmTest: "y", testReussi: true, campagnesActives: 0, appelEnCours: false, appelesAujourdhui: 0 }).campagnes.ton, "a_faire");
+verifie("onglets : suivi en direct", etatsOnglets({ numeroAppelant: "x", gsmTest: "y", testReussi: true, campagnesActives: 0, appelEnCours: true, appelesAujourdhui: 3 }).suivi.texte, "en direct");
+verifie("onglets : suivi du jour", etatsOnglets({ numeroAppelant: "x", gsmTest: "y", testReussi: true, campagnesActives: 0, appelEnCours: false, appelesAujourdhui: 3 }).suivi.texte, "3 aujourd'hui");
+verifie("lireOnglet : connu", lireOnglet("suivi", "campagnes"), "suivi");
+verifie("lireOnglet : l'ancien nom retombe sur le défaut", lireOnglet("mise-en-route", "campagnes"), "campagnes");
+verifie("lireOnglet : absent", lireOnglet(undefined, "numero-test"), "numero-test");
+vrai("la ligne de connexion dit « une seule fois »", LIGNE_CONNEXION.includes("une seule fois"));
+vrai("le refus du réel renvoie vers « Numéro & test »", REFUS_REEL_SANS_TEST.includes("Numéro & test"));
+verifie(
+  "refus de lancer, exact : rien n'est prêt",
+  refusLancement({ numeroAppelant: null, gsmTest: null, secretsPoses: [], testReussi: false }),
+  "Le numéro appelant n'est pas réglé (onglet « Numéro & test »). La connexion technique n'est pas finalisée : il manque la clé OpenAI, l'identifiant SIP et le mot de passe SIP (Réglages avancés → Connexion, une seule fois). Faites d'abord un appel de test réussi vers votre GSM (onglet « Numéro & test »)."
+);
+
+// ---------------------------------------------------------------- les numéros proposés
+verifie(
+  "numéros proposés : réglé d'abord, sans doublon, lisibles",
+  numerosProposes({ actuel: "+32480245368", profil: "0480 24 53 68", gsm: "+32470572864" }),
+  [
+    { e164: "+32480245368", lisible: "0480 24 53 68", source: "réglé" },
+    { e164: "+32470572864", lisible: "0470 57 28 64", source: "votre GSM de test" },
+  ]
+);
+verifie(
+  "numéros proposés : le numéro du compte quand rien n'est réglé",
+  numerosProposes({ actuel: null, profil: "081 22 33 44", gsm: null }).map((n) => [n.e164, n.source]),
+  [["+3281223344", "votre compte"]]
+);
+verifie("numéros proposés : un numéro surtaxé n'est jamais proposé", numerosProposes({ actuel: null, profil: "0903 12 34 56", gsm: null }), []);
+verifie("numéros proposés : rien de connu", numerosProposes({ actuel: null, profil: null, gsm: null }), []);
 
 // Les secrets sans le test du mode « numéro » : le mot de passe ne se confond pas avec l'identifiant.
 verifie(
@@ -101,6 +187,11 @@ verifie(
   "appel en cours ET un manquant : les deux sont dits",
   refusAppelTest({ numeroAppelant: null, gsmTest: "y", secretsPoses: ["openai_api_key", "sip_identifiant", "sip_mot_de_passe"], appelEnCours: true }),
   "Il manque le numéro appelant. Un appel est déjà en cours : attendez qu'il se termine."
+);
+verifie(
+  "test sans connexion : le manque, puis où la poser",
+  refusAppelTest({ numeroAppelant: "x", gsmTest: "y", secretsPoses: ["openai_api_key"], appelEnCours: false }),
+  "Il manque l'identifiant SIP et le mot de passe SIP. La connexion se pose une seule fois, dans Réglages avancés → Connexion."
 );
 
 // ---------------------------------------------------------------- l'appel de test réussi

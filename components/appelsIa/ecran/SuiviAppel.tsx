@@ -7,6 +7,7 @@ import { ETAPES_SUIVI, LIBELLE_ETAPE, dureeLisible, etapeSuivi, marcheASuivre } 
 import { CLASSEMENT_LABEL, OUTCOME_LABEL_APPEL } from "@/lib/appelsIa/libelles";
 import { Icone } from "@/components/ui";
 import { useSondage } from "@/components/appelsIa/sondage";
+import { ListeRepliques } from "./commun";
 
 /** Classes entières (règle JIT) : une étape franchie, en cours, à venir. */
 const PASTILLE: Record<"faite" | "courante" | "avenir" | "echec", string> = {
@@ -125,16 +126,9 @@ export function SuiviAppel({ initial }: { initial: AppelDetail }) {
             <Icone nom="chevron" className="h-3 w-3 transition-transform group-open/transcription:rotate-180" />
             Transcription ({appel.transcription.length} réplique{appel.transcription.length > 1 ? "s" : ""})
           </summary>
-          <ul className="mt-2 space-y-1.5">
-            {appel.transcription.map((r, i) => (
-              <li key={i} className="break-words text-xs leading-relaxed">
-                <span className={r.qui === "janet" ? "font-medium text-blue-200" : "font-medium text-slate-200"}>
-                  {r.qui === "janet" ? "Janet" : "Au bout du fil"} :
-                </span>{" "}
-                <span className="text-slate-300">{r.texte}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-2">
+            <ListeRepliques repliques={appel.transcription} />
+          </div>
         </details>
       )}
     </div>

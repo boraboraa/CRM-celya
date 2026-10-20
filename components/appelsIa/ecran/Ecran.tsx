@@ -36,6 +36,7 @@ import { Scripts } from "./Scripts";
 import { Opposition } from "./Opposition";
 import { BandeauPause } from "./BandeauPause";
 import { LigneControle, type LigneControleVue } from "./LigneControle";
+import { EnDirect } from "./EnDirect";
 import { OngletsAppels, type EtatOnglet, type Onglet } from "./Onglets";
 import { Repliable, TitreCarte } from "./commun";
 
@@ -69,7 +70,7 @@ export function EcranAppels({
   allumeeParAutre,
   maintenant,
   onglet,
-  suiviTest,
+  aSuivreDetail,
   membres,
   moiId,
 }: {
@@ -80,8 +81,12 @@ export function EcranAppels({
   allumeeParAutre: string | null;
   maintenant: Date;
   onglet: Onglet;
-  /** Le dernier appel de test, détaillé (transcription), ou null. */
-  suiviTest: AppelDetail | null;
+  /**
+   * L'appel à suivre, détaillé (transcription), ou null : sur « Mise en
+   * route », le dernier appel de test ; sur « Suivi », l'appel en cours, à
+   * défaut le dernier.
+   */
+  aSuivreDetail: AppelDetail | null;
   /** Les membres actifs : le filtre « propriétaire » de l'assistant de campagne. */
   membres: { id: string; nom: string }[];
   moiId: string;
@@ -106,7 +111,7 @@ export function EcranAppels({
   return (
     <>
       <OngletsAppels actuel={onglet} etats={etats} />
-      {onglet === "mise-en-route" && <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} suiviTest={suiviTest} />}
+      {onglet === "mise-en-route" && <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} aSuivreDetail={aSuivreDetail} />}
       {onglet === "campagnes" && (
         <OngletCampagnes
           page={page}
@@ -118,7 +123,7 @@ export function EcranAppels({
           moiId={moiId}
         />
       )}
-      {onglet === "suivi" && <OngletSuivi page={page} maintenant={maintenant} />}
+      {onglet === "suivi" && <OngletSuivi page={page} r={r} maintenant={maintenant} enDirect={aSuivreDetail} />}
     </>
   );
 }
@@ -132,13 +137,13 @@ function OngletMiseEnRoute({
   r,
   gsm,
   mer,
-  suiviTest,
+  aSuivreDetail,
 }: {
   page: PageAppels;
   r: ReglagesAppels;
   gsm: string | null;
   mer: ReturnType<typeof miseEnRoute>;
-  suiviTest: AppelDetail | null;
+  aSuivreDetail: AppelDetail | null;
 }) {
   const poses = new Map(page.secrets.map((s) => [s.nom, s.pose_le]));
   const lignes: LigneControleVue[] = (["numero_appelant", "gsm_test", "openai_api_key", "sip_identifiant", "sip_mot_de_passe"] as const).map(
@@ -185,7 +190,7 @@ function OngletMiseEnRoute({
 
       <section className="card p-4 sm:p-5">
         <TitreCarte icone="telephone">Appel de test</TitreCarte>
-        <AppelTest gsm={gsm} bloque={mer.bloque} suivi={suiviTest} reussi={page.testReussi} />
+        <AppelTest gsm={gsm} bloque={mer.bloque} suivi={aSuivreDetail} reussi={page.testReussi} />
         {r.pause_cause && (
           <BandeauPause cause={r.pause_cause} depuis={r.pause_at ? jourHeureFr(new Date(r.pause_at)) : null} />
         )}
@@ -315,13 +320,28 @@ function OngletCampagnes({
 // 3. Suivi
 // ---------------------------------------------------------------------------
 
-function OngletSuivi({ page, maintenant }: { page: PageAppels; maintenant: Date }) {
+function OngletSuivi({
+  page,
+  r,
+  maintenant,
+  enDirect,
+}: {
+  page: PageAppels;
+  r: ReglagesAppels;
+  maintenant: Date;
+  enDirect: AppelDetail | null;
+}) {
   return (
     <div className="space-y-6">
+      <EnDirect
+        appel={enDirect}
+        enCours={page.etat.enCours !== null}
+        sonder={r.actif && !r.pause_cause && page.etat.file.total > 0}
+      />
       <FileAppels lignes={page.file} total={page.etat.file.total} maintenant={maintenant} />
       <DerniersAppels appels={page.appels} maintenant={maintenant} />
-      <Scripts scripts={page.scripts} maintenant={maintenant} />
       <Opposition numeros={page.opposition} maintenant={maintenant} />
+      <Scripts scripts={page.scripts} maintenant={maintenant} />
     </div>
   );
 }

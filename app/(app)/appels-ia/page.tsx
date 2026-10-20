@@ -72,8 +72,12 @@ export default async function AppelsIaPage({
   }));
 
   const onglet = lireOnglet(params.onglet, miseEnRoute(page, reglages).complete ? "campagnes" : "mise-en-route");
-  // Le dernier appel de test, détaillé (transcription) : seulement sur l'onglet qui le montre.
-  const suiviTest = onglet === "mise-en-route" && page.dernierTest ? await lireAppel(supabase, page.dernierTest.id) : null;
+  // L'appel à suivre en direct, détaillé (transcription) — seulement sur
+  // l'onglet qui le montre : le dernier appel de test sur « Mise en route »,
+  // l'appel en cours (à défaut le dernier) sur « Suivi ».
+  const aSuivre =
+    onglet === "mise-en-route" ? page.dernierTest : onglet === "suivi" ? (page.etat.enCours ?? page.appels[0] ?? null) : null;
+  const aSuivreDetail = aSuivre ? await lireAppel(supabase, aSuivre.id) : null;
 
   return (
     <>
@@ -84,7 +88,7 @@ export default async function AppelsIaPage({
         allumeeParAutre={allumeeParAutre}
         maintenant={new Date()}
         onglet={onglet}
-        suiviTest={suiviTest}
+        aSuivreDetail={aSuivreDetail}
         membres={membres}
         moiId={session.userId}
       />

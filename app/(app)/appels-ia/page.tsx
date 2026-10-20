@@ -64,6 +64,13 @@ export default async function AppelsIaPage({
     allumeeParAutre = u?.full_name ?? u?.email ?? "un autre administrateur";
   }
 
+  // Les membres actifs : le filtre « propriétaire » de l'assistant de campagne.
+  const { data: equipe } = await supabase.from("crm_users").select("id, full_name, email").eq("is_active", true).order("full_name");
+  const membres = ((equipe ?? []) as { id: string; full_name: string | null; email: string }[]).map((u) => ({
+    id: u.id,
+    nom: u.full_name ?? u.email,
+  }));
+
   const onglet = lireOnglet(params.onglet, miseEnRoute(page, reglages).complete ? "campagnes" : "mise-en-route");
   // Le dernier appel de test, détaillé (transcription) : seulement sur l'onglet qui le montre.
   const suiviTest = onglet === "mise-en-route" && page.dernierTest ? await lireAppel(supabase, page.dernierTest.id) : null;
@@ -78,6 +85,8 @@ export default async function AppelsIaPage({
         maintenant={new Date()}
         onglet={onglet}
         suiviTest={suiviTest}
+        membres={membres}
+        moiId={session.userId}
       />
     </>
   );

@@ -16,7 +16,14 @@ import type { AppelDetail, PageAppels } from "@/lib/appelsIa/lectures";
 import type { ReglagesAppels } from "@/lib/appelsIa/acces";
 import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { enMinutes, heureFr, jourHeureFr } from "@/lib/appelsIa/calendrier";
-import { elementsManquants, refusAppelTest, LIBELLE_ELEMENT, type ElementMiseEnRoute } from "@/lib/appelsIa/ecran";
+import {
+  elementsManquants,
+  phraseBandeau,
+  phraseConfirmationLancement,
+  refusAppelTest,
+  LIBELLE_ELEMENT,
+  type ElementMiseEnRoute,
+} from "@/lib/appelsIa/ecran";
 import { fmtDate } from "@/lib/constants";
 import { EtatMoteur } from "./EtatMoteur";
 import { AppelTest } from "./AppelTest";
@@ -31,7 +38,6 @@ import { BandeauPause } from "./BandeauPause";
 import { LigneControle, type LigneControleVue } from "./LigneControle";
 import { OngletsAppels, type EtatOnglet, type Onglet } from "./Onglets";
 import { Repliable, TitreCarte } from "./commun";
-import { phraseEtat } from "./format";
 
 const AIDE: Record<ElementMiseEnRoute, string> = {
   numero_appelant: "Le numéro présenté aux prospects (le 0480). Sans lui, le moteur refuse de composer.",
@@ -64,6 +70,8 @@ export function EcranAppels({
   maintenant,
   onglet,
   suiviTest,
+  membres,
+  moiId,
 }: {
   page: PageAppels;
   /** Les réglages, lus (la page ne rend l'écran que s'ils existent). */
@@ -74,6 +82,9 @@ export function EcranAppels({
   onglet: Onglet;
   /** Le dernier appel de test, détaillé (transcription), ou null. */
   suiviTest: AppelDetail | null;
+  /** Les membres actifs : le filtre « propriétaire » de l'assistant de campagne. */
+  membres: { id: string; nom: string }[];
+  moiId: string;
 }) {
   const gsm = r.gsm_test ? numeroLisible(r.gsm_test) : null;
   const mer = miseEnRoute(page, r);
@@ -97,7 +108,15 @@ export function EcranAppels({
       <OngletsAppels actuel={onglet} etats={etats} />
       {onglet === "mise-en-route" && <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} suiviTest={suiviTest} />}
       {onglet === "campagnes" && (
-        <OngletCampagnes page={page} r={r} gsm={gsm} allumeeParAutre={allumeeParAutre} />
+        <OngletCampagnes
+          page={page}
+          r={r}
+          gsm={gsm}
+          allumeeParAutre={allumeeParAutre}
+          maintenant={maintenant}
+          membres={membres}
+          moiId={moiId}
+        />
       )}
       {onglet === "suivi" && <OngletSuivi page={page} maintenant={maintenant} />}
     </>
@@ -184,29 +203,39 @@ function OngletCampagnes({
   r,
   gsm,
   allumeeParAutre,
+  maintenant,
+  membres,
+  moiId,
 }: {
   page: PageAppels;
   r: ReglagesAppels;
   gsm: string | null;
   allumeeParAutre: string | null;
+  maintenant: Date;
+  membres: { id: string; nom: string }[];
+  moiId: string;
 }) {
   const debut = heureFr(enMinutes(r.fenetre_debut.slice(0, 5)));
   const fin = heureFr(enMinutes(r.fenetre_fin.slice(0, 5)));
+  const bandeau = phraseBandeau({
+    reglages: r,
+    maintenant,
+    compteur: page.etat.compteur,
+    enCours: page.etat.enCours,
+    fileComposable: page.fileParMode.composable,
+    fileAutreMode: page.fileParMode.autreMode,
+    fileEnPause: page.fileParMode.enPause,
+  });
   return (
     <div className="space-y-6">
       <EtatMoteur
-        phrase={phraseEtat({
-          reglages: r,
-          refus: page.etat.refus,
-          enCours: page.etat.enCours,
-          fileTotal: page.etat.file.total,
-        })}
+        bandeau={bandeau}
         pause={
           r.pause_cause
             ? { cause: r.pause_cause, depuis: r.pause_at ? jourHeureFr(new Date(r.pause_at)) : null }
             : null
         }
-        aRegler={[]}
+        testReussi={page.testReussi}
         actif={r.actif}
         modeTest={r.mode_test}
         gsm={gsm}
@@ -215,23 +244,37 @@ function OngletCampagnes({
         fileTotal={page.etat.file.total}
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <Campagnes
+        campagnes={page.campagnes.map((c) => ({
+          id: c.id,
+          nom: c.nom,
+          statut: c.statut,
+          systeme: c.systeme,
+          creeLe: fmtDate(c.created_at),
+          progression: c.progression,
+        }))}
+        assistant={{
+          membres,
+          moiId,
+          testReussi: page.testReussi,
+          reglages: {
+            fenetre: `${debut}–${fin}`,
+            fenetre_debut: r.fenetre_debut,
+            fenetre_fin: r.fenetre_fin,
+            plafond_heure: r.plafond_heure,
+            plafond_jour: r.plafond_jour,
+            mode_test: r.mode_test,
+            inscription_auto: r.inscription_auto,
+            gsm,
+          },
+          confirmationTest: phraseConfirmationLancement({ ...r, mode_test: true }, maintenant),
+          confirmationReel: phraseConfirmationLancement({ ...r, mode_test: false }, maintenant),
+        }}
+      />
+
+      {r.inscription_auto && (
         <section className="card min-w-0 p-4 sm:p-5">
-          <TitreCarte icone="dossier">Campagnes</TitreCarte>
-          <Campagnes
-            campagnes={page.campagnes.map((c) => ({
-              id: c.id,
-              nom: c.nom,
-              statut: c.statut,
-              systeme: c.systeme,
-              enAttente: c.enAttente,
-              termine: c.termine,
-              creeLe: fmtDate(c.created_at),
-            }))}
-          />
-        </section>
-        <section className="card min-w-0 p-4 sm:p-5">
-          <TitreCarte icone="taches">Inscription dans la file</TitreCarte>
+          <TitreCarte icone="taches">Inscription automatique</TitreCarte>
           <Inscription
             valeur={r.inscription_auto}
             allumeeParAutre={allumeeParAutre}
@@ -239,29 +282,31 @@ function OngletCampagnes({
             modeTest={r.mode_test}
           />
         </section>
-      </div>
+      )}
 
-      <Repliable titre="Réglages avancés" compte={`${debut}–${fin} · ${r.plafond_heure}/h · ${r.plafond_jour}/jour`} icone="reglages">
-        <Reglages
-          r={{
-            fenetre_debut: r.fenetre_debut,
-            fenetre_fin: r.fenetre_fin,
-            plafond_heure: r.plafond_heure,
-            plafond_jour: r.plafond_jour,
-            limite_compte_heure: r.limite_compte_heure,
-            limite_compte_jour: r.limite_compte_jour,
-            duree_max_s: r.duree_max_s,
-            sonnerie_max_s: r.sonnerie_max_s,
-            numero_appelant: r.numero_appelant,
-            gsm_test: r.gsm_test,
-            trunk_url: r.trunk_url,
-            voix: r.voix,
-            modele: r.modele,
-            modele_delegation: r.modele_delegation,
-            mode_test: r.mode_test,
-          }}
-        />
-      </Repliable>
+      <div id="reglages-avances">
+        <Repliable titre="Réglages avancés" compte={`${debut}–${fin} · ${r.plafond_heure}/h · ${r.plafond_jour}/jour`} icone="reglages">
+          <Reglages
+            r={{
+              fenetre_debut: r.fenetre_debut,
+              fenetre_fin: r.fenetre_fin,
+              plafond_heure: r.plafond_heure,
+              plafond_jour: r.plafond_jour,
+              limite_compte_heure: r.limite_compte_heure,
+              limite_compte_jour: r.limite_compte_jour,
+              duree_max_s: r.duree_max_s,
+              sonnerie_max_s: r.sonnerie_max_s,
+              numero_appelant: r.numero_appelant,
+              gsm_test: r.gsm_test,
+              trunk_url: r.trunk_url,
+              voix: r.voix,
+              modele: r.modele,
+              modele_delegation: r.modele_delegation,
+              mode_test: r.mode_test,
+            }}
+          />
+        </Repliable>
+      </div>
     </div>
   );
 }

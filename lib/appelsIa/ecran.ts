@@ -10,6 +10,19 @@
  * Imports RELATIFS en `.ts` : le test l'exécute tel quel sous node.
  */
 
+import {
+  dansFenetre,
+  enMinutes,
+  ferieDe,
+  heureFr,
+  instantBruxelles,
+  jourHeureFr,
+  lendemainOuvre,
+  partiesBruxelles,
+  prochaineOuverture,
+} from "./calendrier.ts";
+import { fenetreDe, refusMoteur, type CompteurAppels, type ReglagesMoteur } from "./regles.ts";
+
 // ---------------------------------------------------------------------------
 // La mise en route : cinq éléments, puis un appel de test réussi
 // ---------------------------------------------------------------------------
@@ -230,4 +243,172 @@ export function marcheASuivre(code: string | null | undefined, message: string |
     };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// L'assistant de campagne : la sélection, l'estimation, la confirmation
+// ---------------------------------------------------------------------------
+
+/** Une fiche proposée par l'assistant, avec la raison de la règle 025 (`appels_ia_simuler_inscription`), ou null. */
+export type FicheCandidate = { id: string; societe: string; refus: string | null };
+
+export type CompteSelection = {
+  appelables: string[];
+  ecartees: { id: string; societe: string; raison: string }[];
+  /** Les raisons d'exclusion, la plus fréquente d'abord : « 3 × Pas de numéro… ». */
+  parRaison: { raison: string; nombre: number }[];
+};
+
+/**
+ * Ce que deviendrait la sélection cochée : combien Janet pourra appeler, et
+ * pourquoi chacune des autres est écartée. Ne JUGE rien : les raisons viennent
+ * de la base (une fiche dont la raison est inconnue est écartée, jamais
+ * appelée par défaut).
+ */
+export function compterSelection(fiches: readonly (FicheCandidate & { refus: string | null | undefined })[], cochees: ReadonlySet<string>): CompteSelection {
+  const appelables: string[] = [];
+  const ecartees: CompteSelection["ecartees"] = [];
+  for (const f of fiches) {
+    if (!cochees.has(f.id)) continue;
+    if (f.refus === null) appelables.push(f.id);
+    else ecartees.push({ id: f.id, societe: f.societe, raison: f.refus ?? "Vérification impossible." });
+  }
+  const compte = new Map<string, number>();
+  for (const e of ecartees) compte.set(e.raison, (compte.get(e.raison) ?? 0) + 1);
+  const parRaison = [...compte.entries()]
+    .map(([raison, nombre]) => ({ raison, nombre }))
+    .sort((a, b) => b.nombre - a.nombre || a.raison.localeCompare(b.raison));
+  return { appelables, ecartees, parRaison };
+}
+
+/** « 23 fiches peuvent être appelées, 4 écartées. » */
+export function phraseSelection(c: Pick<CompteSelection, "appelables" | "ecartees">): string {
+  const n = c.appelables.length;
+  const e = c.ecartees.length;
+  const tete =
+    n === 0
+      ? "Aucune fiche ne peut être appelée"
+      : `${n} fiche${n > 1 ? "s" : ""} ${n > 1 ? "peuvent" : "peut"} être appelée${n > 1 ? "s" : ""}`;
+  return e === 0 ? `${tete}.` : `${tete}, ${e} écartée${e > 1 ? "s" : ""}.`;
+}
+
+/**
+ * Combien de jours ouvrés pour un premier essai sur chaque fiche : la capacité
+ * d'un jour est le plus petit du plafond du jour et du plafond horaire × les
+ * heures de fenêtre. Une fiche peut demander jusqu'à 3 essais : l'écran le
+ * dit à côté, sans le multiplier (la plupart des cycles s'arrêtent avant).
+ */
+export function estimationJours(
+  n: number,
+  r: { plafond_jour: number; plafond_heure: number; fenetre_debut: string; fenetre_fin: string }
+): { parJour: number; jours: number } {
+  const minutes = Math.max(0, enMinutes(r.fenetre_fin.slice(0, 5)) - enMinutes(r.fenetre_debut.slice(0, 5)));
+  const parJour = Math.max(1, Math.min(r.plafond_jour, Math.floor((r.plafond_heure * minutes) / 60)));
+  return { parJour, jours: n <= 0 ? 0 : Math.ceil(n / parJour) };
+}
+
+/** « environ 1 jour ouvré à 40 appels par jour », « environ 3 jours ouvrés … ». */
+export function phraseEstimation(n: number, e: { parJour: number; jours: number }): string {
+  if (n <= 0) return "Rien à appeler.";
+  return `Environ ${e.jours} jour${e.jours > 1 ? "s" : ""} ouvré${e.jours > 1 ? "s" : ""} pour un premier appel à chaque fiche, à ${e.parJour} appels par jour au plus — jusqu'à 3 essais par fiche.`;
+}
+
+/**
+ * La confirmation avant d'allumer : ce que Janet va faire, quand, à quel
+ * rythme. « dès 9h30 en semaine » hors fenêtre ; « dès maintenant » dedans.
+ */
+export function phraseConfirmationLancement(
+  r: { fenetre_debut: string; fenetre_fin: string; plafond_heure: number; mode_test: boolean },
+  maintenant: Date
+): string {
+  const f = { debut: r.fenetre_debut.slice(0, 5), fin: r.fenetre_fin.slice(0, 5) };
+  const quand = dansFenetre(maintenant, f)
+    ? `dès maintenant (jusqu'à ${heureFr(enMinutes(f.fin))})`
+    : `dès ${heureFr(enMinutes(f.debut))} en semaine`;
+  const qui = r.mode_test ? "Janet va appeler VOTRE GSM avec le brief de chaque fiche" : "Janet va commencer à appeler les fiches";
+  return `${qui} ${quand}, ${r.plafond_heure} appel${r.plafond_heure > 1 ? "s" : ""} par heure au plus. Lancer ?`;
+}
+
+/** La seconde confirmation, pour passer en appels réels. */
+export const CONFIRMATION_REEL =
+  "Appels RÉELS : Janet appellera les vrais numéros des fiches et écrira chaque résultat sur la fiche. Elle s'annonce comme une IA dès sa première phrase, et respecte la liste d'opposition : un « ne m'appelez plus » y inscrit le numéro sur-le-champ. Confirmer ?";
+
+// ---------------------------------------------------------------------------
+// Le bandeau d'état de l'onglet Campagnes : UNE phrase
+// ---------------------------------------------------------------------------
+
+export type TonBandeau = "marche" | "pause" | "arret";
+export type Bandeau = { ton: TonBandeau; texte: string };
+
+export type FaitsBandeau = {
+  reglages: ReglagesMoteur;
+  maintenant: Date;
+  compteur: CompteurAppels;
+  enCours: { societe: string | null; prospect_id: string | null; essai: number; mode_test: boolean } | null;
+  /** Lignes en attente dans une campagne ACTIVE, du mode en cours : ce que le moteur prendra. */
+  fileComposable: number;
+  /** Lignes en attente inscrites dans l'AUTRE mode : le moteur ne les prendra pas. */
+  fileAutreMode: number;
+  /** Lignes en attente dans une campagne en pause. */
+  fileEnPause: number;
+};
+
+const ORDINAL = ["", "1er", "2e", "3e"];
+
+/**
+ * Où en est Janet, en une phrase — tirée de la même lecture que l'état du
+ * moteur (`refusMoteur`, lib/appelsIa/regles.ts, appelé tel quel) :
+ *
+ *   « Janet appelle en ce moment : Garage X (2e essai) »
+ *   « En pause : hors fenêtre, reprise demain à 9h30 »
+ *   « En pause : jour férié (Toussaint), reprise lundi 2 novembre à 9h30 »
+ *   « En pause : plafond du jour atteint (40 appels), reprise … »
+ *   « À l'arrêt : interrupteur coupé »
+ */
+export function phraseBandeau(f: FaitsBandeau): Bandeau {
+  const r = f.reglages;
+  if (f.enCours) {
+    const qui = f.enCours.societe ?? (f.enCours.prospect_id ? "une fiche" : "votre GSM (appel de test)");
+    const essai = f.enCours.prospect_id && f.enCours.essai > 1 ? ` (${ORDINAL[f.enCours.essai] ?? `${f.enCours.essai}e`} essai)` : "";
+    return { ton: "marche", texte: `Janet appelle en ce moment : ${qui}${essai}.` };
+  }
+  if (!r.actif) return { ton: "arret", texte: "À l'arrêt : interrupteur coupé." };
+  if (r.pause_cause) return { ton: "pause", texte: `En pause : ${r.pause_cause}` };
+
+  const fenetre = fenetreDe(r);
+  const reprise = jourHeureFr(prochaineOuverture(f.maintenant, fenetre));
+  const refus = refusMoteur(r, f.maintenant, f.compteur);
+  if (refus) {
+    // Le refus du moteur dit CE QUI EMPÊCHE D'ABORD (numéro manquant avant la
+    // fenêtre, fenêtre avant les plafonds) : on lit son ordre, pas le nôtre.
+    if (refus.startsWith("Hors de la fenêtre")) {
+      const ferie = ferieDe(partiesBruxelles(f.maintenant).ymd);
+      return {
+        ton: "pause",
+        texte: ferie ? `En pause : jour férié (${ferie}), reprise ${reprise}.` : `En pause : hors fenêtre, reprise ${reprise}.`,
+      };
+    }
+    if (refus.startsWith("Plafond du jour")) {
+      const demain = prochaineOuverture(instantBruxelles(lendemainOuvre(f.maintenant), 0), fenetre);
+      return { ton: "pause", texte: `En pause : plafond du jour atteint (${r.plafond_jour} appels), reprise ${jourHeureFr(demain)}.` };
+    }
+    if (refus.startsWith("Plafond de l'heure")) {
+      return { ton: "pause", texte: `En pause : plafond de l'heure atteint (${r.plafond_heure} appels), reprise dans moins d'une heure.` };
+    }
+    return { ton: "arret", texte: `À l'arrêt : ${refus}` };
+  }
+
+  if (f.fileComposable > 0) {
+    return { ton: "marche", texte: `En marche : ${f.fileComposable} fiche${f.fileComposable > 1 ? "s" : ""} à appeler, une à la fois.` };
+  }
+  if (f.fileAutreMode > 0) {
+    return {
+      ton: "arret",
+      texte: `Rien à appeler : ${f.fileAutreMode} fiche${f.fileAutreMode > 1 ? "s" : ""} attend${f.fileAutreMode > 1 ? "ent" : ""} dans la file en mode ${r.mode_test ? "réel" : "test"}, que le mode actuel ne prend pas.`,
+    };
+  }
+  if (f.fileEnPause > 0) {
+    return { ton: "arret", texte: `Rien à appeler : ${f.fileEnPause} fiche${f.fileEnPause > 1 ? "s" : ""} attend${f.fileEnPause > 1 ? "ent" : ""} dans une campagne en pause.` };
+  }
+  return { ton: "arret", texte: "Rien à appeler : lancez une campagne." };
 }

@@ -22,7 +22,12 @@ import { depuisSaisie, fusionner, normaliserContenu, CHAMPS_LISTES, CHAMPS_SIMPL
 import { preparerBrief } from "@/lib/appelsIa/briefIA";
 import { partiesBruxelles } from "@/lib/appelsIa/calendrier";
 import { SECTEURS, type Secteur } from "@/lib/appelsIa/secteur";
-import { SECRETS_JANET, refusAppelTest } from "@/lib/appelsIa/ecran";
+import { REFUS_REEL_SANS_TEST, SECRETS_JANET, refusAppelTest } from "@/lib/appelsIa/ecran";
+import { lireTestReussi } from "@/lib/appelsIa/lectures";
+import { numeroLisible } from "@/lib/appelsIa/numeros";
+import { secteurDe } from "@/lib/appelsIa/secteur";
+import { normalizeStatus } from "@/lib/constants";
+import type { ProspectStatus } from "@/lib/types";
 
 export type EtatAction = { ok?: boolean; error?: string; message?: string };
 
@@ -115,10 +120,14 @@ export async function basculerAppelsAction(champ: "actif" | "mode_test" | "inscr
   const moi = await admin();
   if (!moi) return REFUS;
   if (!["actif", "mode_test", "inscription_auto"].includes(champ)) return { error: "Réglage inconnu." };
+  const supabase = await createClient();
+  // Sortir du mode test, c'est appeler de vrais prospects : seulement après un
+  // appel de test décroché et terminé sans erreur. Revérifié ICI — l'écran
+  // masque le geste, la règle vit côté serveur.
+  if (champ === "mode_test" && !valeur && !(await lireTestReussi(supabase))) return { error: REFUS_REEL_SANS_TEST };
   const patch: Record<string, unknown> = { [champ]: valeur, maj_par: moi.id };
   // L'inscription automatique inscrit les fiches DE L'ADMIN QUI L'ALLUME.
   if (champ === "inscription_auto" && valeur) patch.inscription_auto_par = moi.id;
-  const supabase = await createClient();
   const { error } = await supabase.from("appels_ia_reglages").update(patch).eq("id", 1);
   if (error) return { error: error.message };
   revalider();
@@ -218,6 +227,243 @@ export async function statutCampagneAction(id: string, statut: "active" | "pause
   }
   revalider();
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// L'assistant « Nouvelle campagne »
+// ---------------------------------------------------------------------------
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Ce que l'assistant affiche au plus d'un coup : au-delà, il demande de filtrer. */
+const FICHES_MAX = 500;
+
+export type FicheCampagne = {
+  id: string;
+  societe: string;
+  contact: string | null;
+  email: string | null;
+  telephone: string | null;
+  ville: string | null;
+  secteur: ReturnType<typeof secteurDe>;
+  etape: ProspectStatus;
+  proprietaireId: string | null;
+  /** La raison de la règle 025 (`appels_ia_simuler_inscription`), ou null : Janet pourra l'appeler. */
+  refus: string | null;
+};
+
+/**
+ * La simulation, par la règle EN BASE (migration 029 → `appels_ia_refus_inscription`,
+ * la même que l'inscription réelle) : jamais une copie en TypeScript. Sous la
+ * session de l'admin — la fonction le vérifie. Absente (029 non appliquée) :
+ * on le dit, et rien ne se lance.
+ */
+async function simuler(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: string[]
+): Promise<{ refus: Map<string, string | null> } | { error: string }> {
+  if (ids.length === 0) return { refus: new Map() };
+  const { data, error } = await supabase.rpc("appels_ia_simuler_inscription", { p_prospects: ids });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      return { error: "La vérification des fiches n'est pas encore disponible (migration 029 non appliquée) : rien n'est lancé." };
+    }
+    return { error: error.code === "42501" ? REFUS.error : `Vérification impossible : ${error.message}` };
+  }
+  return { refus: new Map(((data ?? []) as { prospect_id: string; refus: string | null }[]).map((r) => [r.prospect_id, r.refus])) };
+}
+
+/**
+ * Les fiches que l'assistant propose, avec, pour chacune, la raison pour
+ * laquelle Janet ne l'appellerait pas (ou rien). L'étape et le propriétaire
+ * filtrent en base ; le secteur, la ville et la recherche se filtrent à
+ * l'écran, sur ces lignes (`correspond`, la règle de ⌘K).
+ */
+export async function fichesPourCampagneAction(f: {
+  etape: string;
+  proprietaire: string;
+}): Promise<{ error?: string; fiches?: FicheCampagne[]; tronque?: boolean }> {
+  const moi = await admin();
+  if (!moi) return REFUS;
+  const supabase = await createClient();
+  let q = supabase
+    .from("prospects")
+    .select("id, company_name, contact_name, email, phone, city, sector, status, owner_id")
+    .order("company_name", { ascending: true })
+    .limit(FICHES_MAX + 1);
+  if (f.etape === "ouvertes") q = q.not("status", "in", "(gagne,perdu)");
+  else if (f.etape !== "toutes") q = q.eq("status", f.etape);
+  if (f.proprietaire === "moi") q = q.eq("owner_id", moi.id);
+  else if (UUID.test(f.proprietaire)) q = q.eq("owner_id", f.proprietaire);
+  const { data, error } = await q;
+  if (error) return { error: error.message };
+  const lignes = (data ?? []) as {
+    id: string;
+    company_name: string;
+    contact_name: string | null;
+    email: string | null;
+    phone: string | null;
+    city: string | null;
+    sector: string | null;
+    status: string;
+    owner_id: string | null;
+  }[];
+  const tronque = lignes.length > FICHES_MAX;
+  const montrees = lignes.slice(0, FICHES_MAX);
+  const sim = await simuler(
+    supabase,
+    montrees.map((l) => l.id)
+  );
+  // Simulation impossible : les fiches se listent quand même, toutes
+  // « écartées » — rien ne se lance sans la règle, mais l'écran reste lisible.
+  const indisponible = "error" in sim ? sim.error : null;
+  const refus = "error" in sim ? new Map<string, string | null>() : sim.refus;
+  return {
+    error: indisponible ?? undefined,
+    tronque,
+    fiches: montrees.map((l) => ({
+      id: l.id,
+      societe: l.company_name,
+      contact: l.contact_name,
+      email: l.email,
+      telephone: l.phone ? (numeroAppelable(l.phone) ? numeroLisible(numeroAppelable(l.phone)!) : l.phone) : null,
+      ville: l.city,
+      secteur: secteurDe(l.sector),
+      etape: normalizeStatus(l.status),
+      proprietaireId: l.owner_id,
+      refus: refus.has(l.id) ? (refus.get(l.id) ?? null) : "Vérification impossible.",
+    })),
+  };
+}
+
+export type IssueLancement = EtatAction & {
+  inscrites?: number;
+  refusees?: { societe: string; raison: string }[];
+};
+
+/**
+ * « Lancer la campagne » — dans cet ordre, et l'écran le dit :
+ *
+ *   1. la sélection est revérifiée par la règle en base (rien ne part si
+ *      aucune fiche ne peut être appelée : pas de campagne vide) ;
+ *   2. le MODE est posé AVANT l'inscription — une ligne de file garde le mode
+ *      de son entrée : inscrire en test puis passer en réel laisserait des
+ *      fiches que le moteur ne prendrait jamais. Le réel exige un appel de
+ *      test réussi (revérifié ici) ;
+ *   3. la campagne naît (ou repart, pour « Ajouter des fiches »), active ;
+ *   4. chaque fiche passe par `appels_ia_inscrire` — le chemin du bouton de
+ *      la fiche et du connecteur MCP ;
+ *   5. l'inscription automatique, si elle est demandée (ses fiches vont dans
+ *      la campagne « Inscription automatique », pas dans celle-ci) ;
+ *   6. l'interrupteur général s'allume.
+ */
+export async function lancerCampagneAction(e: {
+  nom?: string;
+  campagneId?: string | null;
+  ids: string[];
+  reel: boolean;
+  inscriptionAuto: boolean;
+}): Promise<IssueLancement> {
+  const moi = await admin();
+  if (!moi) return REFUS;
+  const ids = [...new Set((e.ids ?? []).filter((x) => typeof x === "string" && UUID.test(x)))];
+  if (ids.length === 0) return { error: "Cochez au moins une fiche." };
+  if (ids.length > 1000) return { error: "1 000 fiches au plus d'un coup." };
+  const nom = (e.nom ?? "").trim().slice(0, 120);
+  if (!e.campagneId && !nom) return { error: "Donnez un nom à la campagne." };
+
+  const supabase = await createClient();
+  const { data: reg, error: er } = await supabase.from("appels_ia_reglages").select("mode_test, pause_cause").eq("id", 1).maybeSingle();
+  if (er || !reg) return { error: "Réglages illisibles : rien n'est lancé." };
+  const r = reg as { mode_test: boolean; pause_cause: string | null };
+
+  // 1. La sélection, revérifiée.
+  const sim = await simuler(supabase, ids);
+  if ("error" in sim) return { error: sim.error };
+  const appelables = ids.filter((id) => sim.refus.has(id) && sim.refus.get(id) === null);
+  if (appelables.length === 0) return { error: "Aucune des fiches cochées ne peut être appelée : rien n'est lancé." };
+
+  // 2. Le mode, avant l'inscription.
+  if (e.reel && r.mode_test) {
+    if (!(await lireTestReussi(supabase))) return { error: REFUS_REEL_SANS_TEST };
+  }
+  if (e.reel === r.mode_test) {
+    const { error } = await supabase.from("appels_ia_reglages").update({ mode_test: !e.reel, maj_par: moi.id }).eq("id", 1);
+    if (error) return { error: `Mode impossible à régler : ${error.message}` };
+  }
+
+  // 3. La campagne.
+  let campagneId: string;
+  let creee = false;
+  if (e.campagneId) {
+    if (!UUID.test(e.campagneId)) return { error: "Campagne inconnue." };
+    const { data: c } = await supabase.from("appels_ia_campagnes").select("id, statut").eq("id", e.campagneId).maybeSingle();
+    if (!c) return { error: "Campagne introuvable." };
+    if ((c as { statut: string }).statut === "terminee") return { error: "Cette campagne est terminée : créez-en une nouvelle." };
+    const { error } = await supabase.from("appels_ia_campagnes").update({ statut: "active" }).eq("id", e.campagneId);
+    if (error) return { error: error.message };
+    campagneId = e.campagneId;
+  } else {
+    const { data: c, error } = await supabase
+      .from("appels_ia_campagnes")
+      .insert({ nom, cree_par: moi.id, statut: "active" })
+      .select("id")
+      .single();
+    if (error || !c) return { error: error?.message ?? "Campagne impossible à créer." };
+    campagneId = (c as { id: string }).id;
+    creee = true;
+  }
+
+  // 4. L'inscription, fiche par fiche, par la règle en base. Une fiche qui a
+  //    bougé depuis la simulation est refusée avec SA raison du moment.
+  const noms = new Map<string, string>();
+  {
+    const { data } = await supabase.from("prospects").select("id, company_name").in("id", ids);
+    for (const p of (data ?? []) as { id: string; company_name: string }[]) noms.set(p.id, p.company_name);
+  }
+  let inscrites = 0;
+  const refusees: { societe: string; raison: string }[] = [];
+  // Par paquets de dix : 300 fiches ne doivent pas attendre 300 allers-retours en série.
+  for (let i = 0; i < ids.length; i += 10) {
+    const paquet = ids.slice(i, i + 10);
+    const raisons = await Promise.all(
+      paquet.map((id) => {
+        const avant = sim.refus.get(id);
+        return avant === null
+          ? inscrire(supabase, { prospectId: id, campagneId, origine: "manuel", parId: moi.id })
+          : Promise.resolve(avant ?? "Fiche introuvable.");
+      })
+    );
+    raisons.forEach((raison, j) => {
+      if (raison) refusees.push({ societe: noms.get(paquet[j]) ?? "Fiche introuvable", raison });
+      else inscrites++;
+    });
+  }
+  if (inscrites === 0) {
+    if (creee) await supabase.from("appels_ia_campagnes").delete().eq("id", campagneId);
+    revalider();
+    return { error: "Aucune fiche n'est entrée dans la file : rien n'est lancé.", refusees };
+  }
+
+  // 5. L'inscription automatique (dans SA campagne système).
+  if (e.inscriptionAuto) {
+    await supabase.from("appels_ia_reglages").update({ inscription_auto: true, inscription_auto_par: moi.id, maj_par: moi.id }).eq("id", 1);
+  }
+
+  // 6. L'interrupteur général.
+  const { error: ea } = await supabase.from("appels_ia_reglages").update({ actif: true, maj_par: moi.id }).eq("id", 1);
+  revalider();
+  const tete = `${inscrites} fiche${inscrites > 1 ? "s" : ""} inscrite${inscrites > 1 ? "s" : ""}${
+    refusees.length ? `, ${refusees.length} écartée${refusees.length > 1 ? "s" : ""}` : ""
+  }.`;
+  if (ea) return { ok: true, inscrites, refusees, message: `${tete} L'interrupteur général n'a pas pu s'allumer (${ea.message}) : allumez-le à la main.` };
+  return {
+    ok: true,
+    inscrites,
+    refusees,
+    message: `${tete} La campagne est lancée, l'interrupteur général est allumé.${
+      r.pause_cause ? ` Attention : le moteur est en pause (${r.pause_cause}) — levez la pause pour que Janet appelle.` : ""
+    }`,
+  };
 }
 
 export async function retirerDeLaFileAction(fileId: string): Promise<EtatAction> {

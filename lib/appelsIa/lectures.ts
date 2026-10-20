@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { estTableAbsente } from "@/lib/crm/access";
 import { REGLAGES_COLONNES, STATUTS_ACTIFS, type ReglagesAppels } from "@/lib/appelsIa/acces";
-import { refusMoteur } from "@/lib/appelsIa/regles";
+import { refusMoteur, type CompteurAppels } from "@/lib/appelsIa/regles";
 import { instantBruxelles, partiesBruxelles } from "@/lib/appelsIa/calendrier";
 import { normaliserAppris, normaliserContenu, type ContenuBrief, type LigneApprise } from "@/lib/appelsIa/brief";
 import { repliques, type Replique } from "@/lib/appelsIa/ecran";
@@ -112,6 +112,8 @@ export type EtatAppels = {
   derniers: AppelResume[];
   /** Pourquoi le moteur ne compose pas maintenant — ou null. */
   refus: string | null;
+  /** Les appels composés depuis minuit et dans la dernière heure (ceux que les plafonds comptent). */
+  compteur: CompteurAppels;
 };
 
 const VIDE: EtatAppels = {
@@ -122,6 +124,7 @@ const VIDE: EtatAppels = {
   jour: { appeles: 0, joints: 0, rdv: 0 },
   derniers: [],
   refus: null,
+  compteur: { aujourdhui: 0, derniereHeure: 0 },
 };
 
 /** L'état du moteur : la colonne « Appels » du tableau de bord, et l'outil MCP `etat_appels`. */
@@ -146,6 +149,10 @@ export async function lireEtatAppels(client: SupabaseClient, o: { derniers?: num
   const duJour = (jour.data ?? []) as { classement: string | null; meeting_id: string | null; session_id: string | null; created_at: string }[];
   const places = duJour.filter((a) => a.session_id);
   const heure = maintenant.getTime() - 3600_000;
+  const compteur: CompteurAppels = {
+    aujourdhui: places.length,
+    derniereHeure: places.filter((a) => Date.parse(a.created_at) >= heure).length,
+  };
   return {
     disponible: true,
     reglages,
@@ -157,10 +164,8 @@ export async function lireEtatAppels(client: SupabaseClient, o: { derniers?: num
       rdv: duJour.filter((a) => a.meeting_id).length,
     },
     derniers: ((derniers.data ?? []) as unknown as AppelBrut[]).map(resume),
-    refus: refusMoteur(reglages, maintenant, {
-      aujourdhui: places.length,
-      derniereHeure: places.filter((a) => Date.parse(a.created_at) >= heure).length,
-    }),
+    refus: refusMoteur(reglages, maintenant, compteur),
+    compteur,
   };
 }
 
@@ -240,15 +245,76 @@ export type ScriptLu = {
   updated_at: string | null;
 };
 
+/** Où en est une campagne : ce qui attend, et ce que les appels ont donné. */
+export type ProgressionCampagne = {
+  enFile: number;
+  /** Fiches appelées au moins une fois (un essai réellement fait). */
+  appelees: number;
+  decrochees: number;
+  rdv: number;
+  aRappeler: number;
+  refus: number;
+};
+
 export type CampagneLue = {
   id: string;
   nom: string;
   statut: "active" | "pause" | "terminee";
   systeme: string | null;
   created_at: string;
-  enAttente: number;
-  termine: number;
+  progression: ProgressionCampagne;
 };
+
+/** Les campagnes montrées : toutes celles qui vivent, et les cinq dernières terminées. */
+const TERMINEES_MONTREES = 5;
+
+/**
+ * La progression d'une campagne, par COMPTES en base (`head: true`) : jamais
+ * une liste rapatriée puis comptée en mémoire, que la limite de 1 000 lignes
+ * de PostgREST tronquerait sans rien dire.
+ */
+async function progression(client: SupabaseClient, id: string): Promise<ProgressionCampagne> {
+  const compte = (r: { count: number | null }) => r.count ?? 0;
+  const file = () => client.from("appels_ia_file").select("id", { count: "exact", head: true }).eq("campagne_id", id);
+  const appels = () => client.from("appels_ia").select("id", { count: "exact", head: true }).eq("campagne_id", id);
+  const [enFile, appelees, decrochees, rdv, aRappeler, refus] = await Promise.all([
+    file().in("statut", ["en_attente", "en_cours"]),
+    file().gt("essais", 0),
+    appels().eq("classement", "repondu_humain"),
+    appels().not("meeting_id", "is", null),
+    appels().eq("resultat", "rappeler"),
+    appels().eq("resultat", "refus"),
+  ]);
+  return {
+    enFile: compte(enFile),
+    appelees: compte(appelees),
+    decrochees: compte(decrochees),
+    rdv: compte(rdv),
+    aRappeler: compte(aRappeler),
+    refus: compte(refus),
+  };
+}
+
+/**
+ * Ce que le moteur prendra, et ce qui attend sans qu'il le prenne : le bandeau
+ * de l'onglet Campagnes le dit (`phraseBandeau`). Il ne prend QUE les lignes en
+ * attente d'une campagne active, inscrites dans le mode en cours.
+ */
+export type FileParMode = { composable: number; autreMode: number; enPause: number };
+
+async function lireFileParMode(client: SupabaseClient, modeTest: boolean): Promise<FileParMode> {
+  const attente = () =>
+    client
+      .from("appels_ia_file")
+      .select("id, appels_ia_campagnes!inner(statut)", { count: "exact", head: true })
+      .eq("statut", "en_attente");
+  const [composable, autreMode, enPause] = await Promise.all([
+    attente().eq("mode_test", modeTest).eq("appels_ia_campagnes.statut", "active"),
+    attente().eq("mode_test", !modeTest).neq("appels_ia_campagnes.statut", "terminee"),
+    attente().eq("mode_test", modeTest).eq("appels_ia_campagnes.statut", "pause"),
+  ]);
+  return { composable: composable.count ?? 0, autreMode: autreMode.count ?? 0, enPause: enPause.count ?? 0 };
+}
 
 export type PageAppels = {
   disponible: boolean;
@@ -269,6 +335,7 @@ export type PageAppels = {
   testReussi: boolean;
   /** Le dernier appel de test, pour reprendre son suivi en revenant sur l'écran. */
   dernierTest: AppelResume | null;
+  fileParMode: FileParMode;
 };
 
 /**
@@ -306,9 +373,10 @@ export async function lirePageAppels(client: SupabaseClient): Promise<PageAppels
       rattrapage: null,
       testReussi: false,
       dernierTest: null,
+      fileParMode: { composable: 0, autreMode: 0, enPause: 0 },
     };
   }
-  const [secrets, scripts, campagnes, lignes, opposition, rattrapage, reussi, dernierTest] = await Promise.all([
+  const [secrets, scripts, campagnes, lignes, opposition, rattrapage, reussi, dernierTest, fileParMode] = await Promise.all([
     client.rpc("appels_ia_secrets_poses"),
     client.from("appels_ia_scripts").select("secteur, accueil, presentation, objectif, questions, objections, updated_at"),
     client.from("appels_ia_campagnes").select("id, nom, statut, systeme, created_at").order("created_at", { ascending: false }),
@@ -317,24 +385,27 @@ export async function lirePageAppels(client: SupabaseClient): Promise<PageAppels
     client.rpc("appels_ia_rattrapage", { p_confirmer: false }),
     lireTestReussi(client),
     client.from("appels_ia").select(APPEL_COLONNES).eq("mode_test", true).is("file_id", null).order("created_at", { ascending: false }).limit(1),
+    lireFileParMode(client, etat.reglages!.mode_test),
   ]);
   const toutesLignes = ((lignes.data ?? []) as unknown as FileBrute[]).map(ligne);
+  const lues = (campagnes.data ?? []) as Omit<CampagneLue, "progression">[];
+  const montrees = [
+    ...lues.filter((c) => c.statut !== "terminee"),
+    ...lues.filter((c) => c.statut === "terminee").slice(0, TERMINEES_MONTREES),
+  ];
   const ordre = ["garage", "restaurant", "cabinet", "autre"];
   return {
     disponible: true,
     etat,
     secrets: ((secrets.data ?? []) as { nom: string; pose_le: string | null }[]) ?? [],
     scripts: ((scripts.data ?? []) as ScriptLu[]).sort((a, b) => ordre.indexOf(a.secteur) - ordre.indexOf(b.secteur)),
-    campagnes: ((campagnes.data ?? []) as Omit<CampagneLue, "enAttente" | "termine">[]).map((c) => ({
-      ...c,
-      enAttente: toutesLignes.filter((l) => l.campagne_id === c.id && (l.statut === "en_attente" || l.statut === "en_cours")).length,
-      termine: toutesLignes.filter((l) => l.campagne_id === c.id && (l.statut === "termine" || l.statut === "arrete")).length,
-    })),
+    campagnes: await Promise.all(montrees.map(async (c) => ({ ...c, progression: await progression(client, c.id) }))),
     file: toutesLignes,
     appels: etat.derniers,
     opposition: (opposition.data ?? []) as PageAppels["opposition"],
     rattrapage: typeof rattrapage.data === "number" ? rattrapage.data : null,
     testReussi: reussi,
     dernierTest: ((dernierTest.data ?? []) as unknown as AppelBrut[]).map(resume)[0] ?? null,
+    fileParMode,
   };
 }

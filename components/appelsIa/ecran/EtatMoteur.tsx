@@ -1,6 +1,6 @@
 /**
- * L'en-tête de l'écran Appels IA : l'état du moteur en une phrase, la pause
- * s'il y en a une, ce qui manque avant le premier appel, les deux
+ * L'en-tête de l'onglet Campagnes : où en est Janet en UNE phrase
+ * (`phraseBandeau`, lib/appelsIa/ecran.ts), la pause s'il y en a une, les deux
  * interrupteurs (général, mode test) et les compteurs du jour.
  *
  * Composant SERVEUR : il ne passe aux composants clients que des données
@@ -11,18 +11,18 @@ import { Icone } from "@/components/ui";
 import { BandeauPause } from "./BandeauPause";
 import { Interrupteur } from "./Interrupteur";
 import { Aide, TitreCarte } from "./commun";
-import type { PhraseEtat, TonEtat } from "./format";
+import { CONFIRMATION_REEL, REFUS_REEL_SANS_TEST, type Bandeau, type TonBandeau } from "@/lib/appelsIa/ecran";
 
-/** Classes entières (règle JIT). Bleu = en marche, neutre = calme, ambre = attention. */
-const POINT: Record<TonEtat, string> = {
-  marche: "bg-celya-blue",
-  calme: "bg-slate-500",
-  attention: "bg-amber-400",
+/** Classes entières (règle JIT). Bleu = en marche, ambre = en pause, neutre = à l'arrêt. */
+const POINT: Record<TonBandeau, string> = {
+  marche: "bg-celya-blue animate-pulse",
+  pause: "bg-amber-400",
+  arret: "bg-slate-500",
 };
-const TITRE: Record<TonEtat, string> = {
+const TITRE: Record<TonBandeau, string> = {
   marche: "font-display text-lg font-semibold text-slate-50",
-  calme: "font-display text-lg font-semibold text-slate-200",
-  attention: "font-display text-lg font-semibold text-amber-200",
+  pause: "font-display text-lg font-semibold text-amber-200",
+  arret: "font-display text-lg font-semibold text-slate-200",
 };
 
 function Tuile({ label, valeur, alerte = false }: { label: string; valeur: string | number; alerte?: boolean }) {
@@ -43,9 +43,9 @@ function Tuile({ label, valeur, alerte = false }: { label: string; valeur: strin
 }
 
 export function EtatMoteur({
-  phrase,
+  bandeau,
   pause,
-  aRegler,
+  testReussi,
   actif,
   modeTest,
   gsm,
@@ -53,10 +53,10 @@ export function EtatMoteur({
   jour,
   fileTotal,
 }: {
-  phrase: PhraseEtat;
+  bandeau: Bandeau;
   pause: { cause: string; depuis: string | null } | null;
-  /** Ce qui manque avant le premier appel (numéros, secrets). */
-  aRegler: string[];
+  /** Un appel de test a réussi : sortir du mode test est permis. */
+  testReussi: boolean;
   actif: boolean;
   modeTest: boolean;
   /** Le GSM de test, lisible, ou null. */
@@ -80,37 +80,15 @@ export function EtatMoteur({
           )
         }
       >
-        État du moteur
+        Janet
       </TitreCarte>
 
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden
-          className={`mt-2 h-2.5 w-2.5 shrink-0 rounded-full ${POINT[phrase.ton]}`}
-        />
-        <div className="min-w-0">
-          <p className={TITRE[phrase.ton]}>{phrase.titre}</p>
-          {phrase.detail && (
-            <p className="mt-0.5 break-words text-sm leading-relaxed text-slate-400">{phrase.detail}</p>
-          )}
-        </div>
+      <div className="flex items-start gap-3" role="status" aria-label="Où en est Janet">
+        <span aria-hidden className={`mt-2.5 h-2.5 w-2.5 shrink-0 rounded-full ${POINT[bandeau.ton]}`} />
+        <p className={`min-w-0 break-words ${TITRE[bandeau.ton]}`}>{bandeau.texte}</p>
       </div>
 
       {pause && <BandeauPause cause={pause.cause} depuis={pause.depuis} />}
-
-      {aRegler.length > 0 && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs text-slate-400">Avant le premier appel :</p>
-          <div className="flex flex-wrap gap-2">
-            {aRegler.map((x) => (
-              <span key={x} className="chip bg-amber-500/15 text-amber-300 ring-amber-400/25">
-                <Icone nom="alerte" className="h-3 w-3" />
-                {x}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="mt-5 grid gap-5 border-t border-white/[0.06] pt-5 md:grid-cols-2">
         <Interrupteur
@@ -137,12 +115,8 @@ export function EtatMoteur({
           attentionSi={true}
           texteOui={`Tout appel part vers le GSM de test${gsm ? ` (${gsm})` : ""}, et rien n'est écrit sur les fiches.`}
           texteNon="Janet appelle les vrais numéros des fiches et écrit chaque résultat au journal."
-          confirmation={{
-            versValeur: false,
-            texte:
-              "Janet appellera les vrais numéros des fiches et écrira chaque résultat sur la fiche (résultat d'appel, rendez-vous, relance).",
-            bouton: "Retirer le mode test",
-          }}
+          confirmation={{ versValeur: false, texte: CONFIRMATION_REEL, bouton: "Retirer le mode test" }}
+          interdit={testReussi ? null : { versValeur: false, texte: REFUS_REEL_SANS_TEST }}
         />
       </div>
       <Aide>

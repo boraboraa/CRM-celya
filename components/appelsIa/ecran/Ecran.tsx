@@ -3,7 +3,9 @@
  *
  * TROIS ONGLETS, dans cet ordre : « Mise en route » (tant qu'elle n'est pas
  * complète, l'écran s'ouvre ici), « Campagnes » (créer et lancer), « Suivi »
- * (l'appel en cours, la file, les derniers appels, l'opposition).
+ * (l'appel en cours, la file, les derniers appels, l'opposition). Ce qui ne
+ * sert pas tous les jours — réglages avancés, scripts — est replié en bas de
+ * « Mise en route » et de « Campagnes » (`Replis`).
  *
  * La page (app/(app)/appels-ia/page.tsx) vérifie le rôle et lit la base ;
  * ici, on ne fait que mettre en forme. Les dates et « maintenant » sont
@@ -28,17 +30,16 @@ import { fmtDate } from "@/lib/constants";
 import { EtatMoteur } from "./EtatMoteur";
 import { AppelTest } from "./AppelTest";
 import { Inscription } from "./Inscription";
-import { Reglages } from "./Reglages";
 import { Campagnes } from "./Campagnes";
 import { FileAppels } from "./File";
 import { DerniersAppels } from "./DerniersAppels";
-import { Scripts } from "./Scripts";
+import { Replis } from "./Replis";
 import { Opposition } from "./Opposition";
 import { BandeauPause } from "./BandeauPause";
 import { LigneControle, type LigneControleVue } from "./LigneControle";
 import { EnDirect } from "./EnDirect";
 import { OngletsAppels, type EtatOnglet, type Onglet } from "./Onglets";
-import { Repliable, TitreCarte } from "./commun";
+import { TitreCarte } from "./commun";
 
 const AIDE: Record<ElementMiseEnRoute, string> = {
   numero_appelant: "Le numéro présenté aux prospects (le 0480). Sans lui, le moteur refuse de composer.",
@@ -111,7 +112,12 @@ export function EcranAppels({
   return (
     <>
       <OngletsAppels actuel={onglet} etats={etats} />
-      {onglet === "mise-en-route" && <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} aSuivreDetail={aSuivreDetail} />}
+      {onglet === "mise-en-route" && (
+        <div className="space-y-6">
+          <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} aSuivreDetail={aSuivreDetail} />
+          <Replis page={page} r={r} maintenant={maintenant} />
+        </div>
+      )}
       {onglet === "campagnes" && (
         <OngletCampagnes
           page={page}
@@ -289,29 +295,7 @@ function OngletCampagnes({
         </section>
       )}
 
-      <div id="reglages-avances">
-        <Repliable titre="Réglages avancés" compte={`${debut}–${fin} · ${r.plafond_heure}/h · ${r.plafond_jour}/jour`} icone="reglages">
-          <Reglages
-            r={{
-              fenetre_debut: r.fenetre_debut,
-              fenetre_fin: r.fenetre_fin,
-              plafond_heure: r.plafond_heure,
-              plafond_jour: r.plafond_jour,
-              limite_compte_heure: r.limite_compte_heure,
-              limite_compte_jour: r.limite_compte_jour,
-              duree_max_s: r.duree_max_s,
-              sonnerie_max_s: r.sonnerie_max_s,
-              numero_appelant: r.numero_appelant,
-              gsm_test: r.gsm_test,
-              trunk_url: r.trunk_url,
-              voix: r.voix,
-              modele: r.modele,
-              modele_delegation: r.modele_delegation,
-              mode_test: r.mode_test,
-            }}
-          />
-        </Repliable>
-      </div>
+      <Replis page={page} r={r} maintenant={maintenant} />
     </div>
   );
 }
@@ -341,7 +325,6 @@ function OngletSuivi({
       <FileAppels lignes={page.file} total={page.etat.file.total} maintenant={maintenant} />
       <DerniersAppels appels={page.appels} maintenant={maintenant} />
       <Opposition numeros={page.opposition} maintenant={maintenant} />
-      <Scripts scripts={page.scripts} maintenant={maintenant} />
     </div>
   );
 }

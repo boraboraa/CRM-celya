@@ -1,65 +1,69 @@
 /**
  * L'écran Appels IA, une fois les données lues — composant SERVEUR.
  *
+ * TROIS ONGLETS, dans cet ordre : « Mise en route » (tant qu'elle n'est pas
+ * complète, l'écran s'ouvre ici), « Campagnes » (créer et lancer), « Suivi »
+ * (l'appel en cours, la file, les derniers appels, l'opposition).
+ *
  * La page (app/(app)/appels-ia/page.tsx) vérifie le rôle et lit la base ;
  * ici, on ne fait que mettre en forme. Les dates et « maintenant » sont
  * calculés ICI et passés en chaînes : aucun composant client ne les recalcule
  * à l'hydratation. Aux composants clients ne passent que des données — jamais
  * une fonction (npm run test:frontiere).
- *
- * L'ordre, de haut en bas : l'état du moteur (et ses deux interrupteurs),
- * l'appel de test et l'inscription, les réglages, les secrets et les
- * campagnes ; puis, repliables, la file, les derniers appels, les scripts et
- * la liste d'opposition.
  */
 
-import type { PageAppels } from "@/lib/appelsIa/lectures";
+import type { AppelDetail, PageAppels } from "@/lib/appelsIa/lectures";
 import type { ReglagesAppels } from "@/lib/appelsIa/acces";
 import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { enMinutes, heureFr, jourHeureFr } from "@/lib/appelsIa/calendrier";
+import { elementsManquants, refusAppelTest, LIBELLE_ELEMENT, type ElementMiseEnRoute } from "@/lib/appelsIa/ecran";
 import { fmtDate } from "@/lib/constants";
 import { EtatMoteur } from "./EtatMoteur";
 import { AppelTest } from "./AppelTest";
 import { Inscription } from "./Inscription";
 import { Reglages } from "./Reglages";
-import { Secrets, type SecretVue } from "./Secrets";
 import { Campagnes } from "./Campagnes";
 import { FileAppels } from "./File";
 import { DerniersAppels } from "./DerniersAppels";
 import { Scripts } from "./Scripts";
 import { Opposition } from "./Opposition";
+import { BandeauPause } from "./BandeauPause";
+import { LigneControle, type LigneControleVue } from "./LigneControle";
+import { OngletsAppels, type EtatOnglet, type Onglet } from "./Onglets";
 import { Repliable, TitreCarte } from "./commun";
 import { phraseEtat } from "./format";
 
-const SECRETS: Omit<SecretVue, "poseLe">[] = [
-  {
-    nom: "openai_api_key",
-    libelle: "Clé OpenAI",
-    aide: "La voix et la conversation de Janet (GPT-Live) : l'annexe la lit au moment de composer.",
-  },
-  {
-    nom: "sip_identifiant",
-    libelle: "Identifiant SIP",
-    aide: "L'identifiant de connexion du trunk SIP Telnyx.",
-  },
-  {
-    nom: "sip_mot_de_passe",
-    libelle: "Mot de passe SIP",
-    aide: "Le mot de passe du même trunk.",
-  },
-];
-
-const A_POSER: Record<SecretVue["nom"], string> = {
-  openai_api_key: "Clé OpenAI à poser",
-  sip_identifiant: "Identifiant SIP à poser",
-  sip_mot_de_passe: "Mot de passe SIP à poser",
+const AIDE: Record<ElementMiseEnRoute, string> = {
+  numero_appelant: "Le numéro présenté aux prospects (le 0480). Sans lui, le moteur refuse de composer.",
+  gsm_test: "Votre GSM : en mode test, tous les appels partent vers lui, et rien n'est écrit sur les fiches.",
+  openai_api_key: "La voix et la conversation de Janet (GPT-Live). Écriture seule : elle ne s'affiche plus jamais.",
+  sip_identifiant: "L'identifiant de connexion du trunk SIP Telnyx (Voice → SIP Connections → Credentials).",
+  sip_mot_de_passe: "Le mot de passe du même trunk. Écriture seule.",
 };
+
+/** Ce que l'écran sait de la mise en route — calculé une fois, lu par la page (onglet par défaut) et ici. */
+export function miseEnRoute(page: PageAppels, r: ReglagesAppels) {
+  const faits = {
+    numeroAppelant: r.numero_appelant,
+    gsmTest: r.gsm_test,
+    secretsPoses: page.secrets.map((s) => s.nom),
+  };
+  const manquants = elementsManquants(faits);
+  return {
+    faits,
+    manquants,
+    complete: manquants.length === 0 && page.testReussi,
+    bloque: refusAppelTest({ ...faits, appelEnCours: page.etat.enCours !== null }),
+  };
+}
 
 export function EcranAppels({
   page,
   reglages: r,
   allumeeParAutre,
   maintenant,
+  onglet,
+  suiviTest,
 }: {
   page: PageAppels;
   /** Les réglages, lus (la page ne rend l'écran que s'ils existent). */
@@ -67,36 +71,127 @@ export function EcranAppels({
   /** Le nom de l'admin qui a allumé l'inscription automatique, si ce n'est pas l'appelant. */
   allumeeParAutre: string | null;
   maintenant: Date;
+  onglet: Onglet;
+  /** Le dernier appel de test, détaillé (transcription), ou null. */
+  suiviTest: AppelDetail | null;
 }) {
   const gsm = r.gsm_test ? numeroLisible(r.gsm_test) : null;
+  const mer = miseEnRoute(page, r);
 
-  // Les secrets : posé (et quand) ou pas — jamais la valeur, que l'écran n'a pas.
+  const campagnesActives = page.campagnes.filter((c) => !c.systeme && c.statut === "active").length;
+  const etats: Record<Onglet, EtatOnglet> = {
+    "mise-en-route": mer.complete
+      ? { ton: "fait", texte: "fait" }
+      : { ton: "a_faire", texte: mer.manquants.length ? `${mer.manquants.length} à régler` : "test à faire" },
+    campagnes:
+      campagnesActives > 0
+        ? { ton: "info", texte: `${campagnesActives} active${campagnesActives > 1 ? "s" : ""}` }
+        : { ton: "a_faire", texte: "à faire" },
+    suivi: page.etat.enCours
+      ? { ton: "info", texte: "en direct" }
+      : { ton: "info", texte: `${page.etat.jour.appeles} aujourd'hui` },
+  };
+
+  return (
+    <>
+      <OngletsAppels actuel={onglet} etats={etats} />
+      {onglet === "mise-en-route" && <OngletMiseEnRoute page={page} r={r} gsm={gsm} mer={mer} suiviTest={suiviTest} />}
+      {onglet === "campagnes" && (
+        <OngletCampagnes page={page} r={r} gsm={gsm} allumeeParAutre={allumeeParAutre} />
+      )}
+      {onglet === "suivi" && <OngletSuivi page={page} maintenant={maintenant} />}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 1. Mise en route
+// ---------------------------------------------------------------------------
+
+function OngletMiseEnRoute({
+  page,
+  r,
+  gsm,
+  mer,
+  suiviTest,
+}: {
+  page: PageAppels;
+  r: ReglagesAppels;
+  gsm: string | null;
+  mer: ReturnType<typeof miseEnRoute>;
+  suiviTest: AppelDetail | null;
+}) {
   const poses = new Map(page.secrets.map((s) => [s.nom, s.pose_le]));
-  const secrets: SecretVue[] = SECRETS.map((s) => {
-    const le = poses.get(s.nom);
-    return { ...s, poseLe: poses.has(s.nom) ? (le ? `posé le ${fmtDate(le)}` : "posé") : null };
-  });
+  const lignes: LigneControleVue[] = (["numero_appelant", "gsm_test", "openai_api_key", "sip_identifiant", "sip_mot_de_passe"] as const).map(
+    (e) => {
+      if (e === "numero_appelant" || e === "gsm_test") {
+        const v = r[e];
+        return { element: e, genre: "numero", libelle: LIBELLE_ELEMENT[e], aide: AIDE[e], fait: v ? numeroLisible(v) : null };
+      }
+      const le = poses.get(e);
+      return {
+        element: e,
+        genre: "secret",
+        libelle: LIBELLE_ELEMENT[e],
+        aide: AIDE[e],
+        fait: poses.has(e) ? (le ? `posé le ${fmtDate(le)}` : "posé") : null,
+      };
+    }
+  );
+  const faits = lignes.filter((l) => l.fait).length;
 
-  // Ce qui manque avant le premier appel.
-  const aRegler = [
-    ...(r.numero_appelant ? [] : ["Numéro appelant à régler"]),
-    ...(r.gsm_test ? [] : ["GSM de test à régler"]),
-    ...secrets.filter((s) => !s.poseLe).map((s) => A_POSER[s.nom]),
-  ];
+  return (
+    <div className="space-y-6">
+      <section className="card p-4 sm:p-5">
+        <TitreCarte
+          icone="reglages"
+          aside={
+            <span className={faits === lignes.length ? "text-xs text-emerald-300" : "text-xs text-amber-300"}>
+              {faits} / {lignes.length}
+            </span>
+          }
+        >
+          Avant le premier appel
+        </TitreCarte>
+        <p className="mb-4 text-xs leading-relaxed text-slate-400">
+          De haut en bas. Chaque ligne se coche dès qu&apos;elle est enregistrée ; les secrets partent dans le
+          coffre-fort de Supabase (Vault) et ne s&apos;affichent plus jamais, ici ni ailleurs.
+        </p>
+        <ul className="divide-y divide-white/[0.06]">
+          {lignes.map((l) => (
+            <LigneControle key={l.element} l={l} />
+          ))}
+        </ul>
+      </section>
 
-  // Pourquoi le bouton de test ne peut pas partir — les mêmes gardes que le
-  // moteur (lib/appelsIa/regles.ts, `test: true`), dites AVANT le clic.
-  const testBloque = page.etat.enCours
-    ? "Un appel est déjà en cours : attendez qu'il se termine."
-    : !r.numero_appelant
-      ? "Le numéro appelant n'est pas réglé : le moteur refuse de composer."
-      : !r.gsm_test
-        ? "Le GSM de test n'est pas réglé (section Réglages)."
-        : null;
+      <section className="card p-4 sm:p-5">
+        <TitreCarte icone="telephone">Appel de test</TitreCarte>
+        <AppelTest gsm={gsm} bloque={mer.bloque} suivi={suiviTest} reussi={page.testReussi} />
+        {r.pause_cause && (
+          <BandeauPause cause={r.pause_cause} depuis={r.pause_at ? jourHeureFr(new Date(r.pause_at)) : null} />
+        )}
+      </section>
+    </div>
+  );
+}
 
+// ---------------------------------------------------------------------------
+// 2. Campagnes
+// ---------------------------------------------------------------------------
+
+function OngletCampagnes({
+  page,
+  r,
+  gsm,
+  allumeeParAutre,
+}: {
+  page: PageAppels;
+  r: ReglagesAppels;
+  gsm: string | null;
+  allumeeParAutre: string | null;
+}) {
   const debut = heureFr(enMinutes(r.fenetre_debut.slice(0, 5)));
   const fin = heureFr(enMinutes(r.fenetre_fin.slice(0, 5)));
-
   return (
     <div className="space-y-6">
       <EtatMoteur
@@ -111,7 +206,7 @@ export function EcranAppels({
             ? { cause: r.pause_cause, depuis: r.pause_at ? jourHeureFr(new Date(r.pause_at)) : null }
             : null
         }
-        aRegler={aRegler}
+        aRegler={[]}
         actif={r.actif}
         modeTest={r.mode_test}
         gsm={gsm}
@@ -122,8 +217,18 @@ export function EcranAppels({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="card min-w-0 p-4 sm:p-5">
-          <TitreCarte icone="telephone">Appel de test</TitreCarte>
-          <AppelTest gsm={gsm} bloque={testBloque} />
+          <TitreCarte icone="dossier">Campagnes</TitreCarte>
+          <Campagnes
+            campagnes={page.campagnes.map((c) => ({
+              id: c.id,
+              nom: c.nom,
+              statut: c.statut,
+              systeme: c.systeme,
+              enAttente: c.enAttente,
+              termine: c.termine,
+              creeLe: fmtDate(c.created_at),
+            }))}
+          />
         </section>
         <section className="card min-w-0 p-4 sm:p-5">
           <TitreCarte icone="taches">Inscription dans la file</TitreCarte>
@@ -136,14 +241,7 @@ export function EcranAppels({
         </section>
       </div>
 
-      {/* Replié une fois réglé : le résumé suffit au quotidien. Ouvert tant
-          qu'un numéro manque — c'est là que le moteur bloque. */}
-      <Repliable
-        titre="Réglages"
-        compte={`${debut}–${fin} · ${r.plafond_heure}/h · ${r.plafond_jour}/jour`}
-        icone="reglages"
-        ouvert={!r.numero_appelant || !r.gsm_test}
-      >
+      <Repliable titre="Réglages avancés" compte={`${debut}–${fin} · ${r.plafond_heure}/h · ${r.plafond_jour}/jour`} icone="reglages">
         <Reglages
           r={{
             fenetre_debut: r.fenetre_debut,
@@ -164,32 +262,17 @@ export function EcranAppels({
           }}
         />
       </Repliable>
+    </div>
+  );
+}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="card min-w-0 p-4 sm:p-5">
-          <TitreCarte icone="cadenas">Secrets</TitreCarte>
-          <p className="mb-4 text-xs leading-relaxed text-slate-400">
-            Écriture seule : la valeur part dans le coffre-fort de Supabase (Vault) et ne s&apos;affiche
-            plus jamais, ici ni ailleurs. Pour en changer, posez-en une nouvelle.
-          </p>
-          <Secrets secrets={secrets} />
-        </section>
-        <section className="card min-w-0 p-4 sm:p-5">
-          <TitreCarte icone="dossier">Campagnes</TitreCarte>
-          <Campagnes
-            campagnes={page.campagnes.map((c) => ({
-              id: c.id,
-              nom: c.nom,
-              statut: c.statut,
-              systeme: c.systeme,
-              enAttente: c.enAttente,
-              termine: c.termine,
-              creeLe: fmtDate(c.created_at),
-            }))}
-          />
-        </section>
-      </div>
+// ---------------------------------------------------------------------------
+// 3. Suivi
+// ---------------------------------------------------------------------------
 
+function OngletSuivi({ page, maintenant }: { page: PageAppels; maintenant: Date }) {
+  return (
+    <div className="space-y-6">
       <FileAppels lignes={page.file} total={page.etat.file.total} maintenant={maintenant} />
       <DerniersAppels appels={page.appels} maintenant={maintenant} />
       <Scripts scripts={page.scripts} maintenant={maintenant} />

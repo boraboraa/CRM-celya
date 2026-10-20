@@ -17,6 +17,7 @@ import { REGLAGES_COLONNES, STATUTS_ACTIFS, type ReglagesAppels } from "@/lib/ap
 import { refusMoteur } from "@/lib/appelsIa/regles";
 import { instantBruxelles, partiesBruxelles } from "@/lib/appelsIa/calendrier";
 import { normaliserAppris, normaliserContenu, type ContenuBrief, type LigneApprise } from "@/lib/appelsIa/brief";
+import { repliques, type Replique } from "@/lib/appelsIa/ecran";
 
 export type AppelResume = {
   id: string;
@@ -47,6 +48,28 @@ type AppelBrut = Omit<AppelResume, "societe"> & { session_id: string | null; pro
 function resume(a: AppelBrut): AppelResume {
   const { prospects, session_id: _s, ...reste } = a;
   return { ...reste, societe: prospects?.company_name ?? (a.prospect_id ? null : "Appel de test") };
+}
+
+export type AppelDetail = AppelResume & {
+  erreur_code: string | null;
+  transcription: Replique[];
+};
+
+/**
+ * Un appel, avec sa transcription : le suivi en direct de l'appel de test
+ * (et de l'appel en cours, onglet « Suivi »). Sous la session de l'admin — la
+ * RLS borne. Null : introuvable, ou pas admin.
+ */
+export async function lireAppel(client: SupabaseClient, id: string): Promise<AppelDetail | null> {
+  const { data, error } = await client
+    .from("appels_ia")
+    .select(`${APPEL_COLONNES}, erreur_code, transcription`)
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  const brut = data as unknown as AppelBrut & { erreur_code: string | null; transcription: unknown };
+  const { erreur_code, transcription, ...reste } = brut;
+  return { ...resume(reste), erreur_code, transcription: repliques(transcription) };
 }
 
 export type LigneFileResume = {
@@ -238,21 +261,62 @@ export type PageAppels = {
   opposition: { numero: string; motif: string | null; source: string; created_at: string }[];
   /** Combien de fiches « À appeler » de l'admin le rattrapage inscrirait. */
   rattrapage: number | null;
+  /**
+   * Un appel de test a-t-il déjà été décroché et terminé sans erreur ? C'est
+   * ce qui clôt la mise en route et ouvre le passage en appels réels
+   * (`testReussi`, lib/appelsIa/ecran.ts — même définition que la requête).
+   */
+  testReussi: boolean;
+  /** Le dernier appel de test, pour reprendre son suivi en revenant sur l'écran. */
+  dernierTest: AppelResume | null;
 };
+
+/**
+ * Un appel de test décroché et terminé sans erreur existe-t-il ? La requête
+ * porte la définition de `testReussi` (lib/appelsIa/ecran.ts). Échoue FERMÉE :
+ * illisible → non (le passage en réel reste fermé).
+ */
+export async function lireTestReussi(client: SupabaseClient): Promise<boolean> {
+  const { data, error } = await client
+    .from("appels_ia")
+    .select("id")
+    .eq("mode_test", true)
+    .eq("statut", "termine")
+    .not("decroche_at", "is", null)
+    .is("erreur_cote", null)
+    .is("erreur_message", null)
+    .limit(1);
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
 
 /** Tout l'écran « Appels IA » (admin, sous sa session). */
 export async function lirePageAppels(client: SupabaseClient): Promise<PageAppels> {
   const etat = await lireEtatAppels(client, { derniers: 50 });
   if (!etat.disponible) {
-    return { disponible: false, etat, secrets: [], scripts: [], campagnes: [], file: [], appels: [], opposition: [], rattrapage: null };
+    return {
+      disponible: false,
+      etat,
+      secrets: [],
+      scripts: [],
+      campagnes: [],
+      file: [],
+      appels: [],
+      opposition: [],
+      rattrapage: null,
+      testReussi: false,
+      dernierTest: null,
+    };
   }
-  const [secrets, scripts, campagnes, lignes, opposition, rattrapage] = await Promise.all([
+  const [secrets, scripts, campagnes, lignes, opposition, rattrapage, reussi, dernierTest] = await Promise.all([
     client.rpc("appels_ia_secrets_poses"),
     client.from("appels_ia_scripts").select("secteur, accueil, presentation, objectif, questions, objections, updated_at"),
     client.from("appels_ia_campagnes").select("id, nom, statut, systeme, created_at").order("created_at", { ascending: false }),
     client.from("appels_ia_file").select(FILE_COLONNES).order("updated_at", { ascending: false }).limit(200),
     client.from("appels_ia_opposition").select("numero, motif, source, created_at").order("created_at", { ascending: false }).limit(500),
     client.rpc("appels_ia_rattrapage", { p_confirmer: false }),
+    lireTestReussi(client),
+    client.from("appels_ia").select(APPEL_COLONNES).eq("mode_test", true).is("file_id", null).order("created_at", { ascending: false }).limit(1),
   ]);
   const toutesLignes = ((lignes.data ?? []) as unknown as FileBrute[]).map(ligne);
   const ordre = ["garage", "restaurant", "cabinet", "autre"];
@@ -270,5 +334,7 @@ export async function lirePageAppels(client: SupabaseClient): Promise<PageAppels
     appels: etat.derniers,
     opposition: (opposition.data ?? []) as PageAppels["opposition"],
     rattrapage: typeof rattrapage.data === "number" ? rattrapage.data : null,
+    testReussi: reussi,
+    dernierTest: ((dernierTest.data ?? []) as unknown as AppelBrut[]).map(resume)[0] ?? null,
   };
 }

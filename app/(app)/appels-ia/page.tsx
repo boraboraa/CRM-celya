@@ -1,14 +1,17 @@
 import { redirect } from "next/navigation";
 import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { lirePageAppels } from "@/lib/appelsIa/lectures";
+import { lireAppel, lirePageAppels } from "@/lib/appelsIa/lectures";
 import { PageHeader, Icone } from "@/components/ui";
-import { EcranAppels } from "@/components/appelsIa/ecran/Ecran";
+import { EcranAppels, miseEnRoute } from "@/components/appelsIa/ecran/Ecran";
+import { lireOnglet } from "@/components/appelsIa/ecran/Onglets";
 
 /**
- * Appels IA — l'écran de Janet : son état, l'appel de test vers le GSM de
- * l'admin, les réglages, les secrets, les scripts, les campagnes, la file, les
- * derniers appels et la liste d'opposition.
+ * Appels IA — l'écran de Janet, en trois onglets : « Mise en route » (les
+ * numéros, les secrets, l'appel de test), « Campagnes » (créer, lancer) et
+ * « Suivi » (l'appel en cours, la file, les derniers appels, l'opposition).
+ * Sans `?onglet=`, l'écran s'ouvre sur la mise en route tant qu'elle n'est pas
+ * complète, sur les campagnes ensuite.
  *
  * ADMIN SEUL : un non-admin est renvoyé vers le tableau de bord, et chaque
  * action le revérifie côté serveur (masquer un lien n'a jamais interdit
@@ -18,12 +21,16 @@ import { EcranAppels } from "@/components/appelsIa/ecran/Ecran";
  * Une seule lecture, `lirePageAppels`. Tolérante à l'absence de la migration
  * 025 : `disponible: false`, et l'écran le dit en une phrase, sans formulaire.
  */
-export default async function AppelsIaPage() {
+export default async function AppelsIaPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await requireMember();
   if (session.me.role !== "admin") redirect("/dashboard");
 
   const supabase = await createClient();
-  const page = await lirePageAppels(supabase);
+  const [page, params] = await Promise.all([lirePageAppels(supabase), searchParams]);
   const reglages = page.etat.reglages;
 
   if (!page.disponible || !reglages) {
@@ -57,13 +64,21 @@ export default async function AppelsIaPage() {
     allumeeParAutre = u?.full_name ?? u?.email ?? "un autre administrateur";
   }
 
+  const onglet = lireOnglet(params.onglet, miseEnRoute(page, reglages).complete ? "campagnes" : "mise-en-route");
+  // Le dernier appel de test, détaillé (transcription) : seulement sur l'onglet qui le montre.
+  const suiviTest = onglet === "mise-en-route" && page.dernierTest ? await lireAppel(supabase, page.dernierTest.id) : null;
+
   return (
     <>
-      <PageHeader
-        title="Appels IA"
-        subtitle="Janet appelle vos fiches « À appeler » : son état, ses réglages, sa file et ses derniers appels."
+      <PageHeader title="Appels IA" subtitle="Janet appelle vos fiches : mettez-la en route, lancez une campagne, suivez ses appels." />
+      <EcranAppels
+        page={page}
+        reglages={reglages}
+        allumeeParAutre={allumeeParAutre}
+        maintenant={new Date()}
+        onglet={onglet}
+        suiviTest={suiviTest}
       />
-      <EcranAppels page={page} reglages={reglages} allumeeParAutre={allumeeParAutre} maintenant={new Date()} />
     </>
   );
 }

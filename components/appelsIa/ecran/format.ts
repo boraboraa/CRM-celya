@@ -16,14 +16,9 @@ import { POINT_APPEL, STATUT_APPEL_LABEL } from "@/lib/appelsIa/libelles";
 import { numeroLisible } from "@/lib/appelsIa/numeros";
 import { ajouterJours, heureFr, jourCourt, jourHeureFr, partiesBruxelles } from "@/lib/appelsIa/calendrier";
 
-/** « 45 s », « 2 min », « 2 min 14 s ». */
-export function dureeLisible(s: number | null | undefined): string | null {
-  if (s === null || s === undefined || !Number.isFinite(s) || s < 0) return null;
-  if (s < 60) return `${Math.round(s)} s`;
-  const m = Math.floor(s / 60);
-  const r = Math.round(s % 60);
-  return r === 0 ? `${m} min` : `${m} min ${r} s`;
-}
+// « 45 s », « 2 min », « 2 min 14 s » : écrit une fois, dans le module pur de
+// l'écran (le suivi en direct, composant client, s'en sert aussi).
+export { dureeLisible } from "@/lib/appelsIa/ecran";
 
 /** Un instant PASSÉ : « aujourd'hui à 10h30 », « hier à 16h », « 06/10 à 9h45 ». */
 export function quandPasse(iso: string | null | undefined, maintenant: Date): string {

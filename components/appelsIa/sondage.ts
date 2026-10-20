@@ -29,12 +29,16 @@ const SONDAGE_MAX_MS = 50 * 60_000;
  * @param actif   faux → aucun sondage
  * @param recevoir appelé avec chaque réponse JSON lue
  * @param relance changer cette valeur RELANCE la fenêtre de 50 min (après un clic)
+ * @param rapideMs le rythme des 5 premières minutes (défaut 6 s) — le suivi
+ *                 en direct de l'appel de test le resserre à 2 s, pour que
+ *                 « ça sonne » se voie quand ça sonne
  */
 export function useSondage<T>(
   url: string,
   actif: boolean,
   recevoir: (donnees: T) => void,
-  relance: number = 0
+  relance: number = 0,
+  rapideMs: number = SONDAGE_RAPIDE_MS
 ): void {
   // Le dernier `recevoir` sans relancer l'effet à chaque rendu.
   const rappel = useRef(recevoir);
@@ -57,7 +61,7 @@ export function useSondage<T>(
       if (arrete || cache() || ecoule() >= SONDAGE_MAX_MS) return;
       minuterie = setTimeout(
         sonder,
-        ecoule() < SONDAGE_RAPIDE_PENDANT_MS ? SONDAGE_RAPIDE_MS : SONDAGE_LENT_MS
+        ecoule() < SONDAGE_RAPIDE_PENDANT_MS ? rapideMs : SONDAGE_LENT_MS
       );
     };
 
@@ -95,5 +99,5 @@ export function useSondage<T>(
       clearTimeout(minuterie);
       document.removeEventListener("visibilitychange", visibilite);
     };
-  }, [url, actif, relance]);
+  }, [url, actif, relance, rapideMs]);
 }

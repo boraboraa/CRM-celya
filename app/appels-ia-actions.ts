@@ -22,6 +22,7 @@ import { depuisSaisie, fusionner, normaliserContenu, CHAMPS_LISTES, CHAMPS_SIMPL
 import { preparerBrief } from "@/lib/appelsIa/briefIA";
 import { partiesBruxelles } from "@/lib/appelsIa/calendrier";
 import { SECTEURS, type Secteur } from "@/lib/appelsIa/secteur";
+import { SECRETS_JANET, refusAppelTest } from "@/lib/appelsIa/ecran";
 
 export type EtatAction = { ok?: boolean; error?: string; message?: string };
 
@@ -140,7 +141,7 @@ export async function poserSecretAction(_prev: EtatAction, fd: FormData): Promis
   if (!moi) return REFUS;
   const nom = str(fd, "nom");
   const valeur = typeof fd.get("valeur") === "string" ? String(fd.get("valeur")) : "";
-  if (!["openai_api_key", "sip_identifiant", "sip_mot_de_passe"].includes(nom)) return { error: "Secret inconnu." };
+  if (!(SECRETS_JANET as readonly string[]).includes(nom)) return { error: "Secret inconnu." };
   if (!valeur.trim()) return { error: "La valeur est vide." };
   const supabase = await createClient();
   const { error } = await supabase.rpc("appels_ia_poser_secret", { p_nom: nom, p_valeur: valeur });
@@ -316,13 +317,36 @@ export async function appelerAvecJanetAction(prospectId: string): Promise<EtatAc
   return { ok: true, message: issue.compose ? "Janet appelle." : `En file. ${issue.message}` };
 }
 
-/** Un appel de test vers le GSM de l'admin, avec le brief d'une fiche (ou une fiche fictive). */
-export async function appelTestAction(prospectId: string | null): Promise<EtatAction> {
+/**
+ * Un appel de test vers le GSM de l'admin, avec le brief d'une fiche (ou une
+ * fiche fictive). Refusé AVANT de réserver quoi que ce soit si la mise en
+ * route n'est pas complète — la même phrase que l'écran (`refusAppelTest`) :
+ * sans secret, l'annexe échouerait après coup et mettrait le moteur en pause.
+ * Renvoie l'identifiant de l'appel, que l'écran suit en direct.
+ */
+export async function appelTestAction(prospectId: string | null): Promise<EtatAction & { appelId?: string }> {
   const moi = await admin();
   if (!moi) return REFUS;
+  const supabase = await createClient();
+  const [reg, sec] = await Promise.all([
+    supabase.from("appels_ia_reglages").select("numero_appelant, gsm_test").eq("id", 1).maybeSingle(),
+    supabase.rpc("appels_ia_secrets_poses"),
+  ]);
+  if (reg.error || !reg.data || sec.error) return { error: "Réglages illisibles : l'appel de test ne part pas." };
+  const r = reg.data as { numero_appelant: string | null; gsm_test: string | null };
+  const refus = refusAppelTest({
+    numeroAppelant: r.numero_appelant,
+    gsmTest: r.gsm_test,
+    secretsPoses: ((sec.data ?? []) as { nom: string }[]).map((x) => x.nom),
+    // Le moteur revérifie l'appel en cours (index unique en base) : ici, pas besoin.
+    appelEnCours: false,
+  });
+  if (refus) return { error: refus };
   const issue = await lancerAppelTest(createAdminClient(), { prospectId: prospectId || null, parId: moi.id });
   revalider(prospectId);
-  return issue.compose ? { ok: true, message: "Appel de test lancé vers votre GSM." } : { error: issue.message };
+  return issue.compose
+    ? { ok: true, message: "Appel de test lancé vers votre GSM.", appelId: issue.appelId }
+    : { error: issue.message, appelId: issue.appelId };
 }
 
 // ---------------------------------------------------------------------------

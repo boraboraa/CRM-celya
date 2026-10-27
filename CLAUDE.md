@@ -5,6 +5,38 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 27 octobre 2026, au soir — simplifier après la mise en ligne
+
+La PR #20 est fusionnée (`main` = `8e43e67`) et **les migrations `025` à `031`
+sont toutes appliquées** (les `026`, `027`, `028` depuis le 19/10, la `029` le
+20/10, la `030` et la `031` le 27/10 — les mentions « pas appliquée » plus bas
+sont historiques). 116 fiches, 4 en essai gratuit (Collins et Nathan, entrées
+en essai avant le 2/11 : elles ne comptent pas au classement, c'est voulu),
+objectifs posés pour les quatre étudiants.
+
+Le lot du soir (retours de Bora après le test en production) est sur la
+branche `claude/youthful-lovelace-2kjwtf`, repartie de `main`, un commit par
+fonctionnalité — voir « Simplifier après la mise en ligne ». Deux migrations,
+**écrites, PAS appliquées** — dans cet ordre, SÉPARÉMENT : la **`032`** seule
+(la valeur d'enum `suivi_email`), puis la **`033`**, **puis** la fusion. Ici
+l'ordre est celui de la `026`/`027` : le code PROPOSE l'étape, le résultat et
+les issues de débrief neufs — sans la `032`/`033`, la base les refuserait au
+clic (23514 / 22P02). La `033` est compatible avec le code en production : elle
+ne fait qu'élargir deux contraintes, réécrire deux fonctions et ajouter un
+trigger.
+
+La `033` **écrit des données une fois** : la reprise de 100% MOTO (son RDV du
+29/09, en attente alors que la fiche est en essai depuis le 12/10) → clos
+`honore` / `essai`, une ligne au journal datée de l'entrée en essai. Rien
+d'autre. Recette `supabase/recettes/033_assembler.sh` : **26 OK, 0 faute** le
+27/10 au soir (md5 `e06d5194…` = fichier), en transaction annulée, production
+revérifiée intacte.
+
+MiniMax est en panne en production pour une raison de **configuration** :
+`MINIMAX_BASE_URL` vaut `https://api.minimax.io` au lieu de
+`https://api.minimax.io/v1` (diagnostic `/compte` : `http_404`) — à corriger
+sur Vercel, rien dans le code.
+
 ## État au 27 octobre 2026 — le cadre de l'équipe de vente
 
 Pour le démarrage des quatre étudiants du Sales Trophy (lundi 2 novembre).
@@ -89,9 +121,9 @@ ligne « plan gratuit » de ce fichier était fausse, corrigée dans Coordonnée
 
 **Au 18 octobre**, les migrations **`026`** (étape « À rappeler ») et **`027`**
 (débrief implicite, un seul RDV en attente par fiche) sont écrites et
-recettées (027 : **57 OK, 0 faute** le 19/10), **pas appliquées**. Ordre : `026` seule, puis `027`,
-puis Vercel — voir « Débriefer là où on travaille ». Elles ne dépendent pas de
-la `025`.
+recettées (027 : **57 OK, 0 faute** le 19/10) — **appliquées le 19/10**
+(constaté le 27/10 : `026`, `027` et `028`). Voir « Débriefer là où on
+travaille ».
 
 ### État au 19 septembre 2026
 
@@ -517,8 +549,8 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
 | `mcp_oauth_clients` / `mcp_oauth_codes` / `mcp_oauth_tokens` | état du serveur OAuth du connecteur MCP (migration `008`) — **RLS fermée sans policy** comme `email_accounts`, seul le `service_role` y accède. Ne pas « corriger » l'absence de policy. |
-| `objectifs` · `objectifs_periode` | les objectifs (migration `031`, **pas appliquée**) : par SEMAINE (désignée par son lundi — appels, réponses, RDV) et sur la PÉRIODE du Sales Trophy (essais). **L'admin écrit** ; chacun lit les siens, l'encadrant ceux qu'il encadre. Les compteurs ne sont PAS stockés : `compteurs_pour` les calcule. Voir « Le cadre de l'équipe de vente » |
-| `appels_ia_reglages` · `appels_ia_campagnes` · `appels_ia_file` · `appels_ia` · `appels_ia_opposition` · `appels_ia_briefs` · `appels_ia_scripts` | les appels IA de Janet (migration `025`, **pas appliquée**) : réglages (ligne unique), campagnes, file d'appel (une ligne vivante par fiche), un appel par ligne (un seul en cours, index unique partiel), opposition par numéro composé, brief d'appel par fiche, quatre scripts. **Admin seul** : une policy `is_admin()` par table, rien pour `anon`. Les secrets (clé OpenAI, identifiants SIP) sont au **Vault**, jamais dans ces tables. Voir « Appels IA » |
+| `objectifs` · `objectifs_periode` | les objectifs (migration `031`) : par SEMAINE (désignée par son lundi — appels, réponses, RDV) et sur la PÉRIODE du Sales Trophy (essais). **L'admin écrit** ; chacun lit les siens, l'encadrant ceux qu'il encadre. Les compteurs ne sont PAS stockés : `compteurs_pour` les calcule. Voir « Le cadre de l'équipe de vente » |
+| `appels_ia_reglages` · `appels_ia_campagnes` · `appels_ia_file` · `appels_ia` · `appels_ia_opposition` · `appels_ia_briefs` · `appels_ia_scripts` | les appels IA de Janet (migration `025`, appliquée) : réglages (ligne unique), campagnes, file d'appel (une ligne vivante par fiche), un appel par ligne (un seul en cours, index unique partiel), opposition par numéro composé, brief d'appel par fiche, quatre scripts. **Admin seul** : une policy `is_admin()` par table, rien pour `anon`. Les secrets (clé OpenAI, identifiants SIP) sont au **Vault**, jamais dans ces tables. Voir « Appels IA » |
 
 Triggers utiles : une activité met à jour `prospects.last_contact_at` ; une
 tâche recalcule `prospects.next_action_at` (la plus proche échéance ouverte).
@@ -559,11 +591,13 @@ l'ancienne app de comptabilité, qui avait déjà un `profiles`. Ce schéma comp
 a été entièrement supprimé le 2 août à la demande de Bora, sauvegarde remise
 au préalable.
 
-### Les huit étapes — et la règle qui remplace la mécanique
+### Les neuf étapes — et la règle qui remplace la mécanique
 
 Statuts (`prospect_status`) : `a_appeler` → `contacte` → `rendez_vous` →
 `a_rappeler` (migration `026`, 18/10 : le RDV a eu lieu, il faut rappeler la
-personne — voir « Débriefer là où on travaille ») → `proposition` →
+personne — voir « Débriefer là où on travaille ») → `suivi_email` (migration
+`032`, 27/10 au soir : on a eu quelqu'un qui veut l'info PAR MAIL — on y entre
+par le fait, voir « Simplifier après la mise en ligne ») → `proposition` →
 `essai_gratuit` (migration `030`, 27/10 : le client essaie gratuitement — le
 « win » d'un étudiant ; MANUELLE, pas une fin de parcours — voir « Le cadre de
 l'équipe de vente ») → `gagne` / `perdu` (migration `007_simplification`, 3 août :
@@ -642,7 +676,9 @@ la discipline de Bora, elle était dans l'interface — consigner « il n'a pas
 répondu » demandait **cinq décisions** dans `QuickNote` (type · nature · case
 proposition · étape · date). Après un appel, personne ne les prend.
 
-`components/ResultatAppel.tsx` : cinq pastilles larges (44 px, cible tactile) —
+`components/ResultatAppel.tsx` : six pastilles larges (44 px, cible tactile —
+« Suivi par email » depuis le 27/10 au soir, et « Pas de réponse » s'affiche
+« Pas décroché », `sans_reponse` en base) —
 📵 Pas de réponse · 🚧 Barrage · ↩︎ À rappeler · 👍 Intéressé · ✕ Pas
 intéressé. **Un tap enregistre**, le reste est facultatif :
 
@@ -679,15 +715,15 @@ prospect passé en Perdu n'a plus de relance ouverte. `normalizeStatus`
 (`lib/constants.ts`) tolère en lecture les anciennes valeurs de statut —
 garde-fou permanent, à ne pas retirer.
 
-**Les dates sont de vrais champs** : un `<input type="date">` (avec l'heure
-pour un rendez-vous), et des raccourcis **« Demain / +3 j / +1 sem »**
-(`+1 mois` / `+3 mois` en plus dans `components/DateField.tsx`) qui
-**remplissent le champ** au lieu de s'y substituer. Toujours modifiable à la
-main — c'était le défaut le plus gênant de la V1 (préréglages seuls,
-impossible de saisir « le 14 octobre »). Ces trois mots-là vivent à **un seul
-endroit**, `RACCOURCIS_RELANCE` (`lib/constants.ts`) : la ligne « Relancer »
-de la carte, la ligne de « À faire » et `DateField` y puisent, personne ne les
-réécrit.
+**Une relance se date AVEC l'heure, en un geste** (27/10 au soir — les
+raccourcis « Demain / +3 j / +1 sem » posaient toujours 9h, et `DateField`
+comme `RACCOURCIS_RELANCE` sont RETIRÉS) : le jour dans une liste (Plus tard
+aujourd'hui · Demain · Dans 2 jours · Dans 3 jours · Dans 1 semaine · Autre
+date…), l'heure en un tap (9h · 11h · 14h · 16h · Autre heure). Sans heure :
+9h. Après 17h, « Plus tard aujourd'hui » disparaît ; aujourd'hui, seules les
+heures à venir. UNE table, `lib/crm/relance.ts` (pur, `npm run test:relance`) ;
+UN composant, `components/ChoixRelance.tsx` — carte PROCHAINE ACTION, ligne de
+« À faire », débrief, « Planifier une relance ». « Demain à 9h » = un tap.
 
 ### L'agenda — le rendez-vous est un OBJET, plus une tâche (31 août)
 
@@ -943,7 +979,7 @@ automate qui écrit dans la base ressemble à un humain qui a décidé.
   `crm-mail` est modifiée **dans le dépôt** et doit être **redéployée depuis
   lui** (puis le diff de contrôle), séparément de Vercel.
 
-### Débriefer là où on travaille (migrations `026` et `027`, 18 octobre — ÉCRITES, PAS APPLIQUÉES)
+### Débriefer là où on travaille (migrations `026` et `027`, 18 octobre — appliquées le 19/10)
 
 Relevé en base le 18/10 : **15 rendez-vous depuis le début, 0 débriefé**, 14
 passés et toujours `prevu` / `reporte`, 9 fiches avec « RDV passé, à
@@ -1089,7 +1125,7 @@ et le report qui remplacent, et **rejoue Carrosserie carsystem**. Côté
 TypeScript : **`npm run test:debrief`** (issues, zone, étape « À rappeler »,
 libellés).
 
-### Le cadre de l'équipe de vente (migrations `030` et `031`, 27 octobre — ÉCRITES, PAS APPLIQUÉES)
+### Le cadre de l'équipe de vente (migrations `030` et `031`, 27 octobre — appliquées le 27/10)
 
 Les étudiants font leur recherche ailleurs (souvent avec leur propre IA) et
 collent leur liste dans le CRM AVANT d'appeler ; puis le cycle existant (cinq
@@ -1238,6 +1274,97 @@ différentielle, en transaction ANNULÉE contre la production, la migration
 jouée verbatim (md5 vérifié dans le rapport), les trois jeux de cas JSON
 injectés. Les assertions qui posent l'étape `essai_gratuit` sont SAUTÉES tant
 que la 030 n'est pas appliquée — **à rejouer après elle**.
+
+### Simplifier après la mise en ligne (migrations `032` et `033`, 27 octobre au soir — ÉCRITES, PAS APPLIQUÉES)
+
+Les retours de Bora après le test en production du cadre de l'équipe de vente :
+« garder simple ». Une décision par point, prise avec Bora le 27/10 au soir :
+
+**1. Deux affichages des mêmes fiches : « Liste | Pipeline »** — un sélecteur
+visible par TOUS en tête de `/prospects` (`BasculeAffichage`), le dernier choix
+retenu (cookie `celya_vue` écrit par le navigateur, relu par `lireVue` et
+validé comme une URL ; « Liste » s'écrit désormais explicitement, `?vue=liste`,
+pour l'emporter sur un pipeline retenu). La **liste** : UNE ligne par fiche,
+sans cadre autour de chaque élément (`ListeProspects`) — ⭐ · société + contact,
+« Ce qu'on sait » en gris dessous · l'**étape en petite liste déroulante** sur
+la ligne (même chemin que le glisser-déposer : `moveProspectAction`, qui
+verrouille ; texte sur la fiche d'un collègue) · dernier résultat · relance en
+date ET heure (`quandCourt` : « Aujourd'hui 14h », « Hier 9h », « jeu. 30/10 ·
+9h ») · Appeler. Ordre « Priorité » (`rangPriorite`) : étoilées, puis en retard
+(ambre), aujourd'hui, à venir, jamais appelées, rien de prévu. Filtres : UNE
+ligne de listes déroulantes — recherche · qui · étape (avec « À débriefer » et
+« Emails envoyés » en raccourcis, `valeurEtape` / `depuisValeurEtape`) · tri.
+Plus de rangée de puces d'étape. Le **pipeline** (`PipelineBoard`) : Gagné et
+Perdu repliés à droite (on peut toujours y déposer), plus de pastille
+« À évaluer ». L'écran vit dans `AffichageProspects` : la page charge, il
+affiche.
+⚠ **Sur téléphone, un `<select>` fait 16 px** (règle anti-zoom iOS de
+`globals.css`, `!important`) : l'étape de la ligne est donc la PUCE d'étape, et
+le menu natif est posé dessus, transparent (`opacity-0`, `absolute inset-0`).
+Ne pas « corriger » en baissant la taille : Safari zoomerait.
+
+**2. La relance : en un geste, avec l'heure** — voir « Les dates sont de vrais
+champs » plus haut (`lib/crm/relance.ts`, `ChoixRelance`). `DateField` et
+`RACCOURCIS_RELANCE` sont retirés. L'outil MCP `planifier_relance` acceptait
+déjà `YYYY-MM-DDTHH:mm` ; sa description dit de ne jamais deviner l'heure.
+
+**3. Six résultats d'appel, et l'étape « Suivi par email »** (option B de
+Bora) — `sans_reponse` s'affiche **« Pas décroché »** (seul le libellé change,
+partout : pastilles, carte, chronologie, `/equipe`). **« Suivi par email »**
+(`suivi_email`) : on a eu quelqu'un qui veut l'info par mail — une RÉPONSE
+(`compteurs_pour` et `lib/crm/compteurs.ts`, même jeu de cas), un échange
+attesté, pas un « intéressé » ; comme « À rappeler », il fait apparaître
+« Pour quand ? ». C'est le FAIT qui fait avancer la fiche dans l'**étape
+`suivi_email`** (032 ; ciel, arobase ; entre « À rappeler » et « Proposition »,
+`STATUS_RANK` 4 — Proposition 5, Essai 6, Gagné/Perdu 7) : `facts.suiviEmail`
+(lib/crm/status.ts) lit le résultat d'appel OU un RDV débriefé `suivi_email`.
+Le modèle ne propose jamais cette étape (`analyzeNoteAction`). Débrief d'un
+RDV : deux issues de plus — **« Suivi par email »** (tenu, date de relance
+exigée) et, sous « N'a pas eu lieu », **« Pas décroché »** (RDV **annulé**,
+`debrief_issue = 'pas_decroche'`, journal « pas de réponse », relance proposée
+jamais exigée ; « Reporter » reste pour une nouvelle date connue). Le débrief
+implicite (027) apprend `suivi_email`. La recopie TS : `issueImplicite`.
+
+**4. Le nom de la personne, au bon endroit** — `lib/crm/raccourcis.ts` lit
+aussi « parlé à Mme Lambert », « avec M. Dupont », « Mme Lambert, la gérante »,
+« Marc Dupont, le patron », « j'ai eu Sophie », et garde la FONCTION dans le
+même champ : « Mme Lambert (gérante) » (pas de colonne de plus). Jamais une
+civilité seule (« appeler Mme demain »), un nom de société (« avec Garage
+Dupont »), « la gérante est absente ». `PastilleContact` le PROPOSE sous le
+résultat d'appel et le compte rendu de débrief — écrit seulement sur
+« Garder » (`poserContactAction`, `contact_name` seul) ; un contact présent
+n'est jamais remplacé sans que la pastille le dise (« Remplacer « M. Dupont »
+par … ? », `lib/crm/contactPropose.ts`) ; l'action refuse si la fiche a changé
+entre-temps. Après un résultat où l'on a eu quelqu'un, une fiche sans contact
+offre « Nom de la personne ». Le déterministe d'abord : l'IA ne sert qu'à
+QuickNote (« Analyser »), jamais à ces écrans.
+
+**5. « Ma liste » : simple** — plus un mot sur Google Maps dans
+l'introduction (aucune lecture des blocs Maps : décision de Bora). La colonne
+« Adresse » d'un tableau était LUE et importée, mais l'écran de relecture ne la
+montrait pas : champ ajouté ; la ville est lue dans l'adresse quand la ligne
+n'en dit pas (`villeDeLAdresse` : « 5000 Namur », 5 chiffres pour la France) ;
+`ligneImport` (pur) est la ligne qui part à l'import. « Coller ma liste » dans
+la barre latérale (`MA_LISTE_ITEM`, jamais un onglet), dans le ＋ sur téléphone.
+
+**6. Une fiche en essai gratuit ne réclame plus un vieux débrief** (033) —
+trigger `prospects_essai_clot_rdv` : au PASSAGE en `essai_gratuit`, le RDV de
+prospect en attente le plus récent, DÉJÀ COMMENCÉ, est clos `honore` / `essai`
+(les plus anciens « remplacés » par la 027), une ligne au journal rattachée au
+RDV ; un RDV à venir n'est jamais touché ; après le débrief explicite « Essai
+gratuit démarré », aucun doublon. `security definer` (un RDV posé par Bora sur
+la fiche d'un étudiant se ferme quand l'étudiant passe SA fiche en essai ;
+l'encadrant, lui, ne change pas l'étape). Reprise décidée avec Bora : 100% MOTO
+(RDV du 29/09). Recopie TS : `rdvClosParEssai`.
+
+**Tests** : `test:relance` (nouveau), `test:debrief`, `test:objectifs`,
+`test:raccourcis`, `test:ma-liste`, `test:filtres`, `test:prochaine-action`,
+`test:nav` étendus. **Recette** : `supabase/recettes/033_assembler.sh`
+(+ `033_corps.sql`), **26 OK, 0 faute** le 27/10 au soir. **Captures avant /
+après** des deux affichages à 390 et 1280 px, sur une page de démonstration
+LOCALE alimentée de fiches fictives (« aucune donnée de production touchée » :
+les étudiants n'ont pas de fiche, et créer un compte de banc aurait écrit en
+base) — jamais commitée.
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
@@ -2821,7 +2948,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
   chemin normal. Elle ne reste que sur les routes OAuth. Voir « Vitesse et
   fluidité ».
 - Composants client uniquement quand il faut de l'état local (`QuickNote`,
-  `PipelineBoard`, `DateField`, `TaskList`, `ImportWizard`, formulaires avec
+  `PipelineBoard`, `ChoixRelance`, `TaskList`, `ImportWizard`, formulaires avec
   `useActionState`).
 - **Toute action visible doit être optimiste** : l'écran bouge au clic, le
   serveur suit. Voir « Vitesse et fluidité » pour le motif exact.
@@ -2836,6 +2963,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
+`npm run test:relance`,
 `npm run test:secteurs`, `npm run test:doublons`, `npm run test:ma-liste`,
 `npm run test:objectifs`, `npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
@@ -3592,34 +3720,17 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
    refusé (23514) ; les rattacher, cocher ou supprimer reste possible (recette
    `supabase/recettes/028.sql`, **7 OK** le 18/10). La `028` est indépendante
    des autres.
-8sexies. **Le cadre de l'équipe de vente (27/10)** — branche
-   `claude/youthful-lovelace-2kjwtf`. Dans cet ordre : **la `030` SEULE**
-   (`apply_migration`), **puis la `031`**, puis **rejouer la recette 031**
-   (`supabase/recettes/031_assembler.sh` — après la 030, ses assertions
-   « essai gratuit » ne sont plus sautées), puis la fusion. Vérifier après la
-   031 : `normaliser_secteur`, `doublons_equipe`, `classement_equipe`,
-   `attribuer_prospects` existent ; `objectifs` et `objectifs_periode` ont leur
-   RLS ; `prospects_insert` exige `is_admin() or owner_id = auth.uid()` ; plus
-   aucun secteur hors liste. Le code tourne avant comme après (lectures
-   tolérantes). Ensuite, depuis `/equipe` : **poser les objectifs** des
-   étudiants (sans objectif, personne n'est au classement) ; et **supprimer
-   `mobile-admin@celya.test`** (désactivé, mot de passe aléatoire, 0 ligne).
-   À faire après la fusion : **la recette réelle MiniMax** de « Ma liste »
-   (collages 1, 3 et 5 de `test:ma-liste`) et **la mesure du sélecteur de
-   périmètre** en production — ni l'une ni l'autre n'ont pu se faire le 27/10
-   (aperçu Vercel inaccessible depuis la session, voir l'état du jour).
-8quinquies. **Appliquer la migration `029`** (`appels_ia_simuler_inscription`)
-   **avant la fusion** de `claude/nifty-cray-jp3l9i` — additive, indépendante.
-   Vérifier après coup : la fonction existe, `authenticated` peut l'exécuter,
-   `anon` non. Puis, depuis `/equipe`, **supprimer `mobile-admin@celya.test`**
-   (redésactivé après le banc du 20/10).
-8ter. **Appliquer les migrations `026` puis `027`** (débrief des RDV, étape
-   « À rappeler »), dans cet ordre et SÉPARÉMENT (la `026` seule : valeur
-   d'enum), **avant** le déploiement du code du même lot — il lit
-   `meetings.debrief_issue`. Vérifier après coup : `prospect_status` porte
-   `a_rappeler` entre `rendez_vous` et `proposition` ; les triggers
-   `activities_debrief_implicite` et `meetings_rdv_remplaces` existent ; aucun
-   RDV n'a changé (aucun rattrapage). Indépendantes de la `025`.
+8septies. **Simplifier après la mise en ligne (27/10 au soir)** — branche
+   `claude/youthful-lovelace-2kjwtf`. Dans cet ordre : **la `032` SEULE**
+   (`apply_migration`), **puis la `033`**, puis la fusion. Vérifier après la
+   033 : `activities_outcome_connu` et `meetings_debrief_issue_connue` portent
+   les nouvelles valeurs, le trigger `prospects_essai_clot_rdv` existe, le RDV
+   du 29/09 de 100% MOTO est `honore` / `essai` (et rien d'autre n'a bougé).
+   Et toujours : **corriger `MINIMAX_BASE_URL`** sur Vercel (`…/v1`), puis la
+   recette réelle MiniMax de « Ma liste » ; **supprimer
+   `mobile-admin@celya.test`** depuis `/equipe`.
+(8ter, 8quinquies et 8sexies — les migrations `026` à `031` — sont FAITS :
+toutes appliquées, constaté le 27/10.)
 9. Activer la protection contre les mots de passe compromis (tableau de bord
    Supabase → Authentication).
 (La région des fonctions est réglée et vérifiée — voir « Vitesse et fluidité ».)

@@ -2,10 +2,15 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { TRIS } from "@/lib/crm/filtresProspects";
+import { TRIS, depuisValeurEtape } from "@/lib/crm/filtresProspects";
 
 /**
- * Recherche, étape et tri de /prospects — À LA FRAPPE (18/10). Il fallait
+ * La ligne de filtres de /prospects (27/10, au soir) : la recherche, puis UNE
+ * ligne de listes déroulantes — QUI (le périmètre, pour qui peut élargir) ·
+ * ÉTAPE (avec les raccourcis « À débriefer » et « Emails envoyés ») · TRI
+ * (en liste). Plus de rangée de puces d'étape.
+ *
+ * Recherche, étape et tri — À LA FRAPPE (18/10). Il fallait
  * taper puis cliquer « Filtrer » : la liste ne réagissait à rien.
  *
  * Le filtre reste dans l'URL (`?q=&statut=&tri=`) et la REQUÊTE reste celle du
@@ -16,17 +21,24 @@ import { TRIS } from "@/lib/crm/filtresProspects";
  */
 export function FiltresProspects({
   q,
-  statut,
+  etape,
   tri,
   etapes,
+  raccourcis = [],
+  qui = null,
   avecTri,
   seulementRecherche = false,
 }: {
   q: string;
-  statut: string;
+  /** La valeur du menu « Étape » : une étape, `f:<raccourci>` ou `tous` (valeurEtape). */
+  etape: string;
   tri: string;
   /** [valeur, libellé] — des chaînes seulement (frontière serveur → client). */
   etapes: [string, string][];
+  /** [raccourci, libellé] — « À débriefer », « Emails envoyés ». */
+  raccourcis?: [string, string][];
+  /** Le périmètre : des liens tout faits (optionsPerimetre) — null : pas de menu. */
+  qui?: { href: string; label: string; actif: boolean }[] | null;
   avecTri: boolean;
   /**
    * Téléphone : la recherche seule, sans libellé — l'étape et le tri passent
@@ -84,64 +96,78 @@ export function FiltresProspects({
     );
   }
 
+  const quiActif = qui?.find((o) => o.actif)?.href ?? "";
+  const menu = "input min-h-[40px] w-auto py-1.5 text-xs";
+
   return (
-    <div className="flex flex-1 flex-wrap items-end gap-3">
-      <div className="min-w-[200px] flex-1">
-        <label className="label" htmlFor="q">
-          Rechercher {enCours && <span className="text-slate-500">…</span>}
-        </label>
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      <div className="relative min-w-[220px] flex-1">
         <input
           id="q"
           type="search"
           value={texte}
           onChange={(e) => setTexte(e.target.value)}
-          className="input"
-          placeholder="Société, contact, téléphone, email, ville…"
+          className="input min-h-[40px] py-1.5"
+          placeholder="Rechercher : société, contact, téléphone, ville…"
+          aria-label="Rechercher une fiche"
           autoComplete="off"
         />
+        {enCours && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">…</span>
+        )}
       </div>
 
-      {/* Depuis le 27/10, l'étape a ses PUCES sur la page : le menu n'est rendu
-          que si on lui passe des étapes. */}
-      {etapes.length > 0 && (
-      <div>
-        <label className="label" htmlFor="statut">
-          Étape
-        </label>
+      {qui && qui.length > 0 && (
         <select
-          id="statut"
-          value={statut || "tous"}
-          onChange={(e) => aller({ statut: e.target.value === "tous" ? null : e.target.value })}
-          className="input"
+          value={quiActif}
+          onChange={(e) => startTransition(() => router.push(e.target.value, { scroll: false }))}
+          aria-label="Qui"
+          className={menu}
         >
-          <option value="tous">Toutes</option>
-          {etapes.map(([v, label]) => (
-            <option key={v} value={v}>
-              {label}
+          {qui.map((o) => (
+            <option key={o.href} value={o.href}>
+              {o.label}
             </option>
           ))}
         </select>
-      </div>
       )}
 
-      {avecTri && (
-        <div>
-          <label className="label" htmlFor="tri">
-            Trier par
-          </label>
-          <select
-            id="tri"
-            value={tri || "priorite"}
-            onChange={(e) => aller({ tri: e.target.value === "priorite" ? null : e.target.value })}
-            className="input"
-          >
-            {Object.entries(TRIS).map(([v, label]) => (
-              <option key={v} value={v}>
+      <select
+        value={etape || "tous"}
+        onChange={(e) => aller(depuisValeurEtape(e.target.value))}
+        aria-label="Étape"
+        className={menu}
+      >
+        <option value="tous">Toutes les étapes</option>
+        {etapes.map(([v, label]) => (
+          <option key={v} value={v}>
+            {label}
+          </option>
+        ))}
+        {raccourcis.length > 0 && (
+          <optgroup label="Raccourcis">
+            {raccourcis.map(([v, label]) => (
+              <option key={v} value={`f:${v}`}>
                 {label}
               </option>
             ))}
-          </select>
-        </div>
+          </optgroup>
+        )}
+      </select>
+
+      {avecTri && (
+        <select
+          value={tri || "priorite"}
+          onChange={(e) => aller({ tri: e.target.value === "priorite" ? null : e.target.value })}
+          aria-label="Trier par"
+          className={menu}
+        >
+          {Object.entries(TRIS).map(([v, label]) => (
+            <option key={v} value={v}>
+              Tri : {label}
+            </option>
+          ))}
+        </select>
       )}
     </div>
   );

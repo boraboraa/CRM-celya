@@ -22,7 +22,7 @@ import {
   LAST_ACTION_LABEL,
   type LastActionKind,
 } from "@/lib/crm/lastAction";
-import { lireProchaineAction, PLUS_RIEN_COURT } from "@/lib/crm/prochaineAction";
+import { lireProchaineAction, PLUS_RIEN_COURT, quandCourt } from "@/lib/crm/prochaineAction";
 
 // ---------------------------------------------------------------------------
 // Pictogrammes — un seul jeu, dessiné ici
@@ -629,10 +629,13 @@ export function ProchaineActionTexte({
   className = "",
   couleurNeutre = "",
   plusRien = false,
+  avecHeure = false,
 }: {
   at: string | null | undefined;
   kind: string | null | undefined;
   statut?: string | null;
+  /** Une relance en jour ET heure (« Aujourd'hui 14h ») au lieu d'une relative. */
+  avecHeure?: boolean;
   sansDate?: string;
   /** Mise en page seulement — la couleur est celle de l'état. */
   className?: string;
@@ -673,7 +676,7 @@ export function ProchaineActionTexte({
       className={`inline-flex items-center gap-1 ${l.retard ? "text-amber-300" : couleurNeutre} ${className}`}
     >
       {l.retard && <Icone nom="alerte" className="h-3 w-3 shrink-0" />}
-      {relative(at)}
+      {avecHeure ? quandCourt(at) : relative(at)}
     </span>
   );
 }

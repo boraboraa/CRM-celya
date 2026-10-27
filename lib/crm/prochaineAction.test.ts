@@ -44,6 +44,7 @@ import {
   rdvQuiCompte,
   rdvVivant,
   PLUS_RIEN,
+  quandCourt,
 } from "./prochaineAction.ts";
 
 let echecs = 0;
@@ -399,6 +400,17 @@ console.log("\n— 10. rdv_visible_et_refus —");
   verifie("MCP : relance après le RDV → acceptée", refusRelanceAvantRdv("2026-10-05T07:00:00Z", RDV_ALAIN.starts_at), null);
   verifie("MCP : au moment même du RDV → acceptée", refusRelanceAvantRdv(RDV_ALAIN.starts_at, RDV_ALAIN.starts_at), null);
   verifie("MCP : pas de RDV à venir → acceptée", refusRelanceAvantRdv("2026-09-25T07:00:00Z", null), null);
+}
+
+// --- La relance en date ET heure (liste des prospects, 27/10) ---------------
+{
+  const MARDI_10H = T("2026-10-27T09:00:00Z"); // mardi 27/10, 10h à Bruxelles (hiver)
+  verifie("aujourd'hui", quandCourt("2026-10-27T13:00:00Z", MARDI_10H), "Aujourd'hui 14h");
+  verifie("demain, avec les minutes", quandCourt("2026-10-28T10:30:00Z", MARDI_10H), "Demain 11h30");
+  verifie("hier (en retard)", quandCourt("2026-10-26T08:00:00Z", MARDI_10H), "Hier 9h");
+  verifie("plus loin : le jour de la semaine", quandCourt("2026-10-30T08:00:00Z", MARDI_10H), "ven. 30/10 · 9h");
+  verifie("heure d'été (vendredi 23/10, UTC+2)", quandCourt("2026-10-23T07:00:00Z", MARDI_10H), "ven. 23/10 · 9h");
+  verifie("minuit à Bruxelles est déjà demain", quandCourt("2026-10-27T23:30:00Z", MARDI_10H), "Demain 0h30");
 }
 
 console.log(echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`);

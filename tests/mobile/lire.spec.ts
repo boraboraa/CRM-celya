@@ -95,8 +95,8 @@ test.describe("Prospects", () => {
   test("la première fiche est dans le premier écran", async ({ page }, info) => {
     const { mobile, role } = contexte(info);
     await page.goto(role === "admin" ? "/prospects?perimetre=moi" : "/prospects");
-    // Des cartes sur toutes les tailles depuis le 27/10 (ListeProspects).
-    const premiere = page.locator("main ul > li.card").first();
+    // UNE ligne par fiche, dans un seul cadre, depuis le 27/10 au soir.
+    const premiere = page.locator("main ul.card > li").first();
     await expect(premiere).toBeVisible();
     await dansLePremierEcran(page, premiere);
     if (mobile) {
@@ -104,6 +104,23 @@ test.describe("Prospects", () => {
       await expect(page.locator("main table")).toBeHidden();
       await expect(premiere.getByText(/ZZ Test mobile/)).toBeVisible();
     }
+  });
+
+  test("« Liste | Pipeline » : visible pour tous, et le dernier choix est retenu", async ({ page }) => {
+    await page.goto("/prospects?perimetre=moi");
+    const bascule = page.getByRole("group", { name: "Affichage" }).filter({ visible: true }).first();
+    await expect(bascule.getByRole("link", { name: "Pipeline" })).toHaveAttribute("href", /vue=colonnes/);
+    // Choisir le pipeline (on charge l'URL du lien — voir la note plus bas),
+    // puis revenir sur /prospects sans paramètre : c'est le pipeline qui revient.
+    await page.goto("/prospects?vue=colonnes&perimetre=moi");
+    await expect(page.locator("main section h2").first()).toBeVisible();
+    await page.waitForTimeout(300); // le cookie est écrit au montage
+    await page.goto("/prospects?perimetre=moi");
+    await expect(page.locator("main section h2").first()).toBeVisible();
+    await expect(page.locator("main ul.card")).toHaveCount(0);
+    // Et « Liste » l'emporte, explicitement.
+    await page.goto("/prospects?vue=liste&perimetre=moi");
+    await expect(page.locator("main ul.card > li").first()).toBeVisible();
   });
 
   test("téléphone : la feuille « Filtres » et les puces retirables", async ({ page }, info) => {

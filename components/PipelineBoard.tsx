@@ -101,6 +101,9 @@ export type BoardProspect = {
   modifiable?: boolean;
 };
 
+/** Repliées à droite par défaut — les fins de parcours (27/10). */
+const REPLIEES: ProspectStatus[] = ["gagne", "perdu"];
+
 /**
  * Le pipeline : une colonne par étape, glisser-déposer pour corriger.
  *
@@ -127,6 +130,11 @@ export function PipelineBoard({
   const [overColumn, setOverColumn] = useState<ProspectStatus | null>(null);
   const [justMoved, setJustMoved] = useState<string | null>(null);
   const [enCours, setEnCours] = useState<string | null>(null);
+  /**
+   * Gagné et Perdu sont REPLIÉS à droite (27/10) : une colonne étroite qui dit
+   * combien, et qu'on déplie d'un clic. On peut toujours y déposer une fiche.
+   */
+  const [deplies, setDeplies] = useState<Set<ProspectStatus>>(new Set());
   const [error, setError] = useState<string>();
   const [, startTransition] = useTransition();
   /**
@@ -233,6 +241,7 @@ export function PipelineBoard({
             // Colonne d'origine de la carte en cours de déplacement : on la
             // laisse en retrait pour que la cible ressorte.
             const isSource = dragging !== null && dragging.status === status;
+            const repliee = REPLIEES.includes(status) && !deplies.has(status);
 
             return (
               <section
@@ -255,7 +264,9 @@ export function PipelineBoard({
                   if (id) move(id, status);
                 }}
                 style={{ animationDelay: `${columnIndex * 40}ms` }}
-                className={`w-full shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 lg:block lg:w-[272px] ${
+                className={`w-full shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 lg:block ${
+                  repliee ? "lg:w-[76px]" : "lg:w-[272px]"
+                } ${
                   status === etapeMobile ? "" : "hidden"
                 } ${
                   isTarget
@@ -265,6 +276,24 @@ export function PipelineBoard({
                       : "ring-transparent"
                 }`}
               >
+                {repliee && (
+                  <button
+                    type="button"
+                    onClick={() => setDeplies((d) => new Set(d).add(status))}
+                    title={`Déplier « ${STATUS_LABEL[status]} »`}
+                    className={`hidden w-full flex-col items-center gap-2 rounded-xl px-1 py-3 text-xs font-semibold ring-1 transition lg:flex ${COLUMN_BANNER[status]} ${
+                      isTarget ? "brightness-125" : ""
+                    }`}
+                  >
+                    <Icone nom={STATUS_ICON[status]} className="h-3.5 w-3.5 opacity-80" />
+                    <span className="[writing-mode:vertical-rl]">{STATUS_LABEL[status]}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${COLUMN_COUNT[status]}`}>
+                      {list.length}
+                    </span>
+                    {isTarget && <span className="text-[10px] font-normal">Déposer</span>}
+                  </button>
+                )}
+                <div className={repliee ? "lg:hidden" : ""}>
                 <header className="mb-3">
                   {/* Un vrai bandeau dans la couleur de l'étape, compteur
                       dans une pastille de la même teinte. */}
@@ -280,6 +309,22 @@ export function PipelineBoard({
                     >
                       {list.length}
                     </span>
+                    {REPLIEES.includes(status) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDeplies((d) => {
+                            const n = new Set(d);
+                            n.delete(status);
+                            return n;
+                          })
+                        }
+                        aria-label={`Replier « ${STATUS_LABEL[status]} »`}
+                        className="hidden h-7 w-7 items-center justify-center rounded-lg opacity-70 transition hover:bg-white/10 hover:opacity-100 lg:inline-flex"
+                      >
+                        <Icone nom="chevron" className="h-3 w-3 rotate-90" />
+                      </button>
+                    )}
                   </h2>
                 </header>
 
@@ -385,21 +430,28 @@ export function PipelineBoard({
 
                           {/* La confiance, d'un coup d'œil — et sa raison. */}
                           <p className="mt-2 flex items-center justify-between gap-2">
-                            <ConfidenceBadge
-                              level={c.confidence_level}
-                              reason={c.confidence_reason}
-                              locked={c.confidence_locked}
-                            />
+                            {/* « À évaluer » (null) n'apprend rien : rien ne
+                                s'affiche (27/10) — la carte s'allège d'autant. */}
+                            {c.confidence_level ? (
+                              <ConfidenceBadge
+                                level={c.confidence_level}
+                                reason={c.confidence_reason}
+                                locked={c.confidence_locked}
+                              />
+                            ) : (
+                              <span />
+                            )}
                             <ProchaineActionTexte
                               at={c.next_action_at}
                               kind={c.next_action_kind}
                               statut={c.status}
                               plusRien={c.plus_rien}
+                              avecHeure
                               className="shrink-0 text-[11px]"
                               couleurNeutre="text-slate-400"
                             />
                           </p>
-                          {c.confidence_reason && !c.confidence_locked && (
+                          {c.confidence_level && c.confidence_reason && !c.confidence_locked && (
                             <p className="mt-1 truncate text-[11px] text-slate-500">
                               {c.confidence_reason}
                             </p>
@@ -426,6 +478,7 @@ export function PipelineBoard({
                       </article>
                     );
                   })}
+                </div>
                 </div>
               </section>
             );

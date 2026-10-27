@@ -128,6 +128,39 @@ export function libelleRdvListe(iso: string): string {
   return `RDV ${out.weekday} ${out.day}/${out.month} · ${heureCourte(out.hour, out.minute)}`;
 }
 
+/** « YYYY-MM-DD » de Bruxelles d'un instant. */
+function jourBruxelles(t: number): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
+}
+
+/**
+ * La relance en DATE ET HEURE, court — la liste des prospects (27/10) :
+ * « Aujourd'hui 14h », « Hier 9h », « Demain 11h », « jeu. 30/10 · 9h ».
+ * Une relative (« dans 10 heures ») ne disait pas l'heure à laquelle appeler.
+ */
+export function quandCourt(iso: string, now: number = Date.now()): string {
+  const t = new Date(iso).getTime();
+  const out: Record<string, string> = {};
+  for (const p of new Intl.DateTimeFormat("fr-BE", {
+    timeZone: TZ,
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(t))) {
+    out[p.type] = p.value;
+  }
+  const h = heureCourte(out.hour, out.minute);
+  const jour = jourBruxelles(t);
+  const auj = jourBruxelles(now);
+  if (jour === auj) return `Aujourd'hui ${h}`;
+  if (jour === jourBruxelles(now + 86400000)) return `Demain ${h}`;
+  if (jour === jourBruxelles(now - 86400000)) return `Hier ${h}`;
+  return `${out.weekday} ${out.day}/${out.month} · ${h}`;
+}
+
 /** « Lundi 28 septembre à 12h » — la carte de la fiche (024). */
 export function jourLong(iso: string): string {
   const out: Record<string, string> = {};

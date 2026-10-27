@@ -1,20 +1,13 @@
-import Link from "next/link";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
-import { PageHeader, EmptyState, Icone } from "@/components/ui";
-import { ListeProspects, type LigneListe } from "@/components/ListeProspects";
-import { PerimetreSwitcher, optionsPerimetre } from "@/components/PerimetreSwitcher";
-import { FiltresProspects } from "@/components/FiltresProspects";
-import { FeuilleFiltres } from "@/components/FeuilleFiltres";
-import {
-  FILTRES_RAPIDES,
-  TRIS,
-  filtresActifs,
-  hrefProspects,
-} from "@/lib/crm/filtresProspects";
+import { type LigneListe } from "@/components/ListeProspects";
+import { optionsPerimetre } from "@/components/PerimetreSwitcher";
+import { AffichageProspects } from "@/components/AffichageProspects";
+import { lireVue, VUE_COOKIE } from "@/lib/crm/filtresProspects";
 import { filtreRecherche } from "@/lib/crm/recherche";
-import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
-import { STATUS_ORDER, STATUS_LABEL, STATUS_CHIP, normalizeStatus } from "@/lib/constants";
+import { type BoardProspect } from "@/components/PipelineBoard";
+import { STATUS_ORDER, normalizeStatus } from "@/lib/constants";
 import { ordonnerProspects } from "@/lib/crm/ordreProspects";
 import { todayBounds } from "@/lib/time";
 import { avecRepliColonne } from "@/lib/crm/tolerance";
@@ -46,11 +39,13 @@ type Search = {
 };
 
 /**
- * Une seule liste de prospects (refaite le 27/10) : des CARTES, dans l'ordre
- * « Priorité » — étoilées, puis ce qui est dû, puis le reste
- * (lib/crm/ordreProspects.ts). L'étape est une PUCE de filtre ; il n'y a plus
- * de bascule. La vue en colonnes reste accessible par `?vue=colonnes` : c'est
- * le pipeline d'équipe, un lien discret pour qui peut élargir le périmètre.
+ * Les prospects (27/10, au soir) : DEUX affichages des mêmes fiches — la
+ * LISTE (une ligne par fiche, ordre « Priorité » : étoilées, en retard,
+ * aujourd'hui, à venir, jamais appelées, rien de prévu — lib/crm/
+ * ordreProspects.ts) et le PIPELINE (`?vue=colonnes`, les colonnes par étape).
+ * Le sélecteur est visible par tous ; le dernier choix est retenu (cookie
+ * `celya_vue`, relu par `lireVue`). L'affichage vit dans AffichageProspects :
+ * cette page ne fait que lire.
  *
  * Le tout dans le PÉRIMÈTRE choisi (« Toute l'équipe » par défaut pour
  * l'admin, « moi » pour les autres). Le nom du responsable n'apparaît sur la
@@ -65,7 +60,7 @@ export default async function ProspectsPage({
   const { q, statut, tri, vue, filtre } = params;
   const supabase = await createClient();
   const session = await getSession();
-  const view = vue === "colonnes" ? "colonnes" : "liste";
+  const view = lireVue(vue, (await cookies()).get(VUE_COOKIE)?.value ?? null);
   // « Emails envoyés » : ne garder que les fiches à qui un mail est parti,
   // triées par date du dernier envoi — pour les retrouver d'un coup.
   const filtreEmails = filtre === "emails";
@@ -217,7 +212,8 @@ export default async function ProspectsPage({
   }[]).map((p) => ({ ...p, status: normalizeStatus(p.status) }));
 
   if (sort === "priorite") {
-    prospects = ordonnerProspects(prospects, new Date(todayBounds().end).getTime());
+    const jour = todayBounds();
+    prospects = ordonnerProspects(prospects, new Date(jour.end).getTime(), new Date(jour.start).getTime());
   }
 
   // Ceinture et bretelles : re-filtre après normalisation des statuts.
@@ -295,15 +291,7 @@ export default async function ProspectsPage({
     };
   });
 
-  /** URL de la page en conservant recherche, étape, tri, vue, filtre — et
-   *  périmètre (la règle vit dans lib/crm/filtresProspects.ts). */
-  const makeHref = (over: {
-    vue?: "liste" | "colonnes" | null;
-    filtre?: "emails" | "a_debriefer" | null;
-  }) => hrefProspects(params, over);
-
-  // ---- Téléphone : la feuille « Filtres » reçoit des liens tout faits.
-  const proprietes = {
+  const qui = optionsPerimetre({
     role: session?.me?.role ?? "commercial",
     viewerId: viewer.userId,
     perimetre,
@@ -311,244 +299,22 @@ export default async function ProspectsPage({
     peutElargir: peutElargir(viewer),
     basePath: "/prospects",
     searchParams: params,
-  };
-  const libellesEtapes = Object.fromEntries(STATUS_ORDER.map((st) => [st, STATUS_LABEL[st]]));
-  const actifs = filtresActifs(params, libellesEtapes);
-  const lienFiltre = (over: Parameters<typeof hrefProspects>[1], label: string, actif: boolean) => ({
-    href: hrefProspects(params, over),
-    label,
-    actif,
   });
-  const etapesLiens = [
-    lienFiltre({ statut: null }, "Toutes", !statut || statut === "tous"),
-    ...STATUS_ORDER.map((st) => lienFiltre({ statut: st }, STATUS_LABEL[st], statut === st)),
-  ];
-  // Le pipeline d'équipe (les colonnes) : un lien discret, pour qui voit
-  // plusieurs portefeuilles — l'URL reste ouverte à tous.
-  const lienPipeline = peutElargir(viewer);
 
   return (
-    <>
-      <PageHeader
-        title="Prospects"
-        subtitle={`${prospects.length} fiche${prospects.length > 1 ? "s" : ""}`}
-        compactMobile
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Link href="/prospects/ma-liste" className="btn-ghost">
-              Coller ma liste
-            </Link>
-            <Link href="/prospects/import" className="btn-ghost">
-              Importer un CSV
-            </Link>
-            <Link href="/prospects/nouveau" className="btn-primary">
-              + Nouveau prospect
-            </Link>
-          </div>
-        }
-      />
-
-      {/* Téléphone : la recherche, et UNE puce « Filtres » pour tout le reste ;
-          les filtres posés restent visibles, chacun retirable d'un tap. */}
-      <div className="mb-3 space-y-2 lg:hidden">
-        <div className="flex items-center gap-2">
-          <FiltresProspects
-            q={q ?? ""}
-            statut={statut ?? "tous"}
-            tri={tri ?? ""}
-            etapes={[]}
-            avecTri={false}
-            seulementRecherche
-          />
-          <FeuilleFiltres
-            nbActifs={actifs.filter((f) => f.cle !== "q").length}
-            vues={
-              view === "colonnes" || lienPipeline
-                ? [
-                    lienFiltre({ vue: null }, "Liste", view === "liste"),
-                    lienFiltre({ vue: "colonnes" }, "Pipeline", view === "colonnes"),
-                  ]
-                : []
-            }
-            perimetre={optionsPerimetre(proprietes)}
-            raccourcis={(Object.keys(FILTRES_RAPIDES) as (keyof typeof FILTRES_RAPIDES)[]).map((f) =>
-              lienFiltre({ filtre: filtre === f ? null : f }, FILTRES_RAPIDES[f], filtre === f)
-            )}
-            etapes={etapesLiens}
-            tris={
-              view === "liste"
-                ? (Object.keys(TRIS) as (keyof typeof TRIS)[]).map((t) =>
-                    lienFiltre({ tri: t === "priorite" ? null : t }, TRIS[t], (sort ?? "priorite") === t)
-                  )
-                : null
-            }
-          />
-          <Link
-            href="/prospects/ma-liste"
-            aria-label="Coller ma liste"
-            className="btn-ghost min-h-[44px] shrink-0 px-3 text-sm"
-          >
-            Coller
-          </Link>
-        </div>
-        {actifs.some((f) => f.cle !== "q") && (
-          <ul className="flex flex-wrap gap-1.5" aria-label="Filtres actifs">
-            {actifs
-              .filter((f) => f.cle !== "q")
-              .map((f) => (
-                <li key={f.cle}>
-                  <Link
-                    href={f.retirer}
-                    prefetch={false}
-                    aria-label={`Retirer le filtre ${f.label}`}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-celya-blue/10 px-3 text-xs text-blue-100 ring-1 ring-celya-blue/30"
-                  >
-                    {f.label}
-                    <Icone nom="croix" className="h-3 w-3" />
-                  </Link>
-                </li>
-              ))}
-          </ul>
-        )}
-        <p className="text-xs text-slate-500">
-          {prospects.length} fiche{prospects.length > 1 ? "s" : ""}
-        </p>
-      </div>
-
-      <div className="mb-3 hidden flex-wrap items-end gap-3 lg:flex">
-        {/* Le périmètre — admin seulement (le composant ne rend rien sinon). */}
-        <PerimetreSwitcher
-          puceMobile={false}
-          role={session?.me?.role ?? "commercial"}
-          viewerId={viewer.userId}
-          perimetre={perimetre}
-          membres={membresProposables(membres, viewer)}
-          peutElargir={peutElargir(viewer)}
-          basePath="/prospects"
-          searchParams={params}
-        />
-
-        {/* Emails envoyés : retrouver d'un coup les fiches déjà démarchées
-            par mail, avec la date du dernier envoi. */}
-        <Link
-          href={makeHref({ filtre: filtreEmails ? null : "emails" })}
-          aria-pressed={filtreEmails}
-          title="Ne montrer que les prospects à qui un mail a été envoyé"
-          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
-            filtreEmails
-              ? "bg-celya-blue/15 text-blue-200 ring-celya-blue/40"
-              : "bg-white/[0.03] text-slate-400 ring-white/10 hover:text-slate-200"
-          }`}
-        >
-          <Icone nom="enveloppe" className="h-3.5 w-3.5" />
-          Emails envoyés
-        </Link>
-
-        {/* À débriefer : les fiches dont un rendez-vous attend son issue —
-            le même ensemble que la zone en tête de « À faire ». */}
-        <Link
-          href={makeHref({ filtre: filtreDebrief ? null : "a_debriefer" })}
-          aria-pressed={filtreDebrief}
-          title="Ne montrer que les fiches dont un rendez-vous passé attend son débrief"
-          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-medium ring-1 transition ${
-            filtreDebrief
-              ? "bg-amber-500/15 text-amber-200 ring-amber-400/40"
-              : "bg-white/[0.03] text-slate-400 ring-white/10 hover:text-slate-200"
-          }`}
-        >
-          <Icone nom="calendrier" className="h-3.5 w-3.5" />
-          À débriefer
-        </Link>
-
-        {/* Recherche et tri : à la frappe. L'étape a ses puces, juste dessous. */}
-        <FiltresProspects
-          q={q ?? ""}
-          statut={statut ?? "tous"}
-          tri={tri ?? ""}
-          etapes={[]}
-          avecTri={view === "liste"}
-        />
-
-        {lienPipeline && (
-          <Link
-            href={makeHref({ vue: view === "colonnes" ? null : "colonnes" })}
-            className="btn-link ml-auto text-xs"
-          >
-            {view === "colonnes" ? "← Revenir à la liste" : "Pipeline d'équipe (colonnes) →"}
-          </Link>
-        )}
-      </div>
-
-      {/* L'étape — une PUCE de filtre, à la place de l'ancienne bascule. Sur
-          téléphone, la rangée défile d'elle-même (jamais la page). */}
-      {view === "liste" && (
-        <nav aria-label="Étape" className="-mx-4 mb-4 overflow-x-auto px-4 lg:mx-0 lg:px-0">
-          <ul className="flex w-max gap-1.5 lg:w-auto lg:flex-wrap">
-            {etapesLiens.map((l, i) => (
-              <li key={l.href + l.label}>
-                <Link
-                  href={l.href}
-                  prefetch={false}
-                  aria-current={l.actif ? "true" : undefined}
-                  className={`inline-flex min-h-[44px] items-center rounded-full px-3.5 text-xs font-medium ring-1 transition lg:min-h-[36px] ${
-                    l.actif
-                      ? i === 0
-                        ? "bg-white/[0.09] text-slate-50 ring-white/20"
-                        : STATUS_CHIP[STATUS_ORDER[i - 1]]
-                      : "bg-white/[0.02] text-slate-400 ring-white/10 hover:text-slate-200"
-                  }`}
-                >
-                  {l.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      )}
-
-      {error && (
-        <p className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
-          {error.message}
-        </p>
-      )}
-
-      {prospects.length === 0 ? (
-        <EmptyState
-          title={
-            filtreEmails
-              ? "Aucun email envoyé"
-              : filtreDebrief
-                ? "Aucun rendez-vous à débriefer"
-                : q || statut
-                ? "Aucun résultat"
-                : "Aucun prospect pour l'instant"
-          }
-          hint={
-            filtreEmails
-              ? "Aucun mail n'est encore parti vers ces prospects — le filtre ne montre que les fiches déjà démarchées par email."
-              : filtreDebrief
-                ? "Aucun rendez-vous passé n'attend son issue dans ce périmètre."
-                : q || statut
-                ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
-                : "Collez votre liste (« Coller ma liste »), importez un CSV, ou créez une première fiche."
-          }
-          href="/prospects/ma-liste"
-          cta="Coller ma liste"
-        />
-      ) : view === "colonnes" ? (
-        <PipelineBoard prospects={boardProspects} janetIds={janetIds} />
-      ) : (
-        <ListeProspects
-          lignes={lignes}
-          admin={viewer.isAdmin}
-          membres={
-            viewer.isAdmin
-              ? membres.map((m) => [m.id, m.full_name ?? m.email] as [string, string])
-              : []
-          }
-          filtreEmails={filtreEmails}
-        />
-      )}
-    </>
+    <AffichageProspects
+      params={params}
+      vue={view}
+      lignes={lignes}
+      board={boardProspects}
+      janetIds={janetIds}
+      erreur={error?.message ?? null}
+      qui={qui}
+      admin={viewer.isAdmin}
+      membresAttribution={
+        viewer.isAdmin ? membres.map((m) => [m.id, m.full_name ?? m.email] as [string, string]) : []
+      }
+      tri={sort}
+    />
   );
 }

@@ -1,7 +1,7 @@
 // npm run test:filtres — l'URL de /prospects et les puces des filtres actifs.
 import assert from "node:assert/strict";
-import { filtresActifs, hrefProspects } from "./filtresProspects.ts";
-import { echeance, etoileesDabord, ordonnerProspects } from "./ordreProspects.ts";
+import { depuisValeurEtape, filtresActifs, hrefProspects, lireVue, valeurEtape, VUES } from "./filtresProspects.ts";
+import { echeance, etoileesDabord, ordonnerProspects, rangPriorite } from "./ordreProspects.ts";
 
 let ok = 0;
 function cas(nom: string, f: () => void) {
@@ -17,8 +17,38 @@ cas("sans rien : /prospects nu", () => {
   assert.deepEqual(filtresActifs({}, ETAPES), []);
 });
 
-cas("les valeurs par défaut ne s'écrivent pas (tous, priorite, liste)", () => {
-  assert.equal(hrefProspects({ statut: "tous", tri: "priorite", vue: "liste" }), "/prospects");
+cas("les valeurs par défaut ne s'écrivent pas (tous, priorite)", () => {
+  assert.equal(hrefProspects({ statut: "tous", tri: "priorite" }), "/prospects");
+});
+
+cas("l'affichage : « Liste » s'écrit aussi (il doit l'emporter sur un Pipeline retenu)", () => {
+  assert.equal(hrefProspects({ vue: "liste" }), "/prospects?vue=liste");
+  assert.equal(hrefProspects({ vue: "colonnes" }), "/prospects?vue=colonnes");
+  assert.equal(hrefProspects({ vue: "constructor" }), "/prospects");
+  assert.deepEqual(Object.values(VUES), ["Liste", "Pipeline"]);
+});
+
+cas("l'affichage retenu : l'URL d'abord, puis le dernier choix, puis la liste", () => {
+  assert.equal(lireVue("colonnes", "liste"), "colonnes");
+  assert.equal(lireVue("liste", "colonnes"), "liste");
+  assert.equal(lireVue(undefined, "colonnes"), "colonnes");
+  assert.equal(lireVue(undefined, undefined), "liste");
+});
+
+cas("un affichage inconnu (URL ou cookie trafiqués) est ignoré", () => {
+  assert.equal(lireVue("kanban", "colonnes"), "colonnes");
+  assert.equal(lireVue(undefined, "<script>"), "liste");
+  assert.equal(lireVue("__proto__", null), "liste");
+});
+
+cas("le menu « Étape » porte les étapes ET les deux raccourcis", () => {
+  assert.equal(valeurEtape({}), "tous");
+  assert.equal(valeurEtape({ statut: "contacte" }), "contacte");
+  assert.equal(valeurEtape({ filtre: "a_debriefer", statut: "contacte" }), "f:a_debriefer");
+  assert.deepEqual(depuisValeurEtape("f:emails"), { statut: null, filtre: "emails" });
+  assert.deepEqual(depuisValeurEtape("f:constructor"), { statut: null, filtre: null });
+  assert.deepEqual(depuisValeurEtape("suivi_email"), { statut: "suivi_email", filtre: null });
+  assert.deepEqual(depuisValeurEtape("tous"), { statut: null, filtre: null });
 });
 
 cas("« Activité récente » n'est plus le défaut : elle s'écrit, et devient une puce", () => {
@@ -66,6 +96,34 @@ cas("le tri ne compte pas en colonnes ; une étape inconnue n'est pas une puce",
 });
 
 // --- L'ordre des fiches (lib/crm/ordreProspects.ts) -------------------------
+cas("rang : en retard, aujourd'hui, à venir, jamais appelée, rien de prévu", () => {
+  const DEBUT = Date.parse("2026-11-01T23:00:00Z"); // lundi 2/11, 0h à Bruxelles
+  const FIN_ = Date.parse("2026-11-02T22:59:00Z");
+  const r = (next_action_at: string | null, last_contact_at: string | null = null) =>
+    rangPriorite({ company_name: "x", next_action_at, last_contact_at }, DEBUT, FIN_);
+  assert.equal(r("2026-11-01T08:00:00Z"), 0, "hier : en retard");
+  assert.equal(r("2026-11-02T08:00:00Z"), 1, "aujourd'hui, même passé de quelques heures");
+  assert.equal(r("2026-11-03T08:00:00Z"), 2, "demain : à venir");
+  assert.equal(r(null, null), 3, "rien de prévu, jamais contactée : jamais appelée");
+  assert.equal(r(null, "2026-10-20T08:00:00Z"), 4, "rien de prévu après un contact");
+});
+
+cas("priorité : en retard AVANT aujourd'hui, jamais appelées avant « plus rien »", () => {
+  const DEBUT = Date.parse("2026-11-01T23:00:00Z");
+  const FIN_ = Date.parse("2026-11-02T22:59:00Z");
+  const g = (company_name: string, next_action_at: string | null, last_contact_at: string | null = null) =>
+    ({ company_name, next_action_at, last_contact_at, starred_at: null });
+  const rows = [
+    g("Plus rien", null, "2026-10-20T08:00:00Z"),
+    g("Jamais appelée", null),
+    g("Demain", "2026-11-03T08:00:00Z"),
+    g("Aujourd'hui tôt", "2026-11-02T07:00:00Z"),
+    g("Avant-hier", "2026-10-31T08:00:00Z"),
+  ];
+  assert.deepEqual(ordonnerProspects(rows, FIN_, DEBUT).map((x) => x.company_name),
+    ["Avant-hier", "Aujourd'hui tôt", "Demain", "Jamais appelée", "Plus rien"]);
+});
+
 const FIN = Date.parse("2026-11-02T22:59:00Z"); // lundi 2/11, 23h59 à Bruxelles
 const f = (company_name: string, next_action_at: string | null, starred_at: string | null = null) => ({
   company_name,

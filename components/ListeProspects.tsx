@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
-import { attribuerProspectsAction } from "@/app/actions";
+import { attribuerProspectsAction, moveProspectAction } from "@/app/actions";
 import {
   Avatar,
-  ConfidenceBadge,
   EtiquetteJanet,
   Icone,
   LastActionLine,
@@ -13,7 +12,7 @@ import {
   StatusChip,
 } from "@/components/ui";
 import { BoutonEtoile } from "@/components/BoutonEtoile";
-import { STATUS_EDGE, fmtDate, relative } from "@/lib/constants";
+import { STATUS_LABEL, STATUS_ORDER, fmtDate, relative } from "@/lib/constants";
 import { lienTel } from "@/lib/crm/telephone";
 import { composerHref } from "@/lib/crm/composer";
 import type { LastActionKind } from "@/lib/crm/lastAction";
@@ -52,17 +51,23 @@ export type LigneListe = {
 };
 
 /**
- * La liste des prospects (27/10) — UNE carte par fiche, au téléphone comme à
- * l'ordinateur, dans l'ordre que la page a calculé (lib/crm/ordreProspects.ts :
- * étoilées, puis dû, puis le reste).
+ * La liste des prospects (27/10, au soir — « moche, plein de cases qui ne
+ * servent à rien ») : UNE LIGNE par prospect, sans cadre autour de chaque
+ * élément, dans l'ordre que la page a calculé (lib/crm/ordreProspects.ts :
+ * étoilées, en retard, aujourd'hui, à venir, jamais appelées, rien de prévu).
  *
- * Chaque carte dit, d'un coup d'œil : la société et son étape, l'étoile,
- * « Ce qu'on sait » DÈS « À appeler » (la recherche faite avant le premier
- * appel — tronquée, entière au survol ou au tap), la prochaine action, ce
- * qu'a donné le dernier appel, et « Appeler ». Toute la carte ouvre la fiche
- * (lien étiré) ; l'étoile, « Appeler », « ✉ » et la case passent au-dessus.
+ * Sur la ligne, et rien d'autre : ⭐ · la société et son contact, « Ce qu'on
+ * sait » en gris dessous · l'ÉTAPE en petite liste déroulante (le même chemin
+ * que le glisser-déposer du pipeline : `moveProspectAction`, qui VERROUILLE) ·
+ * le dernier résultat · la relance en date ET heure · Appeler. Toute la ligne
+ * ouvre la fiche (lien étiré) ; l'étoile, l'étape, la note, « ✉ » et
+ * « Appeler » passent au-dessus. Sur téléphone, la ligne devient une carte
+ * compacte de trois lignes. La confiance n'y est plus : elle vit sur la fiche.
  *
- * ADMIN : une case par carte, et « Attribuer à… » — la base revérifie
+ * Sur la fiche d'un collègue, l'étape est du TEXTE (masquer, pas désactiver :
+ * la base refuserait après coup).
+ *
+ * ADMIN : une case par ligne, et « Attribuer à… » — la base revérifie
  * (`attribuer_prospects`, 031). Les membres arrivent en chaînes.
  */
 export function ListeProspects({
@@ -82,6 +87,12 @@ export function ListeProspects({
   const [cible, setCible] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; texte: string } | null>(null);
   const [pending, startTransition] = useTransition();
+  /** L'étape change AU CHOIX ; le serveur suit (et un refus la ramène seule). */
+  const [vue, appliquer] = useOptimistic(
+    lignes,
+    (liste: LigneListe[], patch: { id: string; status: ProspectStatus }) =>
+      liste.map((l) => (l.id === patch.id ? { ...l, status: patch.status } : l))
+  );
 
   const basculer = (set: Set<string>, id: string) => {
     const n = new Set(set);
@@ -89,6 +100,18 @@ export function ListeProspects({
     else n.add(id);
     return n;
   };
+
+  function changerEtape(id: string, status: ProspectStatus) {
+    setMessage(null);
+    startTransition(async () => {
+      appliquer({ id, status });
+      try {
+        await moveProspectAction(id, status);
+      } catch {
+        setMessage({ ok: false, texte: "L'étape n'a pas pu être enregistrée. Réessayez." });
+      }
+    });
+  }
 
   function attribuer() {
     if (!cible || choisies.size === 0) return;
@@ -113,21 +136,23 @@ export function ListeProspects({
     });
   }
 
-  const toutes = lignes.length > 0 && choisies.size === lignes.length;
+  const toutes = vue.length > 0 && choisies.size === vue.length;
 
   return (
     <>
-      {admin && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-          <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={toutes}
-              onChange={() => setChoisies(toutes ? new Set() : new Set(lignes.map((l) => l.id)))}
-              className="h-5 w-5 accent-celya-blue"
-            />
-            Tout sélectionner
-          </label>
+      {(admin || message) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          {admin && (
+            <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={toutes}
+                onChange={() => setChoisies(toutes ? new Set() : new Set(vue.map((l) => l.id)))}
+                className="h-5 w-5 accent-celya-blue"
+              />
+              Tout sélectionner
+            </label>
+          )}
           {message && (
             <span role="status" className={message.ok ? "text-emerald-300" : "text-rose-300"}>
               {message.texte}
@@ -136,144 +161,184 @@ export function ListeProspects({
         </div>
       )}
 
-      <ul className="animate-rise space-y-2">
-        {lignes.map((p) => {
+      {/* Entêtes de colonne — ordinateur seulement. */}
+      <div
+        aria-hidden
+        className={`hidden px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 lg:grid lg:gap-3 ${
+          admin ? GRILLE_ADMIN : GRILLE
+        }`}
+      >
+        {admin && <span />}
+        <span />
+        <span>Prospect</span>
+        <span>Étape</span>
+        <span>{filtreEmails ? "Dernier mail" : "Dernier résultat"}</span>
+        <span>Relance</span>
+        <span />
+      </div>
+
+      <ul className="card animate-rise divide-y divide-white/[0.05] overflow-hidden">
+        {vue.map((p) => {
           const tel = lienTel(p.phone);
           const noteOuverte = ouvertes.has(p.id);
+          const qui = [p.contact_name, p.city].filter(Boolean).join(" · ") || p.email || "";
           return (
             <li
               key={p.id}
-              className={`card relative border-l-4 px-3 py-2.5 transition active:scale-[0.998] sm:px-4 lg:hover:bg-white/[0.03] ${STATUS_EDGE[p.status]} ${
-                choisies.has(p.id) ? "ring-1 ring-celya-blue/50" : ""
-              }`}
+              className={`relative px-3 py-2.5 transition lg:grid lg:items-center lg:gap-3 lg:py-2 lg:hover:bg-white/[0.025] ${
+                admin ? GRILLE_ADMIN : GRILLE
+              } ${choisies.has(p.id) ? "bg-celya-blue/[0.06]" : ""}`}
             >
-              <div className="flex min-w-0 items-start gap-1">
-                {admin && (
-                  <label className="relative z-10 -ml-1 inline-flex h-11 w-9 shrink-0 cursor-pointer items-center justify-center">
-                    <input
-                      type="checkbox"
-                      checked={choisies.has(p.id)}
-                      onChange={() => setChoisies((s) => basculer(s, p.id))}
-                      aria-label={`Sélectionner ${p.company_name}`}
-                      className="h-5 w-5 accent-celya-blue"
-                    />
-                  </label>
-                )}
+              {admin && (
+                <label className="absolute left-0 top-1.5 z-10 inline-flex h-11 w-9 cursor-pointer items-center justify-center lg:static">
+                  <input
+                    type="checkbox"
+                    checked={choisies.has(p.id)}
+                    onChange={() => setChoisies((s) => basculer(s, p.id))}
+                    aria-label={`Sélectionner ${p.company_name}`}
+                    className="h-5 w-5 accent-celya-blue"
+                  />
+                </label>
+              )}
+
+              {/* ⭐ + qui c'est (téléphone : la première ligne, avec Appeler). */}
+              <div className={`flex min-w-0 items-start gap-1 lg:contents ${admin ? "pl-8 lg:pl-0" : ""}`}>
                 <BoutonEtoile
                   prospectId={p.id}
                   etoilee={p.etoilee}
                   modifiable={p.modifiable}
                   nom={p.company_name}
-                  className={p.modifiable ? "-ml-2" : "mt-3.5 mr-1"}
+                  className="-ml-2 -mt-1.5 lg:-my-1.5"
                 />
-
-                <div className="min-w-0 flex-1 pt-1.5 lg:grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-4">
-                  {/* Qui c'est, et ce qu'on en sait. */}
-                  <div className="min-w-0">
-                    <p className="flex min-w-0 items-center gap-1.5">
-                      {/* Pas de préchargement : 500 lignes, 500 rendus de fiche. */}
-                      <Link
-                        href={`/prospects/${p.id}`}
-                        prefetch={false}
-                        className="truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
-                      >
-                        {p.company_name}
-                      </Link>
-                      {p.janet && <EtiquetteJanet compact />}
-                    </p>
-                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                      <StatusChip status={p.status} />
-                      <span className="min-w-0 truncate text-xs text-slate-400">
-                        {[p.contact_name, p.city].filter(Boolean).join(" · ") || p.email || ""}
-                      </span>
-                      <span className="hidden lg:inline-flex">
-                        <ConfidenceBadge
-                          level={p.confidence_level}
-                          reason={p.confidence_reason}
-                          locked={p.confidence_locked}
-                        />
-                      </span>
-                    </div>
-                    {p.note && (
-                      <button
-                        type="button"
-                        onClick={() => setOuvertes((s) => basculer(s, p.id))}
-                        aria-expanded={noteOuverte}
-                        title={noteOuverte ? undefined : p.note}
-                        className={`relative z-10 mt-1.5 block w-full rounded-lg text-left text-xs leading-relaxed text-slate-300 ${
-                          noteOuverte ? "whitespace-pre-wrap" : "line-clamp-2"
-                        }`}
-                      >
-                        <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                          Ce qu&apos;on sait
-                        </span>
-                        {p.note}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Ce qui vient, et ce qui s'est passé. */}
-                  <div className="mt-1.5 min-w-0 space-y-1 text-xs lg:mt-0">
-                    <p className="flex min-w-0 items-center gap-1.5">
-                      <span className="shrink-0 text-[10px] uppercase tracking-wider text-slate-500 lg:hidden">
-                        Ensuite
-                      </span>
-                      <ProchaineActionTexte
-                        at={p.next_action_at}
-                        kind={p.next_action_kind}
-                        statut={p.status}
-                        plusRien={p.plus_rien}
-                        className="min-w-0 truncate"
-                      />
-                    </p>
-                    {p.last_kind && (
-                      <p className="truncate text-[11px]">
-                        <LastActionLine
-                          kind={p.last_kind}
-                          at={p.last_at}
-                          outcome={p.last_outcome}
-                          text={p.last_text}
-                          streak={p.last_no_answer_streak}
-                        />
-                      </p>
-                    )}
-                    {filtreEmails && p.dernier_mail && (
-                      <p className="text-[11px] text-slate-400">
-                        Dernier mail : {fmtDate(p.dernier_mail)} · {relative(p.dernier_mail)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Les gestes — au-dessus du lien étiré. */}
-                <div className="relative z-10 flex shrink-0 items-center">
-                  {p.responsable && (
-                    <span className="mr-1 hidden sm:inline-flex">
-                      <Avatar name={p.responsable} />
-                    </span>
-                  )}
-                  {p.email && p.modifiable && (
+                <div className="min-w-0 flex-1">
+                  <p className="flex min-w-0 items-center gap-1.5">
+                    {/* Pas de préchargement : 500 lignes, 500 rendus de fiche. */}
                     <Link
-                      href={composerHref(p.id)}
+                      href={`/prospects/${p.id}`}
                       prefetch={false}
-                      title={`Écrire à ${p.email}`}
-                      aria-label={`Écrire à ${p.company_name}`}
-                      className="hidden h-11 w-11 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white/[0.06] hover:text-celya-blue sm:inline-flex"
+                      className="truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
                     >
-                      <Icone nom="enveloppe" className="h-4 w-4" />
+                      {p.company_name}
                     </Link>
-                  )}
-                  {tel && (
-                    <a
-                      href={tel}
-                      aria-label={`Appeler ${p.company_name}`}
-                      title={p.phone ?? undefined}
-                      className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-celya-blue transition hover:bg-white/[0.06] active:bg-white/[0.06]"
+                    {qui && <span className="hidden min-w-0 truncate text-xs text-slate-400 sm:inline">{qui}</span>}
+                    {p.janet && <EtiquetteJanet compact />}
+                    {p.responsable && (
+                      <span className="shrink-0" title={p.responsable}>
+                        <Avatar name={p.responsable} />
+                      </span>
+                    )}
+                  </p>
+                  {qui && <p className="truncate text-xs text-slate-400 sm:hidden">{qui}</p>}
+                  {p.note && (
+                    <button
+                      type="button"
+                      onClick={() => setOuvertes((s) => basculer(s, p.id))}
+                      aria-expanded={noteOuverte}
+                      title={noteOuverte ? undefined : p.note}
+                      className={`relative z-10 mt-0.5 block w-full text-left text-xs leading-relaxed text-slate-500 ${
+                        noteOuverte ? "whitespace-pre-wrap text-slate-300" : "line-clamp-1"
+                      }`}
                     >
-                      <Icone nom="telephone" className="h-4 w-4" />
-                    </a>
+                      {p.note}
+                    </button>
                   )}
                 </div>
+                {tel && (
+                  <a
+                    href={tel}
+                    aria-label={`Appeler ${p.company_name}`}
+                    title={p.phone ?? undefined}
+                    className="relative z-10 -mr-1 -mt-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-celya-blue transition hover:bg-white/[0.06] lg:hidden"
+                  >
+                    <Icone nom="telephone" className="h-4 w-4" />
+                  </a>
+                )}
+              </div>
+
+              {/* L'étape, la relance, le dernier résultat (téléphone : une ligne). */}
+              <div className={`mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs lg:contents ${admin ? "pl-8 lg:pl-0" : ""}`}>
+                <div className="relative z-10 lg:min-w-0">
+                  {p.modifiable ? (
+                    // La PUCE se voit, le menu natif est posé dessus, transparent :
+                    // un tap ouvre le sélecteur du téléphone, et la règle des
+                    // 16 px (anti-zoom iOS, globals.css) ne grossit pas la ligne.
+                    <span className="relative inline-flex items-center rounded-full focus-within:ring-2 focus-within:ring-celya-blue/60">
+                      <StatusChip status={p.status} />
+                      <Icone nom="chevron" className="ml-1 h-2.5 w-2.5 text-slate-500" />
+                      <select
+                        value={p.status}
+                        onChange={(e) => changerEtape(p.id, e.target.value as ProspectStatus)}
+                        disabled={pending}
+                        aria-label={`Étape de ${p.company_name}`}
+                        title="Changer l'étape — ce choix est alors verrouillé"
+                        className="absolute inset-0 h-full min-h-[36px] w-full cursor-pointer appearance-none opacity-0"
+                      >
+                        {STATUS_ORDER.map((s) => (
+                          <option key={s} value={s} className="bg-[#121829] text-slate-100">
+                            {STATUS_LABEL[s]}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  ) : (
+                    <StatusChip status={p.status} />
+                  )}
+                </div>
+                <div className="min-w-0 truncate text-[11px] lg:order-none">
+                  {filtreEmails && p.dernier_mail ? (
+                    <span className="text-slate-400">
+                      {fmtDate(p.dernier_mail)} · {relative(p.dernier_mail)}
+                    </span>
+                  ) : p.last_kind ? (
+                    <LastActionLine
+                      kind={p.last_kind}
+                      at={p.last_at}
+                      outcome={p.last_outcome}
+                      text={p.last_text}
+                      streak={p.last_no_answer_streak}
+                    />
+                  ) : (
+                    <span className="text-slate-600 lg:inline">{p.status === "a_appeler" ? "Jamais appelée" : ""}</span>
+                  )}
+                </div>
+                <div className="min-w-0 text-[11px] lg:text-xs">
+                  <ProchaineActionTexte
+                    at={p.next_action_at}
+                    kind={p.next_action_kind}
+                    statut={p.status}
+                    plusRien={p.plus_rien}
+                    avecHeure
+                    couleurNeutre="text-slate-300"
+                    sansDate=""
+                    className="whitespace-nowrap"
+                  />
+                </div>
+              </div>
+
+              {/* Les gestes, ordinateur — au-dessus du lien étiré. */}
+              <div className="relative z-10 hidden items-center justify-end lg:flex">
+                {p.email && p.modifiable && (
+                  <Link
+                    href={composerHref(p.id)}
+                    prefetch={false}
+                    title={`Écrire à ${p.email}`}
+                    aria-label={`Écrire à ${p.company_name}`}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white/[0.06] hover:text-celya-blue"
+                  >
+                    <Icone nom="enveloppe" className="h-4 w-4" />
+                  </Link>
+                )}
+                {tel && (
+                  <a
+                    href={tel}
+                    aria-label={`Appeler ${p.company_name}`}
+                    title={p.phone ?? undefined}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-celya-blue transition hover:bg-celya-blue/10"
+                  >
+                    <Icone nom="telephone" className="h-3.5 w-3.5" />
+                    Appeler
+                  </a>
+                )}
               </div>
             </li>
           );
@@ -321,3 +386,9 @@ export function ListeProspects({
     </>
   );
 }
+
+/** Les colonnes de la ligne, ordinateur (classes complètes : règle JIT). */
+const GRILLE =
+  "lg:grid-cols-[2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";
+const GRILLE_ADMIN =
+  "lg:grid-cols-[2.25rem_2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";

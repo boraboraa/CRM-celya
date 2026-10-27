@@ -22,6 +22,7 @@ import {
 import { entreeFormulaire } from "@/lib/crm/ligneProspect";
 import { createProspectCore } from "@/lib/crm/prospects";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
+import { normaliserSecteur } from "@/lib/crm/secteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
   poserRendezVous,
@@ -168,7 +169,7 @@ export async function updateProspectAction(fd: FormData) {
     email: str(fd, "email")?.toLowerCase() ?? null,
     phone: str(fd, "phone"),
     website: str(fd, "website"),
-    sector: str(fd, "sector"),
+    sector: normaliserSecteur(str(fd, "sector")),
     // Stockée TELLE QUELLE : adresse libre ou lien Maps, on ne réécrit pas.
     address: str(fd, "address"),
     city: str(fd, "city"),

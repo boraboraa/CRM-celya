@@ -32,6 +32,7 @@ import { isoToLocalInput } from "@/lib/time";
 import { SOURCES, STATUS_ORDER, STATUS_LABEL } from "@/lib/constants";
 import type { ProspectStatus } from "@/lib/types";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
+import { normaliserSecteur } from "@/lib/crm/secteurs";
 import {
   normalizeBelgianPhone,
   findDuplicates,
@@ -282,7 +283,7 @@ export async function extractProspectAction(input: {
     phone: normalizeBelgianPhone(raw.phone),
     email: cleanEmail(raw.email),
     website: cleanWebsite(raw.website),
-    sector: cleanStr(raw.sector, 80),
+    sector: normaliserSecteur(cleanStr(raw.sector, 80)),
     address: cleanStr(raw.address, ADRESSE_MAX),
     city: cleanStr(raw.city, 80),
     source: SOURCES.includes(cleanStr(raw.source) ?? "")

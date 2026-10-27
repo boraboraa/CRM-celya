@@ -1,0 +1,30 @@
+-- ============================================================
+-- 030 — Une étape « Essai gratuit » avant « Gagné » (27 octobre 2026)
+--
+-- Le « win » d'un étudiant du Sales Trophy (à partir du 2 novembre), c'est un
+-- client EN ESSAI GRATUIT. Il n'avait nulle part où aller : « Proposition »
+-- dit trop peu, « Gagné » trop tôt (l'essai n'a pas encore converti).
+--
+--   a_appeler → contacte → rendez_vous → a_rappeler → proposition
+--             → essai_gratuit → gagne / perdu
+--
+-- MANUELLE uniquement (lib/crm/status.ts, MANUAL_ONLY) : aucun fait ne la
+-- déduit. On y entre par un clic sur l'étape, le glisser-déposer, l'issue de
+-- débrief « Essai gratuit démarré », ou `mettre_a_jour_statut` (MCP).
+-- Ce n'est PAS une fin de parcours : une fiche en essai garde ses relances et
+-- ses débriefs (la 023 ne regarde que gagne / perdu) — c'est le suivi de fin
+-- d'essai. `gagne` = l'essai est devenu payant ; `perdu` = il n'a pas converti.
+--
+-- SEULE dans sa migration, et c'est voulu (même raison que la 026) : Postgres
+-- refuse d'utiliser une valeur d'enum dans la transaction qui l'a ajoutée
+-- (« unsafe use of new value »). La 031 — qui pose `essai_gratuit_at` et
+-- l'issue de débrief correspondante — s'applique donc APRÈS celle-ci.
+--
+-- Additive et compatible avec le code en production : aucune ligne ne prend
+-- la valeur tant que le code du même lot n'est pas déployé, et l'affichage
+-- tolère un statut inconnu (normalizeStatus).
+-- Non réversible au sens strict (Postgres ne retire pas une valeur d'enum) ;
+-- inerte tant qu'aucune fiche ne la porte.
+-- ============================================================
+
+alter type public.prospect_status add value if not exists 'essai_gratuit' before 'gagne';

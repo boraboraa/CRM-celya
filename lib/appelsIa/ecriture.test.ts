@@ -99,6 +99,13 @@ const secteurs: [string | null, string][] = [
   ["Chauffage / sanitaire", "autre"],
   ["", "autre"],
   [null, "autre"],
+  // La liste fixe (031) : correspondance explicite — « auto » n'est pas un garage.
+  ["Auto-école", "autre"],
+  ["Kiné / paramédical", "cabinet"],
+  ["Infirmier à domicile", "cabinet"],
+  ["Centre médical / maison médicale", "cabinet"],
+  ["Opticien / audioprothésiste", "autre"],
+  ["Syndic de copropriété", "autre"],
 ];
 for (const [s, attendu] of secteurs) verifie(`secteur « ${s} » → ${attendu}`, secteurDe(s), attendu);
 

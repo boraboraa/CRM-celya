@@ -11,6 +11,7 @@
 // Chemins RELATIFS avec extension : le test s'exécute tel quel sous node.
 import { normalizeStatus } from "../constants.ts";
 import { ADRESSE_MAX } from "./maps.ts";
+import { normaliserSecteur } from "./secteurs.ts";
 
 export type NewProspectInput = {
   company_name?: string | null;
@@ -109,7 +110,9 @@ export function ligneProspect(input: NewProspectInput, userId: string) {
     email: trimOrNull(input.email)?.toLowerCase() ?? null,
     phone: trimOrNull(input.phone),
     website: trimOrNull(input.website),
-    sector: trimOrNull(input.sector, 80),
+    // La liste fixe (031) : « garage » → « Garage / carrosserie ». Le trigger
+    // en base ferait de même ; la ligne renvoyée est déjà juste.
+    sector: normaliserSecteur(trimOrNull(input.sector, 80)),
     address: trimOrNull(input.address, ADRESSE_MAX),
     city: trimOrNull(input.city, 80),
     status: normalizeStatus(trimOrNull(input.status)),

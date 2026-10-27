@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeStatus } from "@/lib/constants";
 import { findDuplicates, normalizeBelgianPhone, type DuplicateHit } from "./dedup";
+import { normaliserSecteur } from "./secteurs";
 import type { Viewer } from "./access";
 
 // La ligne et la lecture du formulaire vivent dans un module pur, testé
@@ -260,7 +261,7 @@ export async function importProspectsCore(
       email,
       phone: clean(row.phone),
       website: clean(row.website),
-      sector: clean(row.sector),
+      sector: normaliserSecteur(clean(row.sector)),
       city: clean(row.city),
       status: toStatus(row.status),
       source: clean(row.source) ?? "Import CSV",

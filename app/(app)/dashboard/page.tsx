@@ -1,3 +1,4 @@
+import { etoileesDabord } from "@/lib/crm/ordreProspects";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
@@ -98,7 +99,7 @@ export default async function TodoPage({
   const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
   const TASK_SELECT =
-    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind)";
+    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind, starred_at)";
 
   // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un
@@ -152,7 +153,7 @@ export default async function TodoPage({
       supabase
         .from("emails")
         .select(
-          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id)"
+          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id, starred_at)"
         )
         .eq("direction", "entrant")
         .eq("triage", "a_traiter")
@@ -176,7 +177,7 @@ export default async function TodoPage({
     filtrerProspects(
       supabase
         .from("prospects")
-        .select("id, company_name, contact_name, next_action_at, next_action_kind")
+        .select("id, company_name, contact_name, next_action_at, next_action_kind, starred_at")
         .not("status", "in", "(gagne,perdu)"),
       perimetre,
       viewer
@@ -251,9 +252,14 @@ export default async function TodoPage({
   const aMoi = (ownerId: string | null | undefined) =>
     viewer.isAdmin || ownerId === viewer.userId;
 
-  const replies = (
-    (repliesRes.data ?? []) as unknown as ReplyCardEmail[]
-  ).filter((e) => aMoi(e.prospects?.owner_id));
+  // Les étoilées en tête de CHAQUE zone (031) — jamais une zone de plus :
+  // l'ordre propre à la zone vaut ensuite (lib/crm/ordreProspects.ts).
+  const replies = etoileesDabord(
+    ((repliesRes.data ?? []) as unknown as (ReplyCardEmail & {
+      prospects?: { starred_at?: string | null } | null;
+    })[]).filter((e) => aMoi(e.prospects?.owner_id)),
+    (e) => Boolean(e.prospects?.starred_at)
+  );
   const membres = (membresRes.data ?? []) as {
     id: string;
     full_name: string | null;
@@ -316,6 +322,7 @@ export default async function TodoPage({
       phone: string | null;
       city: string | null;
       status: string;
+      starred_at?: string | null;
     }
   >();
   // Les fiches des rendez-vous, et — pour l'admin — ceux que Janet a posés
@@ -327,7 +334,7 @@ export default async function TodoPage({
     meetingProspectIds.length > 0
       ? supabase
           .from("prospects")
-          .select("id, company_name, contact_name, phone, city, status")
+          .select("id, company_name, contact_name, phone, city, status, starred_at")
           .in("id", meetingProspectIds)
       : Promise.resolve({ data: [] }),
     viewer.isAdmin && meetingsToday.length > 0
@@ -344,6 +351,7 @@ export default async function TodoPage({
     phone: string | null;
     city: string | null;
     status: string;
+    starred_at: string | null;
   }[]) {
     meetingProspects.set(p.id, p);
   }
@@ -351,9 +359,9 @@ export default async function TodoPage({
   // un RDV perso, jamais une fiche gagnée ou perdue (023 : sa fiche ne le dit
   // plus, cette zone non plus), UN SEUL rendez-vous par fiche (le plus récent ;
   // la base clôt les plus anciens « remplacés » dès qu'il est débriefé, 027).
-  const debriefMeetings: DebriefMeeting[] = rdvADebriefer(
-    aDebriefer,
-    (id) => meetingProspects.get(id)?.status
+  const debriefMeetings: DebriefMeeting[] = etoileesDabord(
+    rdvADebriefer(aDebriefer, (id) => meetingProspects.get(id)?.status),
+    (m) => Boolean(m.prospect_id && meetingProspects.get(m.prospect_id)?.starred_at)
   ).map((m) => ({
       id: m.id,
       title: m.title,
@@ -396,8 +404,15 @@ export default async function TodoPage({
     return rdv ? { ...t, rdv_a_debriefer: rdv } : t;
   };
 
-  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
-  const today = todayAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
+  const etoilee = (t: TaskWithProspect) => Boolean(t.prospects?.starred_at);
+  const overdue = etoileesDabord(
+    overdueAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief),
+    etoilee
+  );
+  const today = etoileesDabord(
+    todayAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief),
+    etoilee
+  );
 
   // Le résultat du prédicat, pas le prédicat : `TaskList` est un composant
   // CLIENT, et une fonction ne traverse pas la frontière serveur → client
@@ -421,7 +436,7 @@ export default async function TodoPage({
       .filter((id) => !dueIds.has(id) && !replyIds.has(id))
   );
 
-  const waiting: WaitingProspect[] = openProspectRows
+  const waitingTries: WaitingProspect[] = openProspectRows
     .filter((p) => calmIds.has(p.id))
     .map((p) => ({
       ...p,
@@ -439,6 +454,9 @@ export default async function TodoPage({
         new Date(b.next_action_at).getTime()
       );
     });
+  const waiting = etoileesDabord(waitingTries, (p) =>
+    Boolean((p as WaitingProspect & { starred_at?: string | null }).starred_at)
+  );
 
   // L'ordre des lignes de l'écran, pour « Fiche suivante » sur la fiche
   // ouverte d'ici — exactement ce qui s'affiche, dans l'ordre des zones.

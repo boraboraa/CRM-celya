@@ -60,7 +60,12 @@ export type Prospect = {
   currency: string;
   owner_id: string | null;
   tags: string[];
+  /** « Ce qu'on sait » — affiché en tête de fiche dès « À appeler » (27/10). */
   notes: string | null;
+  /** Étoilée par son responsable (031) : en tête de la liste et de « À faire ». */
+  starred_at?: string | null;
+  /** Dernière entrée en « Essai gratuit » (031) — compte les essais. */
+  essai_gratuit_at?: string | null;
   /**
    * La prochaine action, c'est le prochain rendez-vous de la fiche tant qu'il
    * n'est pas débriefé ; sinon, sa relance la plus proche — sauf relance posée

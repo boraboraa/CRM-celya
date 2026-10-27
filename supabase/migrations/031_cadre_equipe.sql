@@ -339,3 +339,109 @@ revoke all on function public.doublons_equipe_pour(uuid, text[], text[]) from pu
 grant execute on function public.doublons_equipe_pour(uuid, text[], text[]) to service_role;
 revoke all on function public.doublons_equipe(text[], text[]) from public, anon;
 grant execute on function public.doublons_equipe(text[], text[]) to authenticated;
+
+-- ------------------------------------------------------------
+-- 4. L'étoile
+--
+-- Les fiches qu'un commercial juge les plus chaudes, il les étoile : elles
+-- passent en tête de sa liste et de chaque zone de « À faire ». Une date
+-- plutôt qu'un booléen : « étoilée depuis » se lit, et l'ordre entre deux
+-- étoilées reste stable.
+--
+-- AUCUNE policy nouvelle : l'étoile s'écrit par `prospects_update`, dont le
+-- WITH CHECK teste la fiche (propriétaire ou admin). Un encadrant VOIT
+-- l'étoile de son étudiant (lecture élargie par `encadre`, 021) et ne peut
+-- pas la poser ni la retirer — vérifié par la recette.
+-- ------------------------------------------------------------
+
+alter table public.prospects
+  add column if not exists starred_at timestamptz;
+
+comment on column public.prospects.starred_at is
+  'Étoilée par son responsable (031) — en tête de la liste et de « À faire ». null = pas d''étoile.';
+
+-- ------------------------------------------------------------
+-- 5. L'attribution — seul l'admin donne une fiche
+--
+-- `prospects_insert` n'exigeait que `is_member()` : un commercial pouvait
+-- créer une fiche AU NOM d'un autre (owner_id fourni par l'appelant). Le
+-- trou existait depuis le début ; il comptait peu tant que personne n'avait
+-- de raison de le faire. Avec quatre étudiants en compétition et la règle
+-- « au premier qui l'enregistre », il devient le moyen de pousser une fiche
+-- dans le portefeuille d'un autre — ou de contourner le doublon d'équipe.
+--
+-- Le WITH CHECK décrit OÙ la ligne atterrit (la leçon de la 020) : chez moi,
+-- ou n'importe où pour l'admin. `prospects_set_owner` (BEFORE INSERT, 015)
+-- remplit un owner_id nul par `auth.uid()` AVANT ce contrôle : les insertions
+-- qui ne précisent rien passent comme avant. Le service_role (MCP, Janet)
+-- n'est pas soumis à la RLS ; le connecteur pose lui-même le porteur du jeton.
+-- ------------------------------------------------------------
+
+drop policy if exists prospects_insert on public.prospects;
+create policy prospects_insert on public.prospects
+  for insert to authenticated
+  with check (public.is_member() and (public.is_admin() or owner_id = auth.uid()));
+
+-- Réattribuer des fiches : l'admin seul, en un geste, tracé au journal.
+--   - la fiche change de responsable ;
+--   - ses relances OUVERTES suivent (sinon le nouveau responsable ne pourrait
+--     pas les cocher, et « À faire » les montrerait à l'ancien) ;
+--   - ses rendez-vous À VENIR suivent (décision de Bora, 27/10) ; les passés
+--     restent à l'ancien — c'est lui qui les a tenus, c'est à lui de les
+--     débriefer… ou au nouveau, qui le peut aussi par le débrief implicite ;
+--   - une ligne au journal : « Fiche attribuée à Hakim (par Bora) ».
+-- `security invoker` : la RLS de l'admin s'applique, et la fonction revérifie
+-- le rôle elle-même (42501) — masquer un bouton n'a jamais interdit un appel.
+-- Rien ne bouge sur une fiche qui est déjà au bon responsable.
+create or replace function public.attribuer_prospects(p_ids uuid[], p_owner uuid)
+returns integer
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_nom   text;
+  v_par   text;
+  v_n     integer := 0;
+  r       record;
+begin
+  if not public.is_admin() then
+    raise exception 'Seul l''administrateur attribue une fiche' using errcode = '42501';
+  end if;
+  select coalesce(nullif(btrim(u.full_name), ''), u.email) into v_nom
+    from public.crm_users u where u.id = p_owner and u.is_active;
+  if v_nom is null then
+    raise exception 'Responsable inconnu ou inactif' using errcode = '22023';
+  end if;
+  select coalesce(nullif(btrim(u.full_name), ''), u.email) into v_par
+    from public.crm_users u where u.id = auth.uid();
+
+  for r in
+    select p.id, p.owner_id
+      from public.prospects p
+     where p.id = any(p_ids) and p.owner_id is distinct from p_owner
+  loop
+    update public.prospects set owner_id = p_owner where id = r.id;
+    update public.tasks set assignee_id = p_owner
+     where prospect_id = r.id and status = 'a_faire';
+    update public.meetings set owner_id = p_owner
+     where prospect_id = r.id and kind = 'prospect'
+       and starts_at > now() and status in ('prevu', 'confirme', 'reporte');
+    insert into public.activities
+      (prospect_id, author_id, type, subject, body, occurred_at, is_draft, is_exchange)
+    values
+      (r.id, auth.uid(), 'note',
+       'Fiche attribuée à ' || v_nom || coalesce(' (par ' || v_par || ')', ''),
+       'Ses relances ouvertes et ses rendez-vous à venir suivent le nouveau responsable.',
+       now(), false, false);
+    v_n := v_n + 1;
+  end loop;
+  return v_n;
+end;
+$$;
+
+comment on function public.attribuer_prospects(uuid[], uuid) is
+  'Réattribution par l''admin (031) : la fiche, ses relances ouvertes, ses RDV à venir ; une ligne au journal. Renvoie le nombre de fiches qui ont changé.';
+
+revoke all on function public.attribuer_prospects(uuid[], uuid) from public, anon;
+grant execute on function public.attribuer_prospects(uuid[], uuid) to authenticated;

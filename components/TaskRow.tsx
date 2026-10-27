@@ -33,6 +33,8 @@ export type TaskWithProspect = {
     contact_name: string | null;
     phone?: string | null;
     email?: string | null;
+    /** Étoilée (031) : une étoile devant le nom, et la ligne en tête de zone. */
+    starred_at?: string | null;
     /**
      * La prochaine action de la fiche (« À faire » seulement) : un rendez-vous
      * à venir s'y lit, et la ligne le dit (024) — la relance reste à faire,
@@ -205,6 +207,11 @@ export function TaskRow({
                 prefetch={false}
                 className="text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
               >
+                {task.prospects.starred_at && (
+                  <span className="mr-1 inline-flex align-[-2px] text-amber-300" title="Étoilée">
+                    <Icone nom="etoile" className="h-3.5 w-3.5 fill-current" />
+                  </span>
+                )}
                 {task.prospects.company_name}
               </Link>
               {tel && (

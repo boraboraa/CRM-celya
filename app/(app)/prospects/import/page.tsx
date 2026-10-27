@@ -18,7 +18,11 @@ export default async function ImportPage() {
     .eq("is_active", true)
     .order("full_name");
 
-  const members = (data ?? []) as Pick<Profile, "id" | "full_name" | "email">[];
+  // Seul l'admin choisit le responsable d'un import ; un commercial importe
+  // pour lui-même (031 : la base refuserait une fiche posée au nom d'un autre).
+  const tous = (data ?? []) as Pick<Profile, "id" | "full_name" | "email">[];
+  const members =
+    session.me.role === "admin" ? tous : tous.filter((m) => m.id === session.userId);
 
   return (
     <>

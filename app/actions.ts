@@ -161,6 +161,55 @@ export async function ajoutRapideAction(input: {
 }
 
 /**
+ * L'étoile d'une fiche (031) — un tap, optimiste côté écran. La base tranche :
+ * `prospects_update` n'accepte que le responsable (ou l'admin), donc un
+ * encadrant qui toucherait l'étoile de son étudiant modifie ZÉRO ligne — on
+ * le dit au lieu de faire croire que c'est fait.
+ */
+export async function etoilerProspectAction(prospectId: string, etoile: boolean): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const { data, error } = await supabase
+    .from("prospects")
+    .update({ starred_at: etoile ? new Date().toISOString() : null })
+    .eq("id", prospectId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) return { error: "Seul le responsable de la fiche peut l'étoiler." };
+  revalidateProspect(prospectId);
+  return {};
+}
+
+/**
+ * Réattribuer des fiches (031) — l'admin seul, revérifié EN BASE
+ * (`attribuer_prospects` lève 42501 hors admin). Les relances ouvertes et les
+ * rendez-vous à venir suivent ; une ligne au journal de chaque fiche.
+ */
+export async function attribuerProspectsAction(
+  ids: string[],
+  ownerId: string
+): Promise<{ error?: string; n?: number }> {
+  const { supabase } = await currentUserId();
+  const propres = [...new Set(ids.filter((x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)))];
+  if (propres.length === 0) return { error: "Aucune fiche sélectionnée." };
+  if (propres.length > 500) return { error: "500 fiches au plus par attribution." };
+  const { data, error } = await supabase.rpc("attribuer_prospects", { p_ids: propres, p_owner: ownerId });
+  if (error) {
+    return {
+      error:
+        error.code === "42501"
+          ? "Seul l'administrateur attribue une fiche."
+          : error.code === "PGRST202"
+            ? "L'attribution demande la migration 031, pas encore appliquée."
+            : error.message,
+    };
+  }
+  revalidatePath("/prospects");
+  revalidatePath("/dashboard");
+  revalidatePath("/agenda");
+  return { n: typeof data === "number" ? data : propres.length };
+}
+
+/**
  * « Déjà suivie dans l'équipe ? » — pour l'ajout rapide, à la frappe (031).
  * La base répond par des booléens : rien sur la fiche d'un autre. `peutForcer`
  * dit si le compte (admin) peut créer malgré tout.
@@ -1164,8 +1213,12 @@ export async function importProspectsAction(
   ownerId: string | null
 ): Promise<ImportResult> {
   const { supabase, userId } = await currentUserId();
+  // Seul l'admin choisit le responsable d'un import (031 : `prospects_insert`
+  // refuserait de toute façon une fiche posée au nom d'un autre).
+  const session = await getSession();
+  const owner = session?.me?.role === "admin" ? ownerId : userId;
 
-  const result = await importProspectsCore(supabase, userId, rows, ownerId);
+  const result = await importProspectsCore(supabase, userId, rows, owner);
 
   if (result.inserted > 0) {
     revalidatePath("/prospects");

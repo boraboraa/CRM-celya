@@ -24,6 +24,7 @@ import {
   rdvADebriefer,
   estIssueDebrief,
   issueImplicite,
+  rdvClosParEssai,
   ISSUES_TENUES,
   type RdvEnAttente,
 } from "./debrief.ts";
@@ -179,6 +180,27 @@ const zone = rdvADebriefer(
 );
 verifie("un seul RDV par fiche — le plus récent ; ni perso, ni fiche close, ni à venir, ni déjà débriefé ; une fiche en ESSAI n'est pas close",
   zone.map((m) => m.id), ["vivier-prev", "nice-06", "essai"]);
+
+// --- 2b. L'essai gratuit clôt le RDV en attente (miroir du trigger 033) -----
+console.log("\n— l'essai gratuit clôt le RDV en attente —");
+const moto = (id: string, starts_at: string, status = "prevu", extra: Partial<RdvEnAttente> = {}): RdvEnAttente =>
+  ({ id, prospect_id: "moto", kind: "prospect", status, starts_at, ...extra });
+const rdvMoto = [moto("rdv-29-09", RDV_29_09), moto("rdv-futur", FUTUR)];
+verifie("100% MOTO : passer en essai clôt le RDV du 29/09 (commencé, en attente)",
+  rdvClosParEssai(rdvMoto, "rendez_vous", "essai_gratuit", NOW)?.id, "rdv-29-09");
+verifie("un RDV À VENIR n'est jamais touché",
+  rdvClosParEssai([moto("rdv-futur", FUTUR)], "proposition", "essai_gratuit", NOW), null);
+verifie("le plus RÉCENT des RDV commencés (les autres : remplacés par la base)",
+  rdvClosParEssai([moto("vieux", "2026-09-10T08:00:00Z"), moto("recent", RDV_29_09, "reporte")], "contacte", "essai_gratuit", NOW)?.id,
+  "recent");
+verifie("déjà en essai : rien (pas de passage)", rdvClosParEssai(rdvMoto, "essai_gratuit", "essai_gratuit", NOW), null);
+verifie("une autre étape : rien", rdvClosParEssai(rdvMoto, "rendez_vous", "proposition", NOW), null);
+verifie("un RDV déjà débriefé, annulé ou perso : rien",
+  rdvClosParEssai([
+    moto("deb", RDV_29_09, "prevu", { debriefed_at: "2026-10-01T08:00:00Z" }),
+    moto("ann", RDV_29_09, "annule"),
+    { id: "perso", prospect_id: null, kind: "perso", status: "prevu", starts_at: RDV_29_09 },
+  ], "rendez_vous", "essai_gratuit", NOW), null);
 
 // --- 3. L'étape « À rappeler » ----------------------------------------------
 console.log("\n— l'étape « À rappeler » —");

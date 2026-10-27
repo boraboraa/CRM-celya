@@ -296,3 +296,38 @@ export function rdvADebriefer<R extends RdvEnAttente>(
     (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()
   );
 }
+
+// ---------------------------------------------------------------------------
+// L'essai gratuit clôt le rendez-vous en attente — miroir du trigger SQL (033)
+// ---------------------------------------------------------------------------
+
+/**
+ * Le rendez-vous qu'un PASSAGE en « Essai gratuit » clôt (`honore` / `essai`,
+ * ligne au journal). La règle s'exécute EN SQL (`prospects_essai_clot_rdv`,
+ * migration 033 — tous les chemins y passent : clic sur l'étape,
+ * glisser-déposer, formulaire, `mettre_a_jour_statut`) ; cette fonction en est
+ * la recopie, jouée par `test:debrief`.
+ *
+ * 100% MOTO, en essai depuis le 12/10, réclamait encore le débrief de son RDV
+ * du 29/09 : entrer en essai DIT ce qu'a donné le rendez-vous. Seul le RDV de
+ * prospect en attente le plus récent, DÉJÀ COMMENCÉ, est clos — les plus
+ * anciens le sont « remplacés » par la base (027) ; un RDV À VENIR n'est
+ * jamais touché. Rester en essai (ou y être déjà) ne clôt rien.
+ */
+export function rdvClosParEssai<R extends RdvEnAttente>(
+  meetings: R[],
+  ancienStatut: string | null | undefined,
+  nouveauStatut: string,
+  now: number = Date.now()
+): R | null {
+  if (nouveauStatut !== "essai_gratuit" || ancienStatut === "essai_gratuit") return null;
+  let choisi: R | null = null;
+  for (const m of meetings) {
+    if (m.kind !== "prospect" || !m.prospect_id) continue;
+    if (!["prevu", "confirme", "reporte"].includes(m.status)) continue;
+    if (m.debriefed_at) continue;
+    if (new Date(m.starts_at).getTime() > now) continue;
+    if (!choisi || new Date(m.starts_at).getTime() > new Date(choisi.starts_at).getTime()) choisi = m;
+  }
+  return choisi;
+}

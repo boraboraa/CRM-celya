@@ -260,3 +260,130 @@ $$;
 
 comment on function public.compteurs_pour(uuid[], date, date) is
   'La règle de comptage (031, 033) — appels, réponses (rappeler · intéressé · suivi par email · refus), intéressés, RDV, essais, numéros sur [début, fin) en dates de Bruxelles. Recopie : lib/crm/compteurs.ts. Service_role seul.';
+
+
+-- ------------------------------------------------------------
+-- 4. Une fiche qui passe en essai gratuit ne réclame plus de débrief
+--
+-- 100% MOTO, passée en « Essai gratuit » le 12/10, réclamait encore le débrief
+-- de son rendez-vous du 29/09 : l'essai ne fermait rien. Or entrer en essai
+-- dit ce qu'a donné le rendez-vous — c'est l'issue « Essai gratuit démarré »
+-- (031), posée par un autre chemin (un clic sur l'étape, le glisser-déposer,
+-- `mettre_a_jour_statut`).
+--
+-- Règle : au PASSAGE en essai_gratuit, le rendez-vous de prospect en attente
+-- le plus récent, DÉJÀ COMMENCÉ, est clos `honore` / `essai`, avec une ligne au
+-- journal rattachée au RDV (meeting_id : sans effet sur le débrief implicite).
+-- Les plus anciens sont clos « remplacés » par meetings_rdv_remplaces (027),
+-- dans la foulée — exactement comme un débrief explicite.
+-- Un rendez-vous À VENIR n'est jamais touché (une démo d'installation pendant
+-- l'essai reste légitime).
+--
+-- Quand le débrief explicite « Essai gratuit démarré » passe la fiche en essai,
+-- `cloturerRendezVous` a DÉJÀ clos le rendez-vous : le trigger ne trouve rien,
+-- aucune ligne en double.
+--
+-- `security definer`, borné aux rendez-vous de la fiche modifiée : Nathan doit
+-- pouvoir clore un RDV que Bora a posé sur SA fiche (meetings_update est
+-- réservé au propriétaire du RDV) ; le changement d'étape a déjà passé la RLS
+-- de la fiche (prospects_update). Sa recopie lisible : `rdvClosParEssai`
+-- (lib/crm/debrief.ts).
+-- ------------------------------------------------------------
+
+create or replace function public.prospects_essai_clot_rdv()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_rdv record;
+begin
+  if new.status::text <> 'essai_gratuit'
+     or old.status::text is not distinct from 'essai_gratuit' then
+    return new;
+  end if;
+
+  select m.id, m.starts_at into v_rdv
+    from public.meetings m
+   where m.prospect_id = new.id
+     and m.kind = 'prospect'
+     and public.rdv_vivant(m.status)
+     and m.debriefed_at is null
+     and m.starts_at <= now()
+   order by m.starts_at desc
+   limit 1;
+  if v_rdv.id is null then
+    return new;
+  end if;
+
+  update public.meetings
+     set status = 'honore',
+         debriefed_at = now(),
+         debrief_issue = 'essai'
+   where id = v_rdv.id;
+
+  insert into public.activities
+    (prospect_id, author_id, type, subject, body, occurred_at, is_draft, is_exchange, meeting_id)
+  values (
+    new.id,
+    coalesce(auth.uid(), new.owner_id),
+    'note',
+    'RDV du ' || to_char(v_rdv.starts_at at time zone 'Europe/Brussels', 'DD/MM')
+      || ' clos : fiche passée en essai gratuit',
+    'La fiche est passée en « Essai gratuit » : le rendez-vous du '
+      || public.jour_heure_court(v_rdv.starts_at)
+      || ' est considéré comme tenu, issue « Essai gratuit démarré ».',
+    now(),
+    false,
+    false,
+    v_rdv.id
+  );
+  return new;
+end $$;
+revoke all on function public.prospects_essai_clot_rdv() from public, anon, authenticated;
+
+create trigger prospects_essai_clot_rdv
+  after update of status on public.prospects
+  for each row execute function public.prospects_essai_clot_rdv();
+
+-- La reprise — décidée avec Bora le 27/10 : les fiches DÉJÀ en essai dont un
+-- rendez-vous commencé AVANT leur entrée en essai attend encore son débrief.
+-- Mesurée le 27/10 au soir : 100% MOTO et son RDV du 29/09, rien d'autre.
+-- Même effet que le trigger ; la ligne de journal est datée de l'entrée en
+-- essai (`essai_gratuit_at`), pour que la chronologie reste vraie et que la
+-- « dernière action » de la carte ne change pas.
+with a_clore as (
+  select distinct on (p.id)
+         p.id as prospect_id, p.owner_id, p.essai_gratuit_at, m.id as meeting_id, m.starts_at
+    from public.prospects p
+    join public.meetings m on m.prospect_id = p.id
+   where p.status::text = 'essai_gratuit'
+     and p.essai_gratuit_at is not null
+     and m.kind = 'prospect'
+     and public.rdv_vivant(m.status)
+     and m.debriefed_at is null
+     and m.starts_at <= p.essai_gratuit_at
+   order by p.id, m.starts_at desc
+),
+clos as (
+  update public.meetings m
+     set status = 'honore',
+         debriefed_at = now(),
+         debrief_issue = 'essai'
+    from a_clore c
+   where m.id = c.meeting_id
+  returning c.*
+)
+insert into public.activities
+  (prospect_id, author_id, type, subject, body, occurred_at, is_draft, is_exchange, meeting_id)
+select prospect_id,
+       owner_id,
+       'note',
+       'RDV du ' || to_char(starts_at at time zone 'Europe/Brussels', 'DD/MM')
+         || ' clos : fiche passée en essai gratuit',
+       'La fiche est passée en « Essai gratuit » le '
+         || to_char(essai_gratuit_at at time zone 'Europe/Brussels', 'DD/MM')
+         || ' : le rendez-vous du ' || public.jour_heure_court(starts_at)
+         || ' est considéré comme tenu, issue « Essai gratuit démarré » (reprise du 27/10).',
+       essai_gratuit_at,
+       false,
+       false,
+       meeting_id
+  from clos;

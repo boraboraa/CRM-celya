@@ -24,8 +24,11 @@ part la première, les écrans neufs disent seulement « pas encore disponible �
 Voir « Le cadre de l'équipe de vente ».
 
 La 031 **écrit des données** une fois : la normalisation des secteurs
-(52 fiches sur 98 à 15h le 27/10, « garage » → « Garage / carrosserie »…).
-Rien d'autre.
+(52 fiches sur 98 à 15h le 27/10, **70 en fin de journée** — la base grossit :
+le chiffre réel sera celui du jour de l'application ; « garage » → « Garage /
+carrosserie »…). Rien d'autre. Recette rejouée sur la version finale
+(md5 `9d84716e…`) : **63 OK, 0 faute**, assertions « essai gratuit » sautées
+jusqu'à la 030.
 
 Comptes de banc du 27/10 : `mobile-commercial@celya.test` recréé, puis
 **supprimé** (`crm-admin delete_user`, ses 7 fiches retirées) ;

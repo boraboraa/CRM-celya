@@ -392,6 +392,7 @@ export default async function TodoPage({
             id: m.prospect_id,
             company_name:
               meetingProspects.get(m.prospect_id)?.company_name ?? "Fiche prospect",
+            contact_name: meetingProspects.get(m.prospect_id)?.contact_name ?? null,
           }
         : null,
     }));

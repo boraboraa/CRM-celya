@@ -24,6 +24,7 @@ import { createProspectCore, nomsDesProprietaires } from "@/lib/crm/prospects";
 import { doublonsEquipe } from "@/lib/crm/doublonsEquipe";
 import { estDoublonEquipe, phraseDoublon } from "@/lib/crm/doublons";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
+import { CONTACT_MAX } from "@/lib/crm/contactPropose";
 import { normaliserSecteur } from "@/lib/crm/secteurs";
 import { DEBUT_SALES_TROPHY, lundiDe } from "@/lib/crm/compteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
@@ -454,6 +455,51 @@ export async function setProspectAddressAction(
 
   revalidateProspect(id);
   return { success: "Adresse enregistrée." };
+}
+
+/**
+ * Le nom de la personne, PROPOSÉ par la pastille « Contact → … » (résultat
+ * d'appel, débrief) ou saisi dans « Nom de la personne » — écrit seulement sur
+ * ce geste, et seulement `contact_name` (comme l'adresse : un mini-formulaire
+ * qui passerait par updateProspectAction viderait le reste de la fiche).
+ *
+ * `remplace` : le contact que l'écran a montré (« Remplacer « M. Dupont » par
+ * … ? »). Si la fiche porte autre chose entre-temps, on refuse plutôt que
+ * d'écraser en silence un contact que personne n'a vu.
+ */
+export async function poserContactAction(input: {
+  prospectId: string;
+  nom: string;
+  remplace?: string | null;
+}): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const nom = (input.nom ?? "").replace(/\s+/g, " ").trim().slice(0, CONTACT_MAX);
+  if (!input.prospectId || !nom) return { error: "Dites le nom de la personne." };
+
+  const { data: fiche, error: e1 } = await supabase
+    .from("prospects")
+    .select("contact_name")
+    .eq("id", input.prospectId)
+    .maybeSingle();
+  if (e1) return { error: e1.message };
+  if (!fiche) return { error: "Fiche introuvable." };
+  const actuel = ((fiche as { contact_name: string | null }).contact_name ?? "").trim();
+  if (actuel && actuel !== (input.remplace ?? "").trim()) {
+    return { error: `La fiche porte déjà « ${actuel} » : ouvrez-la pour choisir.` };
+  }
+
+  // La RLS tranche la permission : on n'écrit que sur ses propres fiches
+  // (prospects_update) — un encadrant voit la pastille, la base refuse.
+  const { data, error } = await supabase
+    .from("prospects")
+    .update({ contact_name: nom })
+    .eq("id", input.prospectId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) return { error: "Cette fiche n'est pas à vous." };
+
+  revalidateProspect(input.prospectId);
+  return { success: `Contact enregistré : ${nom}.` };
 }
 
 export async function deleteProspectAction(fd: FormData) {

@@ -277,6 +277,8 @@ export function TaskRow({
                 </p>
                 <DebriefRdv
                   meetingId={rdvEnAttente.id}
+                  prospectId={task.prospects?.id ?? null}
+                  contactActuel={task.prospects?.contact_name ?? null}
                   apres={(r) => {
                     if (r.ok) {
                       setDebriefFait(true);
@@ -302,6 +304,7 @@ export function TaskRow({
             {resultatOuvert ? (
               <ResultatAppel
                 prospectId={task.prospects.id}
+                contactActuel={task.prospects.contact_name}
                 onRappeler={() => setPourQuand(true)}
                 className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]"
               />

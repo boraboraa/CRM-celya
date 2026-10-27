@@ -501,6 +501,7 @@ export default async function ProspectDetailPage({
           rdvAVenir={prochainRdv?.starts_at ?? null}
           canEmail={Boolean(prospect.email)}
           lectureSeule={lectureSeule}
+          contactName={prospect.contact_name}
         />
       </div>
 

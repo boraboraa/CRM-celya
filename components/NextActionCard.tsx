@@ -41,6 +41,7 @@ export function NextActionCard({
   rdvAVenir = null,
   canEmail = false,
   lectureSeule = false,
+  contactName = null,
 }: {
   action: NextAction;
   prospectId: string;
@@ -73,6 +74,8 @@ export function NextActionCard({
    * dans son journal, et envoyer un mail partirait de SA boîte à lui.
    */
   lectureSeule?: boolean;
+  /** Le contact de la fiche — la pastille « Contact → … » ne l'écrase jamais en silence. */
+  contactName?: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
@@ -322,7 +325,7 @@ export function NextActionCard({
           implicite, migration 027.) */}
       {!lectureSeule && aDebriefer && meeting && (
         <div className="mt-4 border-t border-white/[0.06] pt-3">
-          <DebriefRdv meetingId={meeting.id} />
+          <DebriefRdv meetingId={meeting.id} prospectId={prospectId} contactActuel={contactName} />
         </div>
       )}
 
@@ -332,6 +335,7 @@ export function NextActionCard({
         <div className="mt-4 border-t border-white/[0.06] pt-3">
           <ResultatAppel
             prospectId={prospectId}
+            contactActuel={contactName}
             onRappeler={() => setPourQuand(true)}
           />
         </div>

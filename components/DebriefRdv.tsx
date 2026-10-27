@@ -8,6 +8,7 @@ import {
 import { Icone } from "@/components/ui";
 import { ChampExtensible } from "@/components/ChampExtensible";
 import { ChoixRelance } from "@/components/ChoixRelance";
+import { PastilleContact } from "@/components/PastilleContact";
 import {
   ISSUES_TENUES,
   ISSUE_CHIP,
@@ -53,10 +54,15 @@ export type IssueEnvoyee =
  */
 export function DebriefRdv({
   meetingId,
+  prospectId,
+  contactActuel = null,
   pendant,
   apres,
 }: {
   meetingId: string;
+  /** La fiche du RDV : sans elle, pas de pastille « Contact → … ». */
+  prospectId?: string | null;
+  contactActuel?: string | null;
   pendant?: () => void;
   apres?: (r: IssueEnvoyee) => void;
 }) {
@@ -134,6 +140,10 @@ export function DebriefRdv({
         aria-label="Compte rendu du rendez-vous (facultatif)"
         className="input py-1.5 text-xs"
       />
+
+      {prospectId && (
+        <PastilleContact prospectId={prospectId} texte={compteRendu} contactActuel={contactActuel} />
+      )}
 
       {/* Téléphone : les six issues en grille de deux (une issue impaire, la
           dernière, prendrait toute la ligne : aucune orpheline). */}

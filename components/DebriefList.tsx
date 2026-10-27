@@ -22,6 +22,8 @@ export type DebriefMeeting = {
   prospect: {
     id: string;
     company_name: string;
+    /** Le contact de la fiche (la pastille « Contact → … » le respecte). */
+    contact_name?: string | null;
   } | null;
 };
 
@@ -157,6 +159,8 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
                 <DebriefRdv
                   key={enFeuille.id}
                   meetingId={enFeuille.id}
+                  prospectId={enFeuille.prospect?.id ?? null}
+                  contactActuel={enFeuille.prospect?.contact_name ?? null}
                   pendant={pendant(enFeuille)}
                   apres={apres(enFeuille)}
                 />
@@ -189,7 +193,13 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
                     </p>
                   </div>
                 </div>
-                <DebriefRdv meetingId={m.id} pendant={pendant(m)} apres={apres(m)} />
+                <DebriefRdv
+                  meetingId={m.id}
+                  prospectId={m.prospect?.id ?? null}
+                  contactActuel={m.prospect?.contact_name ?? null}
+                  pendant={pendant(m)}
+                  apres={apres(m)}
+                />
               </li>
             ))}
           </ul>

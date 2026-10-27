@@ -85,6 +85,8 @@ import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { SUPABASE_URL } from "@/lib/env";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
+import { DEBUT_SALES_TROPHY, ZERO, phraseObjectifs, type Compteurs } from "@/lib/crm/compteurs";
+import { lireClassement, periodesClassement } from "@/lib/crm/lectureObjectifs";
 import { saveExchangeCore } from "@/lib/crm/exchange";
 import {
   poserRendezVous,
@@ -119,6 +121,8 @@ import {
   STATUS_LABEL,
   ACTIVITY_LABEL,
   STATUS_ORDER,
+  OUTCOME_ORDER,
+  isCallOutcome,
   fmtDate,
   fmtDateTime,
 } from "@/lib/constants";
@@ -1015,7 +1019,7 @@ function register(server: McpServer) {
   // --- ajouter_note ---------------------------------------------------------
   server.tool(
     "ajouter_note",
-    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. Si la note mentionne un rendez-vous daté, passez « rdv_le » (et « lieu ») : le rendez-vous est posé dans l'agenda en même temps. Si la note mentionne un rendez-vous dont le JOUR ou l'HEURE manque, POSEZ LA QUESTION à l'utilisateur. Ne posez jamais une relance générique à la place : le rendez-vous serait perdu. Pour une simple relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
+    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. Si la note mentionne un rendez-vous daté, passez « rdv_le » (et « lieu ») : le rendez-vous est posé dans l'agenda en même temps. Si la note mentionne un rendez-vous dont le JOUR ou l'HEURE manque, POSEZ LA QUESTION à l'utilisateur. Ne posez jamais une relance générique à la place : le rendez-vous serait perdu. Pour une simple relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie. APRÈS UN APPEL, passez « resultat » (ce qu'a donné l'appel) : c'est lui que la carte affiche et que les objectifs comptent.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -1050,12 +1054,26 @@ function register(server: McpServer) {
         .enum(STATUS_ENUM)
         .optional()
         .describe("Étape imposée. VERROUILLE la fiche — à n'utiliser que sur demande explicite."),
-      motif: z.string().optional().describe("Raison de la perte (si statut = perdu)."),
+      motif: z
+        .string()
+        .optional()
+        .describe("Raison de la perte (si statut = perdu), ou POURQUOI il n'est pas intéressé (resultat = refus, OBLIGATOIRE)."),
+      resultat: z
+        .enum(OUTCOME_ORDER as [string, ...string[]])
+        .optional()
+        .describe(
+          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler), « interesse » (intéressé), « refus » (pas intéressé — « motif » OBLIGATOIRE ; l'étape ne passe PAS en Perdu). Seul « sans_reponse » n'atteste pas d'un échange. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+        ),
     },
     async (args, extra) => {
       const ctx = await context(extra);
       if ("error" in ctx) return fail(ctx.error);
       const { admin, viewer } = ctx;
+      // « Pas intéressé » sans pourquoi ne s'exploite pas : même exigence que
+      // l'écran (ResultatAppel). On le refuse AVANT d'écrire quoi que ce soit.
+      if (args.resultat === "refus" && !args.motif?.trim()) {
+        return fail("« refus » (pas intéressé) demande « motif » : pourquoi, en une phrase. Posez la question à l'utilisateur.");
+      }
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
       const refus = await refusSiPasProprietaire(admin, viewer, resolved);
@@ -1084,9 +1102,12 @@ function register(server: McpServer) {
         // Défaut prudent côté connecteur : sans déclaration explicite, une
         // note écrite par Claude n'atteste pas d'un échange (l'interface, elle,
         // coche la case par défaut — la saisie y est humaine).
-        isExchange: args.echange === true,
+        // Un résultat d'appel autre que « pas de réponse » atteste qu'on a eu
+        // quelqu'un — la même règle que l'écran (enregistrerResultatAction).
+        isExchange: args.resultat ? args.resultat !== "sans_reponse" : args.echange === true,
         isDraft: args.brouillon === true,
         proposalSent: args.proposition_envoyee === true,
+        outcome: isCallOutcome(args.resultat) ? args.resultat : null,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
@@ -2330,6 +2351,81 @@ function register(server: McpServer) {
           })),
           a_reprendre: [...aReprendre.values()],
         }
+      );
+    }
+  );
+
+  // --- mes_objectifs (031) -------------------------------------------------
+  server.tool(
+    "mes_objectifs",
+    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « pas intéressé » — on a eu le décideur ; un barrage est un appel, pas une réponse), intéressés, rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
+    {},
+    async (_args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const { semaine, trophy } = periodesClassement();
+      // service_role : la règle elle-même (`compteurs_pour`), pour le seul
+      // porteur du jeton — jamais un identifiant venu d'un paramètre.
+      const [sem, per, obj, objPer] = await Promise.all([
+        admin.rpc("compteurs_pour", { p_users: [viewer.userId], p_debut: semaine.debut, p_fin: semaine.fin }),
+        admin.rpc("compteurs_pour", { p_users: [viewer.userId], p_debut: trophy.debut, p_fin: trophy.fin }),
+        admin.from("objectifs").select("appels, reponses, rdv").eq("user_id", viewer.userId).eq("semaine", semaine.debut).maybeSingle(),
+        admin.from("objectifs_periode").select("essais").eq("user_id", viewer.userId).eq("debut", DEBUT_SALES_TROPHY).maybeSingle(),
+      ]);
+      if (sem.error || per.error) {
+        return fail("Les objectifs ne sont pas encore en place (migration 031 non appliquée).");
+      }
+      const c = ((sem.data ?? []) as Compteurs[])[0] ?? ZERO;
+      const essaisPeriode = (((per.data ?? []) as Compteurs[])[0] ?? ZERO).essais;
+      const o = obj.data as { appels: number; reponses: number; rdv: number } | null;
+      const op = objPer.data as { essais: number } | null;
+      const objectifs = o || op
+        ? { appels: o?.appels ?? null, reponses: o?.reponses ?? null, rdv: o?.rdv ?? null, essaisPeriode: op?.essais ?? null }
+        : null;
+      return json(`Semaine du ${semaine.debut} : ${phraseObjectifs(c, essaisPeriode, objectifs)}.${objectifs ? "" : " (Aucun objectif posé : l'administrateur les fixe depuis « Équipe ».)"}`, {
+        semaine: semaine.debut,
+        compteurs: c,
+        essais_depuis_le_debut: essaisPeriode,
+        debut_sales_trophy: DEBUT_SALES_TROPHY,
+        objectifs,
+      });
+    }
+  );
+
+  // --- classement (031) ----------------------------------------------------
+  server.tool(
+    "classement",
+    "Le classement de l'équipe — les MÊMES chiffres que l'écran /classement : par participant (commerciaux actifs qui ont un objectif), appels, réponses, intéressés, rendez-vous, essais gratuits, numéros ajoutés. Des chiffres seulement : aucune fiche, aucun nom de prospect. Ordre : essais, puis RDV, puis réponses, puis appels.",
+    {
+      periode: z
+        .enum(["semaine", "depuis_le_debut"])
+        .optional()
+        .describe("« semaine » (défaut, du lundi au dimanche) ou « depuis_le_debut » (depuis le début du Sales Trophy)."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const p = periodesClassement();
+      const bornes = args.periode === "depuis_le_debut" ? p.trophy : p.semaine;
+      const { disponible, lignes } = await lireClassement(admin, bornes.debut, bornes.fin);
+      if (!disponible) return fail("Le classement n'est pas encore en place (migration 031 non appliquée).");
+      return json(
+        lignes.length
+          ? `Classement ${args.periode === "depuis_le_debut" ? `depuis le ${DEBUT_SALES_TROPHY}` : `de la semaine du ${bornes.debut}`} — ${lignes.length} participant(s).`
+          : "Personne au classement pour l'instant (aucun objectif posé).",
+        lignes.map((l, i) => ({
+          rang: i + 1,
+          nom: l.nom,
+          moi: l.user_id === viewer.userId,
+          appels: l.appels,
+          reponses: l.reponses,
+          interesses: l.interesses,
+          rdv: l.rdv,
+          essais: l.essais,
+          numeros_ajoutes: l.numeros,
+        }))
       );
     }
   );

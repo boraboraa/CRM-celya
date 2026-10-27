@@ -71,8 +71,27 @@ export type PerimetreViewer = {
  * Le cookie qui mémorise le dernier périmètre choisi. Un simple RAPPEL : sa
  * valeur repasse par `lirePerimetre`, exactement comme `?perimetre=` — un
  * cookie trafiqué ne vaut pas plus qu'une URL trafiquée.
+ *
+ * Depuis le 27/10, il est écrit par le NAVIGATEUR (`MemoirePerimetre`), plus
+ * par le middleware sur chaque navigation : une réponse RSC qui porte un
+ * `Set-Cookie` n'est jamais resservie par le cache du routeur — chaque
+ * bascule (« Toute l'équipe » → un étudiant → retour) refaisait un rendu
+ * serveur complet, même pour revenir à un écran vu deux secondes plus tôt
+ * (mesuré en production : 0,47 à 0,77 s par geste). D'où un NOUVEAU nom, non
+ * `httpOnly` : le navigateur ne peut pas réécrire l'ancien, qui l'était.
+ * L'ancien est encore LU en repli, le temps qu'il expire.
  */
-export const PERIMETRE_COOKIE = "celya_perimetre";
+export const PERIMETRE_COOKIE = "celya_perim";
+export const ANCIEN_PERIMETRE_COOKIE = "celya_perimetre";
+
+/**
+ * La valeur à mémoriser pour une URL : le `?perimetre=` d'un écran qui porte
+ * le sélecteur, borné (un mot ou un uuid) — sinon null, et rien n'est écrit.
+ */
+export function perimetreAMemoriser(chemin: string, valeur: string | null | undefined): string | null {
+  if (!valeur || valeur.length > 40 || !/^[a-z0-9-]+$/i.test(valeur)) return null;
+  return (PAGES_PERIMETRE as readonly string[]).includes(chemin) ? valeur : null;
+}
 
 /** Les écrans qui portent le sélecteur — et donc ceux où le choix se mémorise. */
 export const PAGES_PERIMETRE = ["/dashboard", "/prospects", "/agenda"] as const;

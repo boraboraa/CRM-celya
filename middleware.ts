@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
-import { PAGES_PERIMETRE, PERIMETRE_COOKIE } from "@/lib/crm/perimetre";
+import { PERIMETRE_COOKIE, perimetreAMemoriser } from "@/lib/crm/perimetre";
 
 // /login, /auth : parcours d'authentification de l'app.
 // /mcp, /sse, /message : serveur MCP (auth par jeton Bearer, pas par cookie).
@@ -81,21 +81,23 @@ export async function middleware(request: NextRequest) {
   }
 
   // Le DERNIER périmètre choisi (« Moi », « Toute l'équipe », un membre) se
-  // mémorise ici — un composant serveur ne peut pas poser de cookie. Ce n'est
+  // mémorise ici pour un chargement COMPLET de la page (lien ouvert, onglet
+  // neuf). Jamais sur une navigation RSC (en-tête `rsc`) : une réponse qui
+  // porte un `Set-Cookie` n'est pas resservie par le cache du routeur, et
+  // chaque bascule de périmètre refaisait un rendu serveur — c'est le
+  // navigateur qui s'en charge alors (`MemoirePerimetre`, 27/10). Ce n'est
   // qu'un rappel : la valeur repasse par `lirePerimetre`, qui la valide comme
-  // une URL (lib/crm/perimetre.ts). Longueur bornée : rien d'autre qu'un mot
-  // ou un uuid n'a à y entrer.
-  const choisi = request.nextUrl.searchParams.get("perimetre");
+  // une URL (lib/crm/perimetre.ts).
+  const choisi = perimetreAMemoriser(path, request.nextUrl.searchParams.get("perimetre"));
   if (
     user &&
     choisi &&
-    choisi.length <= 40 &&
-    PAGES_PERIMETRE.some((p) => path === p) &&
+    request.headers.get("rsc") !== "1" &&
     request.cookies.get(PERIMETRE_COOKIE)?.value !== choisi
   ) {
     response.cookies.set(PERIMETRE_COOKIE, choisi, {
       path: "/",
-      httpOnly: true,
+      httpOnly: false,
       sameSite: "lax",
       secure: request.nextUrl.protocol === "https:",
       maxAge: 60 * 60 * 24 * 365,

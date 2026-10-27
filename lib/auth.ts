@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { lirePorteurs, lireEncadres } from "@/lib/crm/access";
-import { PERIMETRE_COOKIE, type PerimetreViewer } from "@/lib/crm/perimetre";
+import { ANCIEN_PERIMETRE_COOKIE, PERIMETRE_COOKIE, type PerimetreViewer } from "@/lib/crm/perimetre";
 import type { Profile } from "@/lib/types";
 
 export type Session = {
@@ -103,7 +103,8 @@ export const getPerimetreViewer = cache(async (): Promise<PerimetreViewer> => {
  * rappel, à passer à `lirePerimetre`, qui le valide comme une URL.
  */
 export async function perimetreMemorise(): Promise<string | null> {
-  return (await cookies()).get(PERIMETRE_COOKIE)?.value ?? null;
+  const c = await cookies();
+  return c.get(PERIMETRE_COOKIE)?.value ?? c.get(ANCIEN_PERIMETRE_COOKIE)?.value ?? null;
 }
 
 export async function requireMember(): Promise<Session & { me: Profile }> {

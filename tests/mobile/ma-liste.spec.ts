@@ -43,7 +43,7 @@ test("importer : la fiche existe, en « À appeler », avec « Ce qu'on sait »"
   await page.getByLabel("Votre liste, ou une correction").fill(COLLAGE);
   await page.getByRole("button", { name: "Lire ma liste" }).click();
   await page.getByRole("button", { name: /Importer 2 fiches/ }).click();
-  await expect(page.getByText(/2 fiches créées/)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /2 fiches créées/ })).toBeVisible();
   const { c } = await sessionDe("commercial");
   const { data } = await c
     .from("prospects")

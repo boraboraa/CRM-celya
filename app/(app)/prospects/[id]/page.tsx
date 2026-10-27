@@ -7,6 +7,7 @@ import { AdresseInline } from "@/components/AdresseInline";
 import { AdresseDepuisRdv } from "@/components/AdresseDepuisRdv";
 import { BoutonsMaps } from "@/components/BoutonsMaps";
 import { RepliMobile } from "@/components/RepliMobile";
+import { BoutonEtoile } from "@/components/BoutonEtoile";
 import { lienTel } from "@/lib/crm/telephone";
 import { lienAller } from "@/lib/crm/maps";
 import { ConfidenceControl } from "@/components/ConfidenceControl";
@@ -348,9 +349,17 @@ export default async function ProspectDetailPage({
 
         <div className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
           <div className="min-w-0 w-full lg:w-auto">
-            <h1 className="font-display text-xl font-semibold tracking-tight text-slate-50 lg:text-2xl">
-              {prospect.company_name}
-            </h1>
+            <div className="flex min-w-0 items-center gap-1">
+              <h1 className="min-w-0 font-display text-xl font-semibold tracking-tight text-slate-50 lg:text-2xl">
+                {prospect.company_name}
+              </h1>
+              <BoutonEtoile
+                prospectId={prospect.id}
+                etoilee={Boolean(prospect.starred_at)}
+                modifiable={modifiable}
+                nom={prospect.company_name}
+              />
+            </div>
             <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400 lg:mt-1.5">
               {prospect.contact_name && <span>{prospect.contact_name}</span>}
               {/* Sur téléphone, le numéro devient le bouton « Appeler » juste
@@ -373,6 +382,20 @@ export default async function ProspectDetailPage({
               )}
               {prospect.city && <span>{prospect.city}</span>}
             </p>
+
+            {/* « Ce qu'on sait » — la recherche faite AVANT le premier appel
+                (« Ma liste », import, formulaire). Elle était tout en bas, sous
+                la chronologie : on appelait sans l'avoir lue. Dès « À appeler ». */}
+            {prospect.notes?.trim() && (
+              <div className="mt-3 max-w-2xl rounded-xl bg-white/[0.03] px-3.5 py-2.5 ring-1 ring-white/[0.08]">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  Ce qu&apos;on sait
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-200">
+                  {prospect.notes}
+                </p>
+              </div>
+            )}
 
             {/* Téléphone : les deux gestes du terrain, en GROS, sous le nom
                 (19/10) — appeler, et y aller. Un petit lien bleu n'est pas un
@@ -669,16 +692,8 @@ export default async function ProspectDetailPage({
           />
           )}
 
-          {prospect.notes && (
-            <section>
-              <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-slate-400">
-                Notes générales
-              </h2>
-              <p className="card whitespace-pre-wrap px-5 py-4 text-sm leading-relaxed text-slate-300">
-                {prospect.notes}
-              </p>
-            </section>
-          )}
+          {/* « Notes générales » est montée en tête de fiche (« Ce qu'on
+              sait », 27/10) : elle n'est plus répétée ici. */}
         </div>
       </div>
     </>

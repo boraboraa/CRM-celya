@@ -275,7 +275,7 @@ export function ProspectForm({
 
         <div className="sm:col-span-2">
           <label className="label" htmlFor="notes">
-            Notes générales
+            Ce qu&apos;on sait
           </label>
           <textarea
             id="notes"

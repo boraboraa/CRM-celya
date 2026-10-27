@@ -1,17 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
-import {
-  PageHeader,
-  StatusChip,
-  EmptyState,
-  Avatar,
-  ConfidenceBadge,
-  LastActionLine,
-  Icone,
-  ProchaineActionTexte,
-  EtiquetteJanet,
-} from "@/components/ui";
+import { PageHeader, EmptyState, Icone } from "@/components/ui";
+import { ListeProspects, type LigneListe } from "@/components/ListeProspects";
 import { PerimetreSwitcher, optionsPerimetre } from "@/components/PerimetreSwitcher";
 import { FiltresProspects } from "@/components/FiltresProspects";
 import { FeuilleFiltres } from "@/components/FeuilleFiltres";
@@ -23,21 +14,14 @@ import {
 } from "@/lib/crm/filtresProspects";
 import { filtreRecherche } from "@/lib/crm/recherche";
 import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
-import {
-  STATUS_ORDER,
-  STATUS_LABEL,
-  STATUS_EDGE,
-  normalizeStatus,
-  relative,
-  fmtDate,
-} from "@/lib/constants";
+import { STATUS_ORDER, STATUS_LABEL, STATUS_CHIP, normalizeStatus } from "@/lib/constants";
+import { ordonnerProspects } from "@/lib/crm/ordreProspects";
+import { todayBounds } from "@/lib/time";
 import {
   LAST_ACTION_SELECT,
   mapLastActions,
   type LastActionRow,
 } from "@/lib/crm/lastAction";
-import { composerHref } from "@/lib/crm/composer";
-import { lienTel } from "@/lib/crm/telephone";
 import {
   lirePerimetre,
   filtrerProspects,
@@ -61,13 +45,15 @@ type Search = {
 };
 
 /**
- * Une seule liste de prospects, deux affichages : liste (tableau filtrable)
- * ou colonnes par étape (glisser-déposer). Même jeu de données, mêmes
- * filtres — la vue en colonnes n'est qu'un mode d'affichage.
+ * Une seule liste de prospects (refaite le 27/10) : des CARTES, dans l'ordre
+ * « Priorité » — étoilées, puis ce qui est dû, puis le reste
+ * (lib/crm/ordreProspects.ts). L'étape est une PUCE de filtre ; il n'y a plus
+ * de bascule. La vue en colonnes reste accessible par `?vue=colonnes` : c'est
+ * le pipeline d'équipe, un lien discret pour qui peut élargir le périmètre.
  *
- * Le tout dans le PÉRIMÈTRE choisi : « moi » par défaut, y compris pour
- * l'admin — le sélecteur lui permet d'élargir. La colonne « Responsable »
- * rend le mode équipe lisible.
+ * Le tout dans le PÉRIMÈTRE choisi (« Toute l'équipe » par défaut pour
+ * l'admin, « moi » pour les autres). Le nom du responsable n'apparaît sur la
+ * carte que si la liste mêle plusieurs personnes.
  */
 export default async function ProspectsPage({
   searchParams,
@@ -97,7 +83,7 @@ export default async function ProspectsPage({
     supabase
       .from("prospects")
       .select(
-        "id, company_name, contact_name, email, phone, city, status, confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name)"
+        "id, company_name, contact_name, email, phone, city, status, notes, starred_at, confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name, email)"
       ),
     perimetre,
     viewer
@@ -125,8 +111,11 @@ export default async function ProspectsPage({
     query = query.eq("status", statutFilter);
   }
 
-  const sort = tri ?? "recent";
-  if (sort === "relance") {
+  // « Priorité » (défaut) : la base trie par prochaine action, la page range
+  // ensuite les étoilées et le dû en tête (en mémoire — PostgREST ne trie pas
+  // sur une expression). Les deux bornes du jour viennent de lib/time.
+  const sort = tri && ["relance", "recent", "nom"].includes(tri) ? tri : "priorite";
+  if (sort === "relance" || sort === "priorite") {
     query = query.order("next_action_at", { ascending: true, nullsFirst: false });
   } else if (sort === "nom") {
     query = query.order("company_name", { ascending: true });
@@ -164,7 +153,7 @@ export default async function ProspectsPage({
         .from("prospect_action_state")
         .select(LAST_ACTION_SELECT)
         .limit(2000),
-      peutElargir(viewer)
+      peutElargir(viewer) || viewer.isAdmin
         ? supabase
             .from("crm_users")
             .select("id, full_name, email")
@@ -220,10 +209,16 @@ export default async function ProspectsPage({
     next_action_at: string | null;
     next_action_kind: string | null;
     last_contact_at: string | null;
+    notes: string | null;
+    starred_at: string | null;
     /** Déjà demandé par le select ; utile pour savoir ce qu'on a le droit de faire. */
     owner_id: string | null;
-    crm_users: { full_name: string | null } | null;
+    crm_users: { full_name: string | null; email: string | null } | null;
   }[]).map((p) => ({ ...p, status: normalizeStatus(p.status) }));
+
+  if (sort === "priorite") {
+    prospects = ordonnerProspects(prospects, new Date(todayBounds().end).getTime());
+  }
 
   // Ceinture et bretelles : re-filtre après normalisation des statuts.
   if (statutFilter) {
@@ -266,13 +261,46 @@ export default async function ProspectsPage({
     modifiable: aMoi(p.owner_id),
   }));
 
+  // La liste mêle-t-elle plusieurs responsables ? Alors chaque carte nomme le
+  // sien (avatar) — sinon c'est du bruit.
+  const plusieurs = new Set(prospects.map((p) => p.owner_id)).size > 1;
+  const lignes: LigneListe[] = prospects.map((p) => {
+    const a = lastActions.get(p.id);
+    return {
+      id: p.id,
+      company_name: p.company_name,
+      contact_name: p.contact_name,
+      email: p.email,
+      phone: p.phone,
+      city: p.city,
+      status: p.status,
+      confidence_level: p.confidence_level,
+      confidence_reason: p.confidence_reason,
+      confidence_locked: Boolean(p.confidence_locked),
+      next_action_at: p.next_action_at,
+      next_action_kind: p.next_action_kind,
+      plus_rien: plusRien(p),
+      etoilee: Boolean(p.starred_at),
+      // « Ce qu'on sait » : borné, la fiche porte le texte entier.
+      note: p.notes?.trim() ? p.notes.trim().slice(0, 600) : null,
+      modifiable: aMoi(p.owner_id),
+      responsable: plusieurs ? (p.crm_users?.full_name ?? p.crm_users?.email ?? null) : null,
+      janet: appeleesParJanet.has(p.id),
+      last_kind: a?.last_kind ?? null,
+      last_at: a?.last_at ?? null,
+      last_outcome: a?.last_outcome ?? null,
+      last_text: a?.last_text ?? null,
+      last_no_answer_streak: a?.last_no_answer_streak ?? null,
+      dernier_mail: filtreEmails ? (a?.last_email_sent_at ?? null) : null,
+    };
+  });
+
   /** URL de la page en conservant recherche, étape, tri, vue, filtre — et
    *  périmètre (la règle vit dans lib/crm/filtresProspects.ts). */
   const makeHref = (over: {
-    vue?: "liste" | "colonnes";
+    vue?: "liste" | "colonnes" | null;
     filtre?: "emails" | "a_debriefer" | null;
   }) => hrefProspects(params, over);
-  const viewHref = (v: "liste" | "colonnes") => makeHref({ vue: v });
 
   // ---- Téléphone : la feuille « Filtres » reçoit des liens tout faits.
   const proprietes = {
@@ -291,6 +319,13 @@ export default async function ProspectsPage({
     label,
     actif,
   });
+  const etapesLiens = [
+    lienFiltre({ statut: null }, "Toutes", !statut || statut === "tous"),
+    ...STATUS_ORDER.map((st) => lienFiltre({ statut: st }, STATUS_LABEL[st], statut === st)),
+  ];
+  // Le pipeline d'équipe (les colonnes) : un lien discret, pour qui voit
+  // plusieurs portefeuilles — l'URL reste ouverte à tous.
+  const lienPipeline = peutElargir(viewer);
 
   return (
     <>
@@ -299,7 +334,10 @@ export default async function ProspectsPage({
         subtitle={`${prospects.length} fiche${prospects.length > 1 ? "s" : ""}`}
         compactMobile
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Link href="/prospects/ma-liste" className="btn-ghost">
+              Coller ma liste
+            </Link>
             <Link href="/prospects/import" className="btn-ghost">
               Importer un CSV
             </Link>
@@ -312,7 +350,7 @@ export default async function ProspectsPage({
 
       {/* Téléphone : la recherche, et UNE puce « Filtres » pour tout le reste ;
           les filtres posés restent visibles, chacun retirable d'un tap. */}
-      <div className="mb-4 space-y-2 lg:hidden">
+      <div className="mb-3 space-y-2 lg:hidden">
         <div className="flex items-center gap-2">
           <FiltresProspects
             q={q ?? ""}
@@ -324,26 +362,34 @@ export default async function ProspectsPage({
           />
           <FeuilleFiltres
             nbActifs={actifs.filter((f) => f.cle !== "q").length}
-            vues={[
-              lienFiltre({ vue: null }, "Liste", view === "liste"),
-              lienFiltre({ vue: "colonnes" }, "Colonnes", view === "colonnes"),
-            ]}
+            vues={
+              view === "colonnes" || lienPipeline
+                ? [
+                    lienFiltre({ vue: null }, "Liste", view === "liste"),
+                    lienFiltre({ vue: "colonnes" }, "Pipeline", view === "colonnes"),
+                  ]
+                : []
+            }
             perimetre={optionsPerimetre(proprietes)}
             raccourcis={(Object.keys(FILTRES_RAPIDES) as (keyof typeof FILTRES_RAPIDES)[]).map((f) =>
               lienFiltre({ filtre: filtre === f ? null : f }, FILTRES_RAPIDES[f], filtre === f)
             )}
-            etapes={[
-              lienFiltre({ statut: null }, "Toutes", !statut || statut === "tous"),
-              ...STATUS_ORDER.map((st) => lienFiltre({ statut: st }, STATUS_LABEL[st], statut === st)),
-            ]}
+            etapes={etapesLiens}
             tris={
               view === "liste"
                 ? (Object.keys(TRIS) as (keyof typeof TRIS)[]).map((t) =>
-                    lienFiltre({ tri: t === "recent" ? null : t }, TRIS[t], (tri || "recent") === t)
+                    lienFiltre({ tri: t === "priorite" ? null : t }, TRIS[t], (sort ?? "priorite") === t)
                   )
                 : null
             }
           />
+          <Link
+            href="/prospects/ma-liste"
+            aria-label="Coller ma liste"
+            className="btn-ghost min-h-[44px] shrink-0 px-3 text-sm"
+          >
+            Coller
+          </Link>
         </div>
         {actifs.some((f) => f.cle !== "q") && (
           <ul className="flex flex-wrap gap-1.5" aria-label="Filtres actifs">
@@ -369,7 +415,7 @@ export default async function ProspectsPage({
         </p>
       </div>
 
-      <div className="mb-5 hidden flex-wrap items-end gap-3 lg:flex">
+      <div className="mb-3 hidden flex-wrap items-end gap-3 lg:flex">
         {/* Le périmètre — admin seulement (le composant ne rend rien sinon). */}
         <PerimetreSwitcher
           puceMobile={false}
@@ -381,29 +427,6 @@ export default async function ProspectsPage({
           basePath="/prospects"
           searchParams={params}
         />
-
-        {/* Bascule liste ↔ colonnes — même jeu de données. */}
-        <div className="flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/10">
-          {(
-            [
-              ["liste", "taches", "Liste"],
-              ["colonnes", "agenda", "Colonnes"],
-            ] as const
-          ).map(([v, icone, label]) => (
-            <Link
-              key={v}
-              href={viewHref(v)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
-                view === v
-                  ? "bg-white/[0.09] text-slate-100 ring-1 ring-white/15"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Icone nom={icone} className="h-3.5 w-3.5" />
-              {label}
-            </Link>
-          ))}
-        </div>
 
         {/* Emails envoyés : retrouver d'un coup les fiches déjà démarchées
             par mail, avec la date du dernier envoi. */}
@@ -437,15 +460,51 @@ export default async function ProspectsPage({
           À débriefer
         </Link>
 
-        {/* Recherche, étape, tri : à la frappe, sans bouton « Filtrer ». */}
+        {/* Recherche et tri : à la frappe. L'étape a ses puces, juste dessous. */}
         <FiltresProspects
           q={q ?? ""}
           statut={statut ?? "tous"}
           tri={tri ?? ""}
-          etapes={STATUS_ORDER.map((s) => [s, STATUS_LABEL[s]] as [string, string])}
+          etapes={[]}
           avecTri={view === "liste"}
         />
+
+        {lienPipeline && (
+          <Link
+            href={makeHref({ vue: view === "colonnes" ? null : "colonnes" })}
+            className="btn-link ml-auto text-xs"
+          >
+            {view === "colonnes" ? "← Revenir à la liste" : "Pipeline d'équipe (colonnes) →"}
+          </Link>
+        )}
       </div>
+
+      {/* L'étape — une PUCE de filtre, à la place de l'ancienne bascule. Sur
+          téléphone, la rangée défile d'elle-même (jamais la page). */}
+      {view === "liste" && (
+        <nav aria-label="Étape" className="-mx-4 mb-4 overflow-x-auto px-4 lg:mx-0 lg:px-0">
+          <ul className="flex w-max gap-1.5 lg:w-auto lg:flex-wrap">
+            {etapesLiens.map((l, i) => (
+              <li key={l.href + l.label}>
+                <Link
+                  href={l.href}
+                  prefetch={false}
+                  aria-current={l.actif ? "true" : undefined}
+                  className={`inline-flex min-h-[44px] items-center rounded-full px-3.5 text-xs font-medium ring-1 transition lg:min-h-[36px] ${
+                    l.actif
+                      ? i === 0
+                        ? "bg-white/[0.09] text-slate-50 ring-white/20"
+                        : STATUS_CHIP[STATUS_ORDER[i - 1]]
+                      : "bg-white/[0.02] text-slate-400 ring-white/10 hover:text-slate-200"
+                  }`}
+                >
+                  {l.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
 
       {error && (
         <p className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
@@ -471,200 +530,24 @@ export default async function ProspectsPage({
                 ? "Aucun rendez-vous passé n'attend son issue dans ce périmètre."
                 : q || statut
                 ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
-                : "Créez votre première fiche, ou importez une liste depuis un fichier CSV."
+                : "Collez votre liste (« Coller ma liste »), importez un CSV, ou créez une première fiche."
           }
-          href="/prospects/nouveau"
-          cta="Créer un prospect"
+          href="/prospects/ma-liste"
+          cta="Coller ma liste"
         />
       ) : view === "colonnes" ? (
         <PipelineBoard prospects={boardProspects} janetIds={janetIds} />
       ) : (
-        <>
-        {/* Téléphone : des CARTES, pas un tableau de 1 939 px dans un cadre
-            qui défile de côté (on n'y voyait que le nom). Mêmes données, mêmes
-            formateurs que le tableau — rien n'est recalculé pour le mobile. */}
-        <ul className="animate-rise space-y-2 lg:hidden">
-          {prospects.map((p) => {
-            const a = lastActions.get(p.id);
-            return (
-              <li
-                key={p.id}
-                className={`card relative border-l-4 px-4 py-3 transition active:scale-[0.995] ${STATUS_EDGE[p.status]}`}
-              >
-                <p className="flex min-w-0 items-center gap-1.5">
-                  {/* Toute la carte ouvre la fiche (lien étiré) ; seul
-                      « Appeler » passe au-dessus. Le nom a TOUTE la ligne. */}
-                  <Link
-                    href={`/prospects/${p.id}`}
-                    prefetch={false}
-                    className="truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
-                  >
-                    {p.company_name}
-                  </Link>
-                  {appeleesParJanet.has(p.id) && <EtiquetteJanet compact />}
-                </p>
-                <div className="mt-1 flex min-w-0 items-center gap-2">
-                  <StatusChip status={p.status} />
-                  <span className="min-w-0 truncate text-xs text-slate-400">
-                    {[p.contact_name, p.city].filter(Boolean).join(" · ") || p.email || ""}
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-xs">
-                  <ProchaineActionTexte
-                    at={p.next_action_at}
-                    kind={p.next_action_kind}
-                    statut={p.status}
-                    plusRien={plusRien(p)}
-                    className="min-w-0 truncate"
-                  />
-                  {lienTel(p.phone) && (
-                    <a
-                      href={lienTel(p.phone)!}
-                      aria-label={`Appeler ${p.company_name}`}
-                      className="relative z-10 -my-2 -mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-celya-blue transition active:bg-white/[0.06]"
-                    >
-                      <Icone nom="telephone" className="h-4 w-4" />
-                    </a>
-                  )}
-                </div>
-                {a?.last_kind && (
-                  <p className="mt-1 truncate text-[11px]">
-                    <LastActionLine
-                      kind={a.last_kind}
-                      at={a.last_at}
-                      outcome={a.last_outcome}
-                      text={a.last_text}
-                      streak={a.last_no_answer_streak}
-                    />
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-
-        <div className="card animate-rise hidden overflow-x-auto lg:block">
-          <table className="w-full min-w-[820px]">
-            <thead className="border-b border-white/[0.06]">
-              <tr>
-                <th className="th">Prospect</th>
-                <th className="th">Étape</th>
-                <th className="th" title="Confiance estimée par l'assistant, corrigeable sur la fiche">
-                  Confiance
-                </th>
-                <th className="th">Prochaine action</th>
-                <th className="th" title="Le dernier événement du journal : canal + résultat + date">
-                  Dernière action
-                </th>
-                {filtreEmails && <th className="th">Dernier mail</th>}
-                <th className="th">Responsable</th>
-                <th className="th">
-                  <span className="sr-only">Écrire</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04]">
-              {prospects.map((p) => {
-                return (
-                  // TOUTE la ligne ouvre la fiche (18/10), pas seulement le nom :
-                  // le lien du nom s'étend sur la ligne (`before:inset-0`), et
-                  // le seul autre geste — « ✉ » — passe au-dessus (z-10).
-                  <tr
-                    key={p.id}
-                    className="relative cursor-pointer transition duration-200 hover:bg-white/[0.04]"
-                  >
-                    <td className="td">
-                      {/* Pas de préchargement : la liste peut afficher 500
-                          lignes, et chacune déclenchait le rendu serveur
-                          complet de sa fiche. */}
-                      <Link
-                        href={`/prospects/${p.id}`}
-                        prefetch={false}
-                        className="flex items-center gap-3 before:absolute before:inset-0 before:content-['']"
-                      >
-                        <Avatar name={p.contact_name ?? p.company_name} />
-                        <span className="min-w-0">
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <span className="truncate font-semibold text-slate-50">
-                              {p.company_name}
-                            </span>
-                            {/* Un appel réel de Janet a touché la fiche — admin
-                                seul (l'ensemble est vide pour les autres). Le
-                                résumé, lui, est déjà dans « Dernière action ». */}
-                            {appeleesParJanet.has(p.id) && <EtiquetteJanet compact />}
-                          </span>
-                          <span className="block truncate text-xs text-slate-400">
-                            {p.phone ?? p.contact_name ?? p.email ?? p.city ?? "—"}
-                          </span>
-                        </span>
-                      </Link>
-                    </td>
-                    <td className="td">
-                      <StatusChip status={p.status} />
-                    </td>
-                    <td className="td whitespace-nowrap">
-                      <ConfidenceBadge
-                        level={p.confidence_level}
-                        reason={p.confidence_reason}
-                        locked={Boolean(p.confidence_locked)}
-                      />
-                    </td>
-                    <td className="td whitespace-nowrap">
-                      <ProchaineActionTexte
-                        at={p.next_action_at}
-                        kind={p.next_action_kind}
-                        statut={p.status}
-                        plusRien={plusRien(p)}
-                      />
-                    </td>
-                    <td className="td whitespace-nowrap">
-                      <LastActionLine
-                        kind={lastActions.get(p.id)?.last_kind}
-                        at={lastActions.get(p.id)?.last_at}
-                        outcome={lastActions.get(p.id)?.last_outcome}
-                        text={lastActions.get(p.id)?.last_text}
-                        streak={lastActions.get(p.id)?.last_no_answer_streak}
-                      />
-                    </td>
-                    {filtreEmails && (
-                      <td className="td whitespace-nowrap text-slate-300">
-                        {fmtDate(lastActions.get(p.id)?.last_email_sent_at)}
-                        <span className="text-slate-500">
-                          {" "}
-                          · {relative(lastActions.get(p.id)?.last_email_sent_at)}
-                        </span>
-                      </td>
-                    )}
-                    <td className="td">
-                      <Avatar name={p.crm_users?.full_name ?? null} />
-                    </td>
-                    {/* Écrire sans passer par la fiche puis par le composeur :
-                        le lien ouvre la fiche, composeur déplié. */}
-                    <td className="td text-right">
-                      {/* Écrire n'est proposé que sur SA fiche : sur celle d'un
-                          collègue le composeur n'existe pas (lecture seule), et
-                          le mail partirait de sa boîte à lui. Un raccourci qui
-                          mène à un écran sans composeur est un raccourci
-                          cassé. */}
-                      {p.email && aMoi(p.owner_id) && (
-                        <Link
-                          href={composerHref(p.id)}
-                          prefetch={false}
-                          title={`Écrire à ${p.email}`}
-                          aria-label={`Écrire à ${p.company_name}`}
-                          className="relative z-10 inline-flex rounded-lg px-2 py-1 text-slate-500 transition hover:bg-white/[0.06] hover:text-celya-blue"
-                        >
-                          <Icone nom="enveloppe" className="h-4 w-4" />
-                        </Link>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        </>
+        <ListeProspects
+          lignes={lignes}
+          admin={viewer.isAdmin}
+          membres={
+            viewer.isAdmin
+              ? membres.map((m) => [m.id, m.full_name ?? m.email] as [string, string])
+              : []
+          }
+          filtreEmails={filtreEmails}
+        />
       )}
     </>
   );

@@ -133,10 +133,10 @@ export function DebriefRdv({
         className="input py-1.5 text-xs"
       />
 
-      {/* Téléphone : les quatre issues en grille 2 × 2 — une seule hauteur,
-          aucune issue seule sur sa ligne. */}
+      {/* Téléphone : les cinq issues en grille de deux — « Pas intéressé »,
+          la dernière, prend toute la ligne : aucune issue orpheline. */}
       <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap" role="group" aria-label="Ce qu'a donné le rendez-vous">
-        {ISSUES_TENUES.map((issue) => (
+        {ISSUES_TENUES.map((issue, i) => (
           <button
             key={issue}
             type="button"
@@ -148,6 +148,8 @@ export function DebriefRdv({
             }
             onClick={() => choisir(issue)}
             className={`inline-flex min-h-[48px] items-center justify-center gap-1.5 rounded-xl px-2.5 text-center text-xs font-medium leading-tight ring-1 transition sm:min-h-[44px] sm:justify-start sm:px-3 sm:text-left ${ISSUE_CHIP[issue]} ${
+              ISSUES_TENUES.length % 2 === 1 && i === ISSUES_TENUES.length - 1 ? "col-span-2 sm:col-span-1" : ""
+            } ${
               ouverte === issue ? "ring-2" : ""
             }`}
           >

@@ -12,6 +12,9 @@
  *   Intéressé — à rappeler   tenu ; relance à la date choisie (EXIGÉE) ;
  *                            l'étape suit le fait → « À rappeler » (026)
  *   Proposition envoyée      tenu ; proposal_sent_at → « Proposition »
+ *   Essai gratuit démarré    tenu ; « Essai gratuit », VERROUILLÉ (031) —
+ *                            le « win » d'un étudiant ; une date « Et
+ *                            ensuite ? » reste offerte (la fin de l'essai)
  *   Signé                    tenu ; « Gagné », VERROUILLÉ (geste humain)
  *   Pas intéressé            tenu ; raison EXIGÉE (lost_reason) ; « Perdu »,
  *                            VERROUILLÉ ; relances ouvertes annulées
@@ -36,13 +39,14 @@ import type { ProspectStatus } from "../types.ts";
 import { jourHeureCourt } from "./prochaineAction.ts";
 
 /** Ce qu'a donné un rendez-vous qui a eu lieu. */
-export type IssueTenue = "a_rappeler" | "proposition" | "signe" | "pas_interesse";
+export type IssueTenue = "a_rappeler" | "proposition" | "essai" | "signe" | "pas_interesse";
 /** …ou bien il n'a pas eu lieu. Le report passe par deplacerRendezVous. */
 export type IssueDebrief = IssueTenue | "annule";
 
 export const ISSUES_TENUES: IssueTenue[] = [
   "a_rappeler",
   "proposition",
+  "essai",
   "signe",
   "pas_interesse",
 ];
@@ -50,6 +54,7 @@ export const ISSUES_TENUES: IssueTenue[] = [
 export const ISSUE_LABEL: Record<IssueDebrief, string> = {
   a_rappeler: "Intéressé — à rappeler",
   proposition: "Proposition envoyée",
+  essai: "Essai gratuit démarré",
   signe: "Signé",
   pas_interesse: "Pas intéressé",
   annule: "Annulé",
@@ -59,6 +64,7 @@ export const ISSUE_LABEL: Record<IssueDebrief, string> = {
 export const ISSUE_ICON: Record<IssueDebrief, IconeNom> = {
   a_rappeler: "pouce",
   proposition: "enveloppe",
+  essai: "cadeau",
   signe: "coche",
   pas_interesse: "croix",
   annule: "croix",
@@ -68,6 +74,7 @@ export const ISSUE_ICON: Record<IssueDebrief, IconeNom> = {
 export const ISSUE_CHIP: Record<IssueDebrief, string> = {
   a_rappeler: "bg-indigo-500/15 text-indigo-200 ring-indigo-400/30 hover:bg-indigo-500/25",
   proposition: "bg-amber-500/15 text-amber-200 ring-amber-400/30 hover:bg-amber-500/25",
+  essai: "bg-teal-500/15 text-teal-200 ring-teal-400/30 hover:bg-teal-500/25",
   signe: "bg-emerald-500/15 text-emerald-200 ring-emerald-400/30 hover:bg-emerald-500/25",
   pas_interesse: "bg-rose-500/10 text-rose-200 ring-rose-400/25 hover:bg-rose-500/20",
   annule: "bg-white/[0.04] text-slate-300 ring-white/10 hover:bg-white/[0.08]",
@@ -117,6 +124,11 @@ export function effetsDebrief(issue: IssueDebrief): EffetsDebrief {
       return { ...base, debriefIssue: "a_rappeler", exigeDate: true, outcome: "interesse" };
     case "proposition":
       return { ...base, debriefIssue: "proposition", proposition: true };
+    case "essai":
+      // Pas une fin de parcours : la fiche en essai garde ses relances, et
+      // « Et ensuite ? » reste offert (la date de fin d'essai). Le résultat
+      // d'appel « Intéressé » est celui que la carte affiche.
+      return { ...base, debriefIssue: "essai", etapeDecidee: "essai_gratuit", outcome: "interesse" };
     case "signe":
       return { ...base, debriefIssue: "signe", etapeDecidee: "gagne", suiteOfferte: false };
     case "pas_interesse":

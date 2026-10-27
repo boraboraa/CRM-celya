@@ -4,13 +4,16 @@ export type UserRole = "admin" | "commercial";
  *  « À appeler » est une colonne (la liste des entreprises à démarcher),
  *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape.
  *  « À rappeler » (migration 026) : le rendez-vous a eu lieu, il faut
- *  rappeler la personne — ne pas confondre avec « À appeler ». */
+ *  rappeler la personne — ne pas confondre avec « À appeler ».
+ *  « Essai gratuit » (migration 030) : le client essaie, gratuitement — le
+ *  « win » d'un étudiant. Manuelle, et pas une fin de parcours. */
 export type ProspectStatus =
   | "a_appeler"
   | "contacte"
   | "rendez_vous"
   | "a_rappeler"
   | "proposition"
+  | "essai_gratuit"
   | "gagne"
   | "perdu";
 

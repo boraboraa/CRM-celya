@@ -119,3 +119,58 @@ create trigger prospects_normaliser_secteur
 update public.prospects
    set sector = public.normaliser_secteur(sector)
  where sector is distinct from public.normaliser_secteur(sector);
+
+-- ------------------------------------------------------------
+-- 2. Essai gratuit — la date d'entrée, l'issue de débrief
+--
+-- `essai_gratuit_at` : quand la fiche est passée en « Essai gratuit » (030).
+-- C'est elle que comptent les objectifs et le classement (« essais de la
+-- semaine », « depuis le 2 novembre »). Posée à CHAQUE entrée dans l'étape,
+-- jamais effacée : une fiche qui passe ensuite en Gagné garde la date de son
+-- essai (c'est bien un essai démarré cette semaine-là).
+--
+-- Posée par un trigger BEFORE, pas par le code : l'étape change depuis l'écran
+-- (clic, glisser-déposer, débrief), le connecteur MCP (service_role) et le SQL
+-- direct. Même forme que `prospects_etape_prochaine_action` (023) : on écrit
+-- NEW, aucun UPDATE ré-entrant. La comparaison se fait en TEXTE : la fonction
+-- ne dépend pas de l'instant où la valeur d'enum a été validée.
+-- ------------------------------------------------------------
+
+alter table public.prospects
+  add column if not exists essai_gratuit_at timestamptz;
+
+comment on column public.prospects.essai_gratuit_at is
+  'Dernière entrée dans l''étape « Essai gratuit » (030/031), posée par le trigger prospects_essai_gratuit_at. Compte les essais de la semaine et de la période.';
+
+create or replace function public.prospects_essai_gratuit_at()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.status::text = 'essai_gratuit'
+     and (tg_op = 'INSERT' or old.status::text is distinct from 'essai_gratuit') then
+    new.essai_gratuit_at := now();
+  end if;
+  return new;
+end;
+$$;
+
+create trigger prospects_essai_gratuit_at
+  before insert or update of status on public.prospects
+  for each row execute function public.prospects_essai_gratuit_at();
+
+create index if not exists prospects_essai_gratuit_at_idx
+  on public.prospects (owner_id, essai_gratuit_at)
+  where essai_gratuit_at is not null;
+
+-- L'issue de débrief « Essai gratuit démarré » (lib/crm/debrief.ts, `essai`) :
+-- le RDV est tenu, la fiche passe en essai, verrouillée — comme « Signé »
+-- passe en Gagné. La contrainte de la 027 est réécrite à l'identique, plus
+-- cette valeur.
+alter table public.meetings
+  drop constraint if exists meetings_debrief_issue_connue;
+alter table public.meetings
+  add constraint meetings_debrief_issue_connue
+  check (debrief_issue is null or debrief_issue in
+    ('a_rappeler', 'proposition', 'essai', 'signe', 'pas_interesse', 'suite_posee', 'remplace'));

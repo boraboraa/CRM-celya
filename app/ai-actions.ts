@@ -402,8 +402,9 @@ Règles absolues :
      ENVOYÉ. « Je dois lui envoyer un devis » n'est pas une proposition envoyée.
    - "contacte" si un échange a réellement eu lieu (on s'est parlé, il a
      répondu).
-   - "gagne" et "perdu" : tu peux les proposer, mais ce sont des décisions
-     humaines — elles ne seront jamais appliquées sans un clic.
+   - "essai_gratuit" (le client a démarré un essai gratuit), "gagne" et
+     "perdu" : tu peux les proposer, mais ce sont des décisions humaines —
+     elles ne seront jamais appliquées sans un clic.
    Dans le doute, mets null : l'étape actuelle reste inchangée.
 3. "date_relance" : la date de relance ou de rendez-vous déduite de la note, convertie en date réelle "YYYY-MM-DD" (ou "YYYY-MM-DDTHH:mm" si l'heure est précisée) — « après les fêtes » = début janvier, « dans 3 mois » = +3 mois. null si la note ne mentionne aucune échéance.
 4. "heure" : l'heure lue dans la note ("HH:mm"), retenue MÊME quand le jour est inconnu — ne la perds jamais. null si aucune heure n'est dite.
@@ -463,6 +464,9 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
   } else if (statut === "gagne" || statut === "perdu") {
     statutReserve =
       "« Gagné » et « Perdu » ne s'obtiennent jamais automatiquement — à vous de confirmer.";
+  } else if (statut === "essai_gratuit") {
+    statutReserve =
+      "« Essai gratuit » ne s'obtient jamais automatiquement — à vous de confirmer (étape de la fiche, ou débrief « Essai gratuit démarré »).";
   } else if (statut === "a_rappeler") {
     // « À rappeler » suit le DÉBRIEF d'un rendez-vous (026/027), jamais un
     // texte libre : le modèle ne la propose pas.

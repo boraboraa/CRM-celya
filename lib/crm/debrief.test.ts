@@ -34,6 +34,7 @@ import {
   libelleFaitRdv,
   raisonAffichee,
   STATUS_RANK,
+  isManualOnly,
 } from "./status.ts";
 import { STATUS_ORDER, normalizeStatus } from "../constants.ts";
 
@@ -73,6 +74,14 @@ const signe = effetsDebrief("signe");
 verifie("signé : honoré, « Gagné » décidé (verrouillé)", [signe.statutRdv, signe.etapeDecidee], ["honore", "gagne"]);
 verifie("signé : pas de date demandée", [signe.exigeDate, signe.suiteOfferte], [false, false]);
 
+const essai = effetsDebrief("essai");
+verifie("essai gratuit : honoré, « Essai gratuit » décidé (verrouillé), issue essai",
+  [essai.statutRdv, essai.etapeDecidee, essai.debriefIssue], ["honore", "essai_gratuit", "essai"]);
+verifie("essai gratuit : un tap, la suite (fin d'essai) est OFFERTE, rien n'est annulé",
+  [essai.exigeDate, essai.exigeRaison, essai.suiteOfferte, essai.annulerRelances], [false, false, true, false]);
+verifie("essai gratuit : la carte dira « Intéressé »", essai.outcome, "interesse");
+verifie("le sujet d'un essai", sujetDebrief("essai", RDV_29_09), "Débrief du RDV du 29/09 à 10h : essai gratuit démarré");
+
 const refus = effetsDebrief("pas_interesse");
 verifie("pas intéressé : honoré, « Perdu » décidé, raison exigée",
   [refus.statutRdv, refus.etapeDecidee, refus.exigeRaison], ["honore", "perdu", true]);
@@ -83,8 +92,8 @@ const annule = effetsDebrief("annule");
 verifie("annulé : RDV annulé, aucune issue, étape inchangée",
   [annule.statutRdv, annule.debriefIssue, annule.etapeDecidee], ["annule", null, null]);
 
-verifie("UN tap suffit pour proposition, signé, annulé",
-  ["proposition", "signe", "annule"].map((i) => manqueDebrief({ issue: i as "signe" })), [null, null, null]);
+verifie("UN tap suffit pour proposition, essai, signé, annulé",
+  ["proposition", "essai", "signe", "annule"].map((i) => manqueDebrief({ issue: i as "signe" })), [null, null, null, null]);
 verifie("à rappeler sans date : refusé, la phrase le dit",
   manqueDebrief({ issue: "a_rappeler" }), "Quand faut-il rappeler ? Choisissez une date.");
 verifie("à rappeler avec date : complet", manqueDebrief({ issue: "a_rappeler", suite: "2026-10-22" }), null);
@@ -96,9 +105,9 @@ verifie("le sujet du journal dit le RDV et l'issue",
   sujetDebrief("a_rappeler", RDV_29_09), "Débrief du RDV du 29/09 à 10h : intéressé — à rappeler");
 verifie("le sujet d'une annulation",
   sujetDebrief("annule", RDV_29_09), "Débrief du RDV du 29/09 à 10h : n'a pas eu lieu (annulé)");
-verifie("estIssueDebrief : les quatre issues tenues + annulé, rien d'autre",
+verifie("estIssueDebrief : les cinq issues tenues + annulé, rien d'autre",
   [...ISSUES_TENUES, "annule", "reporte", "constructor", ""].map(estIssueDebrief),
-  [true, true, true, true, true, false, false, false]);
+  [true, true, true, true, true, true, false, false, false]);
 
 // --- 1b. Le débrief IMPLICITE (miroir du trigger SQL de la 027) ------------
 console.log("\n— le débrief implicite —");
@@ -130,7 +139,7 @@ console.log("\n— la zone « à débriefer » —");
 const rdv = (id: string, p: string | null, starts: string, extra: Partial<RdvEnAttente> = {}): RdvEnAttente => ({
   id, prospect_id: p, kind: "prospect", status: "prevu", starts_at: starts, debriefed_at: null, ...extra,
 });
-const statuts: Record<string, string> = { nice: "rendez_vous", vivier: "rendez_vous", gagne: "gagne", perdu: "perdu", ouverte: "contacte" };
+const statuts: Record<string, string> = { nice: "rendez_vous", vivier: "rendez_vous", gagne: "gagne", perdu: "perdu", ouverte: "contacte", essai: "essai_gratuit" };
 const zone = rdvADebriefer(
   [
     rdv("nice-29", "nice", "2026-09-29T08:00:00Z"),
@@ -141,19 +150,20 @@ const zone = rdvADebriefer(
     rdv("gagne", "gagne", "2026-09-02T08:00:00Z"),
     rdv("perdu", "perdu", "2026-09-02T08:00:00Z"),
     rdv("avenir", "ouverte", FUTUR),
+    rdv("essai", "essai", "2026-10-10T08:00:00Z"),
     rdv("deja", "ouverte", "2026-10-01T08:00:00Z", { status: "honore", debriefed_at: "2026-10-02T08:00:00Z" }),
   ],
   (p) => statuts[p],
   NOW
 );
-verifie("un seul RDV par fiche — le plus récent ; ni perso, ni fiche close, ni à venir, ni déjà débriefé",
-  zone.map((m) => m.id), ["vivier-prev", "nice-06"]);
+verifie("un seul RDV par fiche — le plus récent ; ni perso, ni fiche close, ni à venir, ni déjà débriefé ; une fiche en ESSAI n'est pas close",
+  zone.map((m) => m.id), ["vivier-prev", "nice-06", "essai"]);
 
 // --- 3. L'étape « À rappeler » ----------------------------------------------
 console.log("\n— l'étape « À rappeler » —");
 
-verifie("sept étapes, « À rappeler » entre Rendez-vous et Proposition",
-  STATUS_ORDER, ["a_appeler", "contacte", "rendez_vous", "a_rappeler", "proposition", "gagne", "perdu"]);
+verifie("huit étapes, « À rappeler » entre Rendez-vous et Proposition, « Essai gratuit » avant Gagné",
+  STATUS_ORDER, ["a_appeler", "contacte", "rendez_vous", "a_rappeler", "proposition", "essai_gratuit", "gagne", "perdu"]);
 verifie("rang : rendez_vous < a_rappeler < proposition < gagné = perdu",
   [STATUS_RANK.rendez_vous < STATUS_RANK.a_rappeler, STATUS_RANK.a_rappeler < STATUS_RANK.proposition,
    STATUS_RANK.gagne === STATUS_RANK.perdu], [true, true, true]);
@@ -190,6 +200,18 @@ verifie("un RDV remplacé (annulé) n'est pas un fait",
   "a_appeler");
 verifie("la proposition passe devant « À rappeler »",
   statusFromFacts(factsFromRows({ ...rdvTenuARappeler, proposalSentAt: "2026-10-16T09:00:00Z" })), "proposition");
+
+// --- 3bis. L'étape « Essai gratuit » (030) -----------------------------------
+console.log("\n— l'étape « Essai gratuit » —");
+verifie("rang : proposition < essai_gratuit < gagné = perdu",
+  [STATUS_RANK.proposition < STATUS_RANK.essai_gratuit, STATUS_RANK.essai_gratuit < STATUS_RANK.gagne,
+   STATUS_RANK.gagne === STATUS_RANK.perdu], [true, true, true]);
+verifie("manuelle : jamais déduite (MANUAL_ONLY)", [isManualOnly("essai_gratuit"), isManualOnly("proposition")], [true, false]);
+verifie("normalizeStatus la reconnaît", normalizeStatus("essai_gratuit"), "essai_gratuit");
+v = evaluateStatus("essai_gratuit", false, factsFromRows({ ...sansRien, proposalSentAt: "2026-10-16T09:00:00Z" }));
+verifie("NE RECULE JAMAIS : une proposition (re)marquée ne ramène pas l'essai en Proposition", [v.apply, v.suggest], [false, false]);
+verifie("aucun fait ne mène à l'essai", statusFromFacts(factsFromRows({ ...rdvTenuARappeler, proposalSentAt: "2026-10-16T09:00:00Z" })) === "essai_gratuit", false);
+
 
 // --- 4. Le libellé sous l'étape ---------------------------------------------
 console.log("\n— le libellé de l'étape —");

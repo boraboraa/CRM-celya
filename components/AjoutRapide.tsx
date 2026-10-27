@@ -232,6 +232,17 @@ export function AjoutRapide() {
         }}
         className="space-y-3"
       >
+        {/* Toute une liste à entrer ? « Ma liste » la lit d'un coup (27/10). */}
+        <Link
+          href="/prospects/ma-liste"
+          onClick={fermer}
+          className="flex min-h-[44px] items-center gap-2 rounded-xl bg-white/[0.03] px-3 text-xs text-slate-300 ring-1 ring-white/10"
+        >
+          <Icone nom="taches" className="h-3.5 w-3.5 text-celya-blue" />
+          Toute une liste à entrer ? Collez-la — Janet fait les fiches
+          <Icone nom="suivant" className="ml-auto h-3.5 w-3.5" />
+        </Link>
+
         <div>
           <label className="label" htmlFor="ar-societe">
             Société

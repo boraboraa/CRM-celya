@@ -11,6 +11,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { scopeProspects, canSeeProspect, type Viewer } from "./access";
+import { cleSociete, cleTelephone } from "./doublons";
 
 /**
  * Normalise un numéro au format belge « +32 … ». Déterministe :
@@ -73,25 +74,13 @@ function formatBelgianNSN(nsn: string): string | null {
   return null;
 }
 
-/** Chiffres significatifs d'un numéro pour la comparaison de doublons. */
-export const phoneKey = (v?: string | null): string | null => {
-  if (!v) return null;
-  const d = v.replace(/\D/g, "");
-  if (d.length < 8) return null;
-  return d.slice(-9); // suffisant pour un numéro belge, préfixe pays ignoré
-};
-
-/** Nom de société normalisé (accents, formes juridiques, ponctuation). */
-export const companyKey = (v?: string | null): string | null => {
-  if (!v) return null;
-  const k = v
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/\b(srl|sprl|sa|bv|bvba|nv|asbl|vzw|sc|scs|snc|gmbh)\b/g, "")
-    .replace(/[^a-z0-9]/g, "");
-  return k.length > 3 ? k : null;
-};
+/**
+ * Les clés de comparaison — écrites UNE fois dans `./doublons` (module pur,
+ * recopié en SQL par la 031 pour le dédoublonnage d'équipe). L'ancienne clé de
+ * téléphone (les 9 derniers chiffres) ratait les fixes : voir `cleTelephone`.
+ */
+export const phoneKey = cleTelephone;
+export const companyKey = cleSociete;
 
 export type DuplicateHit = {
   id: string;

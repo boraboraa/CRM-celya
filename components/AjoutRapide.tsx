@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ajoutRapideAction,
+  doublonEquipeAction,
   rechercherProspectsAction,
   type ResultatRecherche,
 } from "@/app/actions";
+import { SECTEURS } from "@/lib/crm/secteurs";
 import { lireRaccourcis } from "@/lib/crm/raccourcis";
 import { lireCeQuiSestPasse, OUVRIR_AJOUT } from "@/lib/crm/ajoutRapide";
 import { chiffresTelephone, doublonsProbables } from "@/lib/crm/recherche";
@@ -37,6 +39,12 @@ export function AjoutRapide() {
   const [societe, setSociete] = useState("");
   const [contact, setContact] = useState("");
   const [telephone, setTelephone] = useState("");
+  const [secteur, setSecteur] = useState("");
+  /** « Déjà suivie dans l'équipe » (031) — la phrase, sans aucun nom pour un commercial. */
+  const [equipe, setEquipe] = useState<{ phrase: string | null; peutForcer: boolean }>({
+    phrase: null,
+    peutForcer: false,
+  });
   const [position, setPosition] = useState<string | null>(null);
   const [localise, setLocalise] = useState(false);
   const [texte, setTexte] = useState("");
@@ -79,15 +87,21 @@ export function AjoutRapide() {
     const tel = chiffresTelephone(telephone);
     if (nom.length < 3 && !tel) {
       setTrouvees([]);
+      setEquipe((e) => ({ ...e, phrase: null }));
       return;
     }
     let annule = false;
     const t = setTimeout(async () => {
-      const [parNom, parTel] = await Promise.all([
+      // Ses fiches (RLS) ET l'équipe entière (031, des booléens seulement).
+      const [parNom, parTel, dansEquipe] = await Promise.all([
         nom.length >= 3 ? rechercherProspectsAction(nom) : Promise.resolve({ resultats: [] }),
         tel ? rechercherProspectsAction(telephone) : Promise.resolve({ resultats: [] }),
+        doublonEquipeAction({ telephone, societe: nom }),
       ]);
-      if (!annule) setTrouvees([...parTel.resultats, ...parNom.resultats]);
+      if (!annule) {
+        setTrouvees([...parTel.resultats, ...parNom.resultats]);
+        setEquipe(dansEquipe);
+      }
     }, 300);
     return () => {
       annule = true;
@@ -96,7 +110,11 @@ export function AjoutRapide() {
   }, [societe, telephone, ouvert]);
 
   const doublons = doublonsProbables({ nom: societe, telephone }, trouvees);
-  const memeFiche = doublons.some((d) => d.raison !== "proche");
+  // Une fiche visible a la priorité (on peut l'ouvrir) ; sinon l'équipe.
+  const equipePhrase = doublons.length === 0 ? equipe.phrase : null;
+  const memeFiche = doublons.some((d) => d.raison !== "proche") || Boolean(equipePhrase);
+  /** Un commercial ne recrée jamais la fiche d'un autre ; l'admin peut forcer. */
+  const bloqueEquipe = Boolean(equipePhrase) && !equipe.peutForcer;
 
   function fermer() {
     setOuvert(false);
@@ -106,6 +124,8 @@ export function AjoutRapide() {
     setSociete("");
     setContact("");
     setTelephone("");
+    setSecteur("");
+    setEquipe({ phrase: null, peutForcer: false });
     setPosition(null);
     setTexte("");
     setRepere(false);
@@ -130,7 +150,7 @@ export function AjoutRapide() {
   }
 
   function creer() {
-    if (!societe.trim() || lecture.manque) return;
+    if (!societe.trim() || lecture.manque || bloqueEquipe) return;
     setErreur(undefined);
     startTransition(async () => {
       const res = await ajoutRapideAction({
@@ -139,9 +159,15 @@ export function AjoutRapide() {
           contact_name: contact,
           phone: telephone,
           address: position ?? "",
+          sector: secteur,
         },
         echange: lecture.echange,
+        forcer: Boolean(equipePhrase) && equipe.peutForcer,
       });
+      if (res.doublonEquipe) {
+        setEquipe((e) => ({ ...e, phrase: res.doublonEquipe ?? null }));
+        return;
+      }
       if (res.error || !res.id) {
         setErreur(res.error ?? "La fiche n'a pas pu être créée.");
         return;
@@ -189,7 +215,7 @@ export function AjoutRapide() {
             <button
               type="submit"
               form="ajout-rapide"
-              disabled={pending || !societe.trim() || Boolean(lecture.manque)}
+              disabled={pending || !societe.trim() || Boolean(lecture.manque) || bloqueEquipe}
               className="btn-primary min-h-[48px] flex-1"
             >
               {libelleCreer}
@@ -257,6 +283,25 @@ export function AjoutRapide() {
           </div>
         </div>
 
+        <div>
+          <label className="label" htmlFor="ar-secteur">
+            Secteur <span className="normal-case tracking-normal text-slate-500">(facultatif)</span>
+          </label>
+          <select
+            id="ar-secteur"
+            value={secteur}
+            onChange={(e) => setSecteur(e.target.value)}
+            className="input min-h-[48px]"
+          >
+            <option value="">—</option>
+            {SECTEURS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* La position — un point, pas une adresse : on le dit. */}
         <div className="flex flex-wrap items-center gap-2">
           {position && estPositionGps(position) ? (
@@ -311,6 +356,21 @@ export function AjoutRapide() {
               </p>
             ))}
           </div>
+        )}
+
+        {equipePhrase && (
+          <p
+            role="status"
+            className="flex min-h-[44px] items-start gap-2 rounded-xl bg-amber-500/[0.08] px-3 py-2 text-xs text-amber-100 ring-1 ring-amber-400/25"
+          >
+            <Icone nom="alerte" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+            <span>
+              Cette société est {equipePhrase}.{" "}
+              {equipe.peutForcer
+                ? "Vous pouvez la créer quand même."
+                : "Elle est à qui l'a enregistrée la première — demandez à l'administrateur de vous l'attribuer."}
+            </span>
+          </p>
         )}
 
         <div>

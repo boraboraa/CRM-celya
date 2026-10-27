@@ -9,6 +9,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeStatus } from "@/lib/constants";
 import { findDuplicates, normalizeBelgianPhone, type DuplicateHit } from "./dedup";
 import { normaliserSecteur } from "./secteurs";
+import { doublonsDansLeLot, estDoublonEquipe, phraseDoublon } from "./doublons";
+import { doublonsEquipe } from "./doublonsEquipe";
 import type { Viewer } from "./access";
 
 // La ligne et la lecture du formulaire vivent dans un module pur, testé
@@ -25,6 +27,13 @@ export type CreateProspectResult = {
    * que `force` n'est pas demandé : on prévient, on ne crée pas en double.
    */
   duplicates?: DuplicateHit[];
+  /**
+   * Renseigné (sans insertion) quand la fiche est DÉJÀ SUIVIE par un autre
+   * membre de l'équipe (031) : la phrase à afficher, qui ne nomme personne
+   * pour un commercial. Un commercial ne passe jamais outre — la fiche est
+   * à qui l'a enregistrée la première ; l'admin, avec `force`.
+   */
+  doublonEquipe?: string;
 };
 
 const trimOrNull = (v: unknown, max = 200): string | null => {
@@ -51,6 +60,12 @@ export async function createProspectCore(
     /** Renseigné par le connecteur MCP seul : il agit en service_role, donc
      *  la dédup doit être bornée à son portefeuille à la main. Voir access.ts. */
     scope?: Viewer | null;
+    /**
+     * Vérifier l'équipe entière (031, `doublons_equipe`) : téléphone et nom.
+     * `viewerId` quand l'appelant est en service_role (MCP) ; `isAdmin` dit
+     * si `force` peut passer outre.
+     */
+    equipe?: { viewerId?: string; isAdmin: boolean };
   } = {}
 ): Promise<CreateProspectResult> {
   const rawPhone = trimOrNull(input.phone);
@@ -67,6 +82,22 @@ export async function createProspectCore(
     if (duplicates.length > 0) return { duplicates };
   }
 
+  if (opts.equipe) {
+    const { doublons } = await doublonsEquipe(
+      supabase,
+      [{ telephone: phone, societe: company }],
+      opts.equipe.viewerId
+    );
+    const d = doublons[0];
+    // Ma propre fiche : les doublons visibles (ci-dessus, ou la recherche de
+    // l'écran) en parlent déjà. Celle d'un autre : on refuse — sauf l'admin
+    // qui force.
+    if (estDoublonEquipe(d) && !d.aMoi && !(opts.equipe.isAdmin && opts.force)) {
+      const noms = await nomsDesProprietaires(supabase, [d.proprietaire]);
+      return { doublonEquipe: phraseDoublon(d, d.proprietaire ? noms.get(d.proprietaire) : null) };
+    }
+  }
+
   const { data, error } = await supabase
     .from("prospects")
     .insert(ligneProspect({ ...input, phone }, userId))
@@ -78,7 +109,15 @@ export async function createProspectCore(
 }
 
 // ---------------------------------------------------------------------------
-// Import en lot — dédup ligne par ligne (email), insertion par paquets.
+// Import en lot — dédup ligne par ligne, insertion par paquets.
+//
+// Trois filets, dans cet ordre (27/10) :
+//  1. dans le fichier lui-même — e-mail, téléphone, nom de société ;
+//  2. dans TOUTE l'équipe — téléphone et nom (`doublons_equipe`, 031), sans
+//     rien apprendre de la fiche d'un autre : « déjà suivie dans l'équipe » ;
+//  3. l'e-mail déjà présent dans ce que le lecteur voit.
+// Jusque-là, seul le 3 existait : une liste Google Maps n'a presque jamais
+// d'e-mail, deux étudiants importaient le même cabinet sans alerte.
 // ---------------------------------------------------------------------------
 
 export type ImportRow = Partial<
@@ -89,6 +128,7 @@ export type ImportRow = Partial<
     | "phone"
     | "website"
     | "sector"
+    | "address"
     | "city"
     | "status"
     | "source"
@@ -209,6 +249,13 @@ export async function importProspectsCore(
      * entière échouerait — d'où une option, et non un comportement par défaut.
      */
     rendreIds?: boolean;
+    /**
+     * Le porteur du jeton, quand l'appelant agit en service_role (connecteur
+     * MCP) : la vérification d'équipe passe alors par
+     * `doublons_equipe_pour(viewer)`. Absent : le client est celui de
+     * l'utilisateur, `doublons_equipe` lit `auth.uid()`.
+     */
+    viewerId?: string;
   } = {}
 ): Promise<ImportResult> {
   if (!Array.isArray(rows) || rows.length === 0) {
@@ -223,7 +270,8 @@ export async function importProspectsCore(
     };
   }
 
-  // Doublons : on compare aux emails déjà présents et à ceux du fichier lui-même.
+  // 3. L'e-mail déjà présent dans ce que le lecteur voit (RLS, ou tout pour
+  // le service_role — l'adresse vient de l'appelant, rien n'est appris).
   const { data: existing } = await supabase
     .from("prospects")
     .select("email")
@@ -235,6 +283,12 @@ export async function importProspectsCore(
       .filter(Boolean) as string[]
   );
 
+  // 1 et 2 : le fichier, puis l'équipe — calculés d'un coup, avant la boucle.
+  const entrees = rows.map((r) => ({ telephone: clean(r.phone), societe: clean(r.company_name) }));
+  const dansLeLot = doublonsDansLeLot(entrees);
+  const { doublons: equipe } = await doublonsEquipe(supabase, entrees, opts.viewerId);
+  const noms = await nomsDesProprietaires(supabase, equipe.map((d) => d.proprietaire));
+
   const reasons: string[] = [];
   let skipped = 0;
   const payload: Record<string, unknown>[] = [];
@@ -244,19 +298,26 @@ export async function importProspectsCore(
   rows.forEach((row, index) => {
     const ligne = index + 2; // +1 en-tête, +1 pour compter à partir de 1
     const company = clean(row.company_name);
-
-    if (!company) {
+    const ignorer = (pourquoi: string) => {
       skipped++;
-      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : société manquante`);
-      return;
+      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : ${pourquoi}`);
+    };
+
+    if (!company) return ignorer("société manquante");
+
+    const double = dansLeLot.get(index);
+    if (double) {
+      return ignorer(
+        `${company} — répète la ligne ${double.premier + 2} (${double.raison === "telephone" ? "même téléphone" : "même nom"})`
+      );
+    }
+    if (estDoublonEquipe(equipe[index])) {
+      const d = equipe[index];
+      return ignorer(`${company} — ${phraseDoublon(d, d.proprietaire ? noms.get(d.proprietaire) : null)}`);
     }
 
     const email = clean(row.email)?.toLowerCase() ?? null;
-    if (email && seen.has(email)) {
-      skipped++;
-      if (reasons.length < 12) reasons.push(`Ligne ${ligne} : ${email} existe déjà`);
-      return;
-    }
+    if (email && seen.has(email)) return ignorer(`${email} existe déjà`);
     if (email) seen.add(email);
 
     payload.push({
@@ -266,6 +327,7 @@ export async function importProspectsCore(
       phone: clean(row.phone),
       website: clean(row.website),
       sector: normaliserSecteur(clean(row.sector)),
+      address: clean(row.address),
       city: clean(row.city),
       status: toStatus(row.status),
       source: clean(row.source) ?? "Import CSV",
@@ -322,4 +384,22 @@ export async function importProspectsCore(
   }
 
   return { inserted, skipped, reasons, ...(ids ? { ids } : {}) };
+}
+
+/**
+ * Les noms des responsables que la base a désignés — elle ne les désigne qu'à
+ * l'ADMIN (031) : pour un commercial, la liste est vide et rien n'est lu.
+ */
+export async function nomsDesProprietaires(
+  supabase: SupabaseClient,
+  ids: (string | null)[]
+): Promise<Map<string, string>> {
+  const uniques = [...new Set(ids.filter((x): x is string => Boolean(x)))];
+  const noms = new Map<string, string>();
+  if (uniques.length === 0) return noms;
+  const { data } = await supabase.from("crm_users").select("id, full_name, email").in("id", uniques);
+  for (const u of (data ?? []) as { id: string; full_name: string | null; email: string }[]) {
+    noms.set(u.id, u.full_name?.trim() || u.email);
+  }
+  return noms;
 }

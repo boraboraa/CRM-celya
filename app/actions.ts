@@ -20,7 +20,9 @@ import {
   isConfidenceLevel,
 } from "@/lib/crm/confidence";
 import { entreeFormulaire } from "@/lib/crm/ligneProspect";
-import { createProspectCore } from "@/lib/crm/prospects";
+import { createProspectCore, nomsDesProprietaires } from "@/lib/crm/prospects";
+import { doublonsEquipe } from "@/lib/crm/doublonsEquipe";
+import { estDoublonEquipe, phraseDoublon } from "@/lib/crm/doublons";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import { normaliserSecteur } from "@/lib/crm/secteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
@@ -93,13 +95,19 @@ export async function createProspectAction(fd: FormData) {
   // est conservée telle quelle (la dédup a déjà été proposée à l'extraction).
   // La lecture du formulaire est celle de l'ajout rapide (ligneProspect.ts) :
   // un champ absent vaut null, la ligne insérée a toujours les mêmes clés.
+  const session = await getSession();
   const result = await createProspectCore(
     supabase,
     userId,
-    entreeFormulaire((k) => fd.get(k))
+    entreeFormulaire((k) => fd.get(k)),
+    // Une fiche déjà suivie par un autre membre ne se recrée pas (031).
+    { equipe: { isAdmin: session?.me?.role === "admin" }, force: fd.get("forcer") === "1" }
   );
 
   if (result.error) throw new Error(result.error);
+  if (result.doublonEquipe) {
+    throw new Error(`Cette société est ${result.doublonEquipe}. Demandez à l'administrateur de vous l'attribuer.`);
+  }
 
   revalidatePath("/prospects");
   redirect(`/prospects/${result.id}`);
@@ -122,17 +130,22 @@ export async function createProspectAction(fd: FormData) {
  * on renvoie quand même vers la fiche, où le geste se refait.
  */
 export async function ajoutRapideAction(input: {
-  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address", string>>;
+  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address" | "sector", string>>;
   echange: Omit<SaveExchangeInput, "prospectId"> | null;
-}): Promise<{ id?: string; error?: string; erreurEchange?: string }> {
+  /** Admin seulement : créer malgré une fiche déjà suivie dans l'équipe. */
+  forcer?: boolean;
+}): Promise<{ id?: string; error?: string; erreurEchange?: string; doublonEquipe?: string }> {
   const { supabase, userId } = await currentUserId();
   if (!input.champs.company_name?.trim()) return { error: "Le nom de la société est requis." };
+  const session = await getSession();
 
   const fiche = await createProspectCore(
     supabase,
     userId,
-    entreeFormulaire((k) => input.champs[k as keyof typeof input.champs] ?? null)
+    entreeFormulaire((k) => input.champs[k as keyof typeof input.champs] ?? null),
+    { equipe: { isAdmin: session?.me?.role === "admin" }, force: input.forcer === true }
   );
+  if (fiche.doublonEquipe) return { doublonEquipe: fiche.doublonEquipe };
   if (fiche.error || !fiche.id) return { error: fiche.error ?? "La fiche n'a pas pu être créée." };
 
   let erreurEchange: string | undefined;
@@ -145,6 +158,27 @@ export async function ajoutRapideAction(input: {
   revalidatePath("/prospects");
   revalidatePath("/dashboard");
   return { id: fiche.id, erreurEchange };
+}
+
+/**
+ * « Déjà suivie dans l'équipe ? » — pour l'ajout rapide, à la frappe (031).
+ * La base répond par des booléens : rien sur la fiche d'un autre. `peutForcer`
+ * dit si le compte (admin) peut créer malgré tout.
+ */
+export async function doublonEquipeAction(input: {
+  telephone?: string | null;
+  societe?: string | null;
+}): Promise<{ phrase: string | null; peutForcer: boolean }> {
+  const { supabase } = await currentUserId();
+  const session = await getSession();
+  const isAdmin = session?.me?.role === "admin";
+  const { doublons } = await doublonsEquipe(supabase, [
+    { telephone: input.telephone ?? null, societe: input.societe ?? null },
+  ]);
+  const d = doublons[0];
+  if (!estDoublonEquipe(d) || d.aMoi) return { phrase: null, peutForcer: isAdmin };
+  const noms = await nomsDesProprietaires(supabase, [d.proprietaire]);
+  return { phrase: phraseDoublon(d, d.proprietaire ? noms.get(d.proprietaire) : null), peutForcer: isAdmin };
 }
 
 export async function updateProspectAction(fd: FormData) {

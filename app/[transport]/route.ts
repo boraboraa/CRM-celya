@@ -911,10 +911,20 @@ function register(server: McpServer) {
           // Sans ce scope, l'avertissement de doublon nommerait les sociétés
           // des autres — le service_role voit tout.
           scope: viewer,
+          // …et l'équipe entière, au nom du porteur du jeton (031) : une
+          // fiche déjà suivie par un autre membre ne se recrée pas.
+          equipe: { viewerId: viewer.userId, isAdmin: viewer.isAdmin },
         }
       );
 
       if (result.error) return fail(`Erreur : ${result.error}`);
+      if (result.doublonEquipe) {
+        return fail(
+          viewer.isAdmin
+            ? `⚠️ Rien créé : cette société est ${result.doublonEquipe}. Relancez avec « forcer: true » si c'est bien une autre fiche.`
+            : `Rien créé : cette société est ${result.doublonEquipe}. Elle appartient à qui l'a enregistrée la première ; seul l'administrateur peut la réattribuer.`
+        );
+      }
       if (result.duplicates) {
         return json(
           `⚠️ Doublon(s) possible(s) — rien créé. Vérifiez, puis relancez avec « forcer: true » si c'est bien une nouvelle fiche.`,
@@ -1802,7 +1812,7 @@ function register(server: McpServer) {
   // --- importer_prospects ---------------------------------------------------
   server.tool(
     "importer_prospects",
-    "Crée des prospects en lot, avec dédup ligne par ligne (email). Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION — le résumé de ce qui serait créé / ignoré — sans rien écrire. Repassez avec « confirmer: true » pour exécuter réellement l'import. « brief » par ligne (facultatif, RÉSERVÉ À L'ADMINISTRATEUR) : le brief d'appel que Janet, l'IA vocale de Celya, lira avant d'appeler la fiche — si un autre compte en passe un, RIEN n'est importé.",
+    "Crée des prospects en lot, avec dédup ligne par ligne : dans le lot lui-même (e-mail, téléphone, nom de société), puis dans TOUTE l'équipe (téléphone et nom — une fiche déjà suivie par un autre membre est ignorée et signalée « déjà suivie dans l'équipe », sans que son responsable soit nommé, sauf pour l'administrateur), puis sur l'e-mail. Le secteur est rangé dans la liste fixe du CRM (« garage » → « Garage / carrosserie », inconnu → « Autre »). Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION — le résumé de ce qui serait créé / ignoré — sans rien écrire. Repassez avec « confirmer: true » pour exécuter réellement l'import. « brief » par ligne (facultatif, RÉSERVÉ À L'ADMINISTRATEUR) : le brief d'appel que Janet, l'IA vocale de Celya, lira avant d'appeler la fiche — si un autre compte en passe un, RIEN n'est importé.",
     {
       prospects: z
         .array(
@@ -1813,11 +1823,12 @@ function register(server: McpServer) {
             phone: z.string().optional(),
             website: z.string().optional(),
             sector: z.string().optional(),
+            address: z.string().optional().describe("Adresse postale, ou lien Google Maps (stocké tel quel)."),
             city: z.string().optional(),
             status: z.string().optional(),
             source: z.string().optional(),
             value_estimate: z.string().optional(),
-            notes: z.string().optional(),
+            notes: z.string().optional().describe("« Ce qu'on sait » de la société — affiché en tête de fiche dès « À appeler »."),
             brief: BRIEF_APPEL.optional().describe(
               "RÉSERVÉ À L'ADMINISTRATEUR. Le brief d'appel de Janet pour cette fiche (faits vérifiés seulement)."
             ),
@@ -1850,7 +1861,9 @@ function register(server: McpServer) {
         lignes,
         viewer.userId,
         // Les ids créés, ligne par ligne : il les faut pour écrire les briefs.
-        { dryRun: !args.confirmer, rendreIds: nbBriefs > 0 }
+        // `viewerId` : la vérification d'équipe se fait au nom du porteur du
+        // jeton (service_role : `auth.uid()` est nul).
+        { dryRun: !args.confirmer, rendreIds: nbBriefs > 0, viewerId: viewer.userId }
       );
       if (result.error) return fail(`Erreur : ${result.error}`);
       const absente = nbBriefs > 0 ? await migration025Absente(admin) : null;

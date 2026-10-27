@@ -174,3 +174,168 @@ alter table public.meetings
   add constraint meetings_debrief_issue_connue
   check (debrief_issue is null or debrief_issue in
     ('a_rappeler', 'proposition', 'essai', 'signe', 'pas_interesse', 'suite_posee', 'remplace'));
+
+-- ------------------------------------------------------------
+-- 3. Doublons — « déjà suivie dans l'équipe », sans nommer personne
+--
+-- Deux étudiants qui importent le même cabinet depuis Google Maps : la liste
+-- n'a presque jamais d'e-mail, et l'import ne dédoublonnait que sur l'e-mail.
+-- Et quand il l'aurait fait sur le téléphone, la RLS l'en aurait empêché :
+-- un étudiant ne VOIT pas les fiches d'un autre étudiant, donc il ne peut
+-- pas savoir qu'elles existent. C'est voulu (la cloison), mais la règle
+-- d'attribution — « au premier qui l'enregistre » — devient invérifiable.
+--
+-- D'où une lecture transversale, ÉTROITE : pour chaque entrée (téléphone,
+-- société), des BOOLÉENS. L'identifiant de la fiche n'est rendu que si c'est
+-- la mienne ; le responsable, qu'à l'admin. Rien d'autre ne sort : ni nom,
+-- ni étape, ni contact. Un étudiant peut sonder « ce cabinet est-il suivi ? »
+-- — c'est exactement le service rendu, et rien de plus.
+--
+-- Les clés sont la recopie de lib/crm/doublons.ts (cleTelephone,
+-- cleSociete), même jeu de cas (doublons.cas.json). La comparaison est
+-- EXACTE sur la clé — pas de « contient », qui rapprocherait tout « garage »
+-- de chaque « Garage Dupont » de la base.
+--
+-- Deux portes, une seule règle (même forme que la 029) :
+--   doublons_equipe_pour(viewer, …)  service_role seul — le connecteur MCP,
+--                                    qui passe l'identité du porteur du jeton ;
+--   doublons_equipe(…)               un membre actif connecté, pour lui-même.
+-- ------------------------------------------------------------
+
+create or replace function public.cle_telephone(p text)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare d text;
+begin
+  if p is null then return null; end if;
+  d := regexp_replace(p, '\D', '', 'g');
+  if left(d, 2) = '00' then d := substr(d, 3); end if;
+  if left(d, 2) = '32' and length(d) in (10, 11) then d := substr(d, 3); end if;
+  if left(d, 1) = '0' then d := substr(d, 2); end if;
+  return case when length(d) >= 8 then d else null end;
+end;
+$$;
+
+create or replace function public.cle_societe(p text)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare t text;
+begin
+  if p is null then return null; end if;
+  t := translate(lower(p), 'àâäáãåçéèêëíìîïñóòôöõúùûüýÿ', 'aaaaaaceeeeiiiinooooouuuuyy');
+  -- Deux passes, comme côté TS.
+  t := regexp_replace(t, '(^|[^a-z0-9])(srl|sprl|sa|bv|bvba|nv|asbl|vzw|sc|scs|snc|gmbh)(?=$|[^a-z0-9])', '\1', 'g');
+  t := regexp_replace(t, '(^|[^a-z0-9])(srl|sprl|sa|bv|bvba|nv|asbl|vzw|sc|scs|snc|gmbh)(?=$|[^a-z0-9])', '\1', 'g');
+  t := regexp_replace(t, '[^a-z0-9]', '', 'g');
+  return case when length(t) > 3 then t else null end;
+end;
+$$;
+
+comment on function public.cle_telephone(text) is
+  'Numéro national significatif (031) — recopie de cleTelephone (lib/crm/doublons.ts), jeu de cas doublons.cas.json.';
+comment on function public.cle_societe(text) is
+  'Nom de société sans accents ni forme juridique (031) — recopie de cleSociete (lib/crm/doublons.ts), jeu de cas doublons.cas.json.';
+
+create or replace function public.doublons_equipe_pour(
+  p_viewer uuid,
+  p_telephones text[],
+  p_societes text[]
+)
+returns table (
+  idx int,
+  par_telephone boolean,
+  par_societe boolean,
+  a_moi boolean,
+  fiche_id uuid,
+  proprietaire uuid
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+#variable_conflict use_column
+-- (Les colonnes de RETURNS TABLE — idx… — portent le nom des colonnes des CTE.)
+declare
+  v_admin boolean;
+  n int := greatest(coalesce(array_length(p_telephones, 1), 0), coalesce(array_length(p_societes, 1), 0));
+begin
+  -- Le lecteur doit être un membre ACTIF : un compte désactivé n'apprend rien.
+  select u.role = 'admin' into v_admin
+    from public.crm_users u
+   where u.id = p_viewer and u.is_active;
+  if v_admin is null then
+    raise exception 'doublons_equipe : compte inconnu ou inactif' using errcode = '42501';
+  end if;
+  if n > 200 then
+    raise exception 'doublons_equipe : 200 entrées au plus par appel' using errcode = '22023';
+  end if;
+
+  return query
+  with entrees as (
+    select i as idx,
+           public.cle_telephone(p_telephones[i]) as kt,
+           public.cle_societe(p_societes[i]) as ks
+      from generate_series(1, n) as i
+  ),
+  fiches as (
+    select p.id, p.owner_id,
+           public.cle_telephone(p.phone) as kt,
+           public.cle_societe(p.company_name) as ks
+      from public.prospects p
+  ),
+  touches as (
+    select e.idx, f.id, f.owner_id,
+           (e.kt is not null and e.kt = f.kt) as par_tel,
+           (e.ks is not null and e.ks = f.ks) as par_nom
+      from entrees e
+      join fiches f on (e.kt is not null and e.kt = f.kt) or (e.ks is not null and e.ks = f.ks)
+  )
+  select e.idx,
+         coalesce(bool_or(t.par_tel), false),
+         coalesce(bool_or(t.par_nom), false),
+         coalesce(bool_or(t.owner_id = p_viewer), false),
+         -- La fiche, seulement si c'est la MIENNE (la plus ancienne des miennes).
+         (array_agg(t.id order by t.id) filter (where t.owner_id = p_viewer))[1],
+         -- Le responsable, seulement pour l'ADMIN.
+         case when v_admin then (array_agg(t.owner_id order by t.id) filter (where t.id is not null))[1] end
+    from entrees e
+    left join touches t on t.idx = e.idx
+   group by e.idx
+   order by e.idx;
+end;
+$$;
+
+comment on function public.doublons_equipe_pour(uuid, text[], text[]) is
+  'Doublons d''équipe (031) : des booléens par entrée, l''id d''une fiche seulement si elle est au lecteur, le responsable seulement pour l''admin. Service_role seul (connecteur MCP).';
+
+create or replace function public.doublons_equipe(p_telephones text[], p_societes text[])
+returns table (
+  idx int,
+  par_telephone boolean,
+  par_societe boolean,
+  a_moi boolean,
+  fiche_id uuid,
+  proprietaire uuid
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select * from public.doublons_equipe_pour(auth.uid(), p_telephones, p_societes);
+$$;
+
+comment on function public.doublons_equipe(text[], text[]) is
+  'Doublons d''équipe pour le compte connecté (031) — enveloppe de doublons_equipe_pour(auth.uid(), …).';
+
+revoke all on function public.doublons_equipe_pour(uuid, text[], text[]) from public, anon, authenticated;
+grant execute on function public.doublons_equipe_pour(uuid, text[], text[]) to service_role;
+revoke all on function public.doublons_equipe(text[], text[]) from public, anon;
+grant execute on function public.doublons_equipe(text[], text[]) to authenticated;

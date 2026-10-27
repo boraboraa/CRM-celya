@@ -86,7 +86,7 @@ begin
   -- A. La reprise : seuls les secteurs bougent, et exactement comme prévu
   -- ==========================================================================
   select count(*) into n from base_prospects b where b.sector is distinct from public.normaliser_secteur(b.sector);
-  perform pg_temp.info(n || ' fiche(s) dont le secteur change (44 attendues le 27/10)');
+  perform pg_temp.info(n || ' fiche(s) dont le secteur change (52 le 27/10 à 15h, sur 98 fiches)');
   perform pg_temp.verifie('reprise : chaque secteur a pris la valeur de normaliser_secteur, et seulement elle',
     not exists (select 1 from base_prospects b join public.prospects p using (id)
                  where p.sector is distinct from public.normaliser_secteur(b.sector)));

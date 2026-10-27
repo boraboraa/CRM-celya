@@ -5,7 +5,8 @@
 -- APRÈS la 030 (la valeur d'enum `essai_gratuit` doit exister et être validée).
 -- Additive : des colonnes neuves, une table, des fonctions, des triggers.
 -- Une seule écriture de données : la normalisation des secteurs (section 1),
--- 44 fiches mesurées le 27/10 en transaction annulée.
+-- 52 fiches sur 98 mesurées le 27/10 à 15h en transaction annulée (le nombre
+-- suit les fiches créées d'ici l'application : la règle, elle, est fixe).
 --
 -- Sections, une par fonctionnalité du lot :
 --   1. Secteurs : une liste fixe, normalisée par trigger
@@ -111,8 +112,8 @@ create trigger prospects_normaliser_secteur
   for each row execute function public.prospects_normaliser_secteur();
 
 -- La reprise : les valeurs existantes, par la même règle. Seules les lignes qui
--- CHANGENT sont écrites (44 le 27/10 : Garage 10, garage 7, Carrosserie 4,
--- Garage automobile 2, Garage / Carrosserie 1, Dentiste 9, Courtier
+-- CHANGENT sont écrites (52 le 27/10 à 15h : Garage 19, garage 7, Carrosserie
+-- 4, Garage automobile 2, Garage / Carrosserie 1, Dentiste 9, Courtier
 -- assurances 4, Chauffage / sanitaire 4, Chauffagiste 3). Effet de bord
 -- assumé : `updated_at` de ces fiches avance (tri « récent » de la liste).
 -- Aucun autre trigger ne regarde `sector`.

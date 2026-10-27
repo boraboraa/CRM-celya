@@ -89,10 +89,17 @@ export async function middleware(request: NextRequest) {
   // qu'un rappel : la valeur repasse par `lirePerimetre`, qui la valide comme
   // une URL (lib/crm/perimetre.ts).
   const choisi = perimetreAMemoriser(path, request.nextUrl.searchParams.get("perimetre"));
+  // Un chargement COMPLET : le navigateur le dit (`Sec-Fetch-Dest: document`).
+  // L'en-tête `rsc` d'une navigation, lui, n'arrive PAS jusqu'ici (Next le
+  // retire avant le middleware) — vérifié le 27/10, il ne peut pas servir.
+  const destination = request.headers.get("sec-fetch-dest");
+  const chargementComplet =
+    destination === "document" ||
+    (destination === null && (request.headers.get("accept") ?? "").includes("text/html"));
   if (
     user &&
     choisi &&
-    request.headers.get("rsc") !== "1" &&
+    chargementComplet &&
     request.cookies.get(PERIMETRE_COOKIE)?.value !== choisi
   ) {
     response.cookies.set(PERIMETRE_COOKIE, choisi, {

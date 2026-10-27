@@ -7,8 +7,8 @@ import {
   rescheduleTaskAction,
   saveExchangeAction,
 } from "@/app/actions";
-import { RACCOURCIS_RELANCE, relative } from "@/lib/constants";
-import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { relative } from "@/lib/constants";
+import { localInputToISO } from "@/lib/time";
 import {
   deriveNextAction,
   type NextAction,
@@ -19,17 +19,7 @@ import { infoRdvPrevu, jourLong, lienAgenda, PLUS_RIEN } from "@/lib/crm/prochai
 import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { DebriefRdv } from "@/components/DebriefRdv";
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/** Date locale décalée de N jours (le navigateur de Bora est à Bruxelles). */
-function shiftedDate(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+import { ChoixRelance } from "@/components/ChoixRelance";
 
 /**
  * PROCHAINE ACTION — c'est ici qu'on arrive en raccrochant.
@@ -140,12 +130,6 @@ export function NextActionCard({
 
   const { task, meeting, context, when, overdue, isMeeting, aDebriefer } = vue;
 
-  // Reporter en conservant l'heure (un RDV à 14:00 le reste) — celle de la
-  // relance ouverte, même quand la carte montre un rendez-vous à sa place.
-  const dueTime = relanceOuverte
-    ? isoToLocalInput(relanceOuverte.due_at).slice(11, 16) || "09:00"
-    : "09:00";
-
   function champs(id: string, extra: Record<string, string>) {
     const fd = new FormData();
     fd.set("id", id);
@@ -165,13 +149,14 @@ export function NextActionCard({
    *     une note sans texte, qui n'atteste d'aucun échange et ne laisse que
    *     sa cadence.
    */
-  function relancer(date: string) {
-    if (!date) return;
+  /** `valeur` : « YYYY-MM-DDTHH:mm » en heure de Bruxelles (ChoixRelance). */
+  function relancer(valeur: string) {
+    if (!valeur) return;
     setPourQuand(false);
     setErreur(undefined);
+    const local = valeur.length >= 16 ? valeur.slice(0, 16) : `${valeur}T09:00`;
 
     if (relanceOuverte) {
-      const local = `${date}T${dueTime}`;
       startTransition(async () => {
         appliquer({ due_at: localInputToISO(local) ?? relanceOuverte.due_at });
         const res = await rescheduleTaskAction(
@@ -182,14 +167,14 @@ export function NextActionCard({
       return;
     }
 
-    const due = localInputToISO(`${date}T09:00`);
+    const due = localInputToISO(local);
     if (!due) return;
     startTransition(async () => {
       appliquer({ relance: due });
       const res = await saveExchangeAction({
         prospectId,
         type: "note",
-        dateLocale: date,
+        dateLocale: local,
         isExchange: false,
       });
       if (res?.error) setErreur(res.error);
@@ -371,43 +356,17 @@ export function NextActionCard({
           </button>
         )}
 
-        <span className="flex flex-wrap items-center gap-1 rounded-xl bg-white/[0.03] px-1.5 py-1 ring-1 ring-white/[0.08]">
-          <span className="pl-1 pr-0.5 text-[11px] text-slate-500">Relancer</span>
-          {pourQuand && (
-            <span className="pr-0.5 text-[11px] text-amber-300">Pour quand&nbsp;?</span>
-          )}
-          {RACCOURCIS_RELANCE.map((r) => (
-            <button
-              key={r.label}
-              type="button"
-              disabled={pending}
-              onClick={() => relancer(shiftedDate(r.jours))}
-              className="min-h-[44px] rounded-lg px-2.5 text-[11px] text-slate-400 transition hover:bg-celya-blue/15 hover:text-blue-200"
-            >
-              {r.label}
-            </button>
-          ))}
-          {/* Toujours modifiable à la main : « le 14 octobre » reste possible.
-              Champ CONTRÔLÉ : il suit le report optimiste au lieu de rester
-              sur la date d'origine. */}
-          <input
-            type="date"
-            disabled={pending}
-            value={task ? isoToLocalInput(task.due_at).slice(0, 10) : ""}
-            onChange={(e) => relancer(e.target.value)}
-            aria-label="Relancer à une date précise"
-            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60"
-          />
-          {/* Poser une relance reste libre, même avant le rendez-vous : on
-              informe, on ne bloque pas (024). Elle remontera dans « À
-              appeler » le jour venu ; la fiche, elle, dira toujours le RDV. */}
-          {rdvAVenir && (
-            <span className="flex basis-full items-center gap-1 px-1 pb-0.5 text-[11px] text-slate-400">
-              <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
-              {infoRdvPrevu(rdvAVenir)}
-            </span>
-          )}
-        </span>
+        {/* Le jour en liste, l'heure en un tap (lib/crm/relance.ts) : « Demain
+            à 9h » est UN tap. Poser une relance reste libre, même avant le
+            rendez-vous : on informe, on ne bloque pas (024). Elle remontera
+            dans « À appeler » le jour venu ; la fiche, elle, dira toujours le
+            RDV. */}
+        <ChoixRelance
+          onChoisir={relancer}
+          pending={pending}
+          avertissement={pourQuand ? "Pour quand ?" : null}
+          info={rdvAVenir ? infoRdvPrevu(rdvAVenir) : null}
+        />
 
         {canEmail && (
           <button

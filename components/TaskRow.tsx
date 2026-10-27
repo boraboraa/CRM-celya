@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { fmtDate, fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
-import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { fmtDate, fmtDateTime, relative } from "@/lib/constants";
+import { localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
 import { infoRdvPrevu, jourHeureCourt } from "@/lib/crm/prochaineAction";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { DebriefRdv } from "@/components/DebriefRdv";
+import { ChoixRelance } from "@/components/ChoixRelance";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
@@ -66,10 +67,6 @@ export type TaskWithProspect = {
   } | null;
 };
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /**
  * Une ligne de relance — purement présentation.
  *
@@ -124,24 +121,14 @@ export function TaskRow({
   const [reprogOuvert, setReprogOuvert] = useState(false);
   const tel = lienTel(task.prospects?.phone);
 
-  const dueLocal = isoToLocalInput(task.due_at); // YYYY-MM-DDTHH:mm Bruxelles
-  const dueDate = dueLocal.slice(0, 10);
-  const dueTime = dueLocal.slice(11, 16) || "09:00";
-
-  /** Reprogramme à une date précise en conservant l'heure existante. */
-  function reschedule(date: string) {
-    if (!date || !onReschedule) return;
+  /** Reprogramme au jour ET à l'heure choisis (ChoixRelance : « YYYY-MM-DDTHH:mm »). */
+  function reschedule(valeur: string) {
+    if (!valeur || !onReschedule) return;
     setPourQuand(false);
-    const local = `${date}T${dueTime}`;
+    const local = valeur.length >= 16 ? valeur.slice(0, 16) : `${valeur}T09:00`;
     // La date affichée tout de suite doit être la vraie : même conversion que
     // le serveur (heure de Bruxelles → UTC), par le même utilitaire.
     onReschedule(local, localInputToISO(local) ?? task.due_at);
-  }
-
-  function shiftedDate(days: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
   return (
@@ -369,7 +356,7 @@ export function TaskRow({
               }`}
             >
               <Icone nom="report" className="h-3.5 w-3.5" />
-              {fmtDate(task.due_at)}
+              {jourHeureCourt(task.due_at)}
               <Icone nom="chevron" className={`h-3 w-3 transition ${reprogOuvert ? "rotate-180" : ""}`} />
             </button>
           </div>
@@ -388,35 +375,16 @@ export function TaskRow({
               : `w-full pl-8 lg:flex lg:w-auto lg:shrink-0 lg:pl-0 ${reprogOuvert || pourQuand ? "flex" : "hidden"}`
           }`}
         >
-          {/* « À rappeler » vient d'être enregistré : il ne manque plus que le
-              jour, et c'est ce champ-ci qui le porte. */}
-          {pourQuand && (
-            <span className="text-[11px] text-amber-300">Pour quand&nbsp;?</span>
-          )}
-          {/* Champ de date réel : reprogrammer au jour près. Les raccourcis
-              remplissent la même date (et l'appliquent aussitôt) — mêmes mots
-              que la ligne « Relancer » de la carte, ils viennent du même
-              endroit (RACCOURCIS_RELANCE). */}
-          <input
-            type="date"
-            value={dueDate}
-            disabled={!onReschedule}
-            onChange={(e) => reschedule(e.target.value)}
-            aria-label="Reprogrammer la relance"
-            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60 lg:min-h-0"
+          {/* Le jour en liste, l'heure en un tap — le même composant que la
+              carte PROCHAINE ACTION (lib/crm/relance.ts). « À rappeler » vient
+              d'être enregistré : il ne manque plus que le jour, et c'est ici
+              qu'il se dit. */}
+          <ChoixRelance
+            titre="Reprogrammer"
+            onChoisir={reschedule}
+            pending={!onReschedule}
+            avertissement={pourQuand ? "Pour quand ?" : null}
           />
-          {RACCOURCIS_RELANCE.map(({ label, jours }) => (
-            <button
-              key={label}
-              type="button"
-              disabled={!onReschedule}
-              onClick={() => reschedule(shiftedDate(jours))}
-              title={`Reprogrammer à dans ${jours} jour${jours > 1 ? "s" : ""}`}
-              className="min-h-[44px] rounded-lg px-2.5 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 lg:min-h-0 lg:px-2"
-            >
-              {label}
-            </button>
-          ))}
           {/* Supprimer est définitif : c'est le seul rose de la ligne. */}
           <button
             type="button"

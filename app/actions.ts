@@ -894,7 +894,7 @@ export async function cloturerRendezVousAction(input: {
   compteRendu?: string | null;
   /** « Pas intéressé » : la raison, exigée. */
   raison?: string | null;
-  /** « Et ensuite ? » : « YYYY-MM-DD » (09:00 Bruxelles), ou null. Exigée pour « à rappeler ». */
+  /** « Et ensuite ? » : « YYYY-MM-DD » (09:00 Bruxelles) ou « YYYY-MM-DDTHH:mm », ou null. Exigée pour « à rappeler ». */
   suite?: string | null;
 }): Promise<ActionState & { plusRien?: boolean }> {
   const session = await getSession();

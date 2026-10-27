@@ -208,17 +208,8 @@ export const SOURCES = [
   "Autre",
 ];
 
-/**
- * Les trois raccourcis de relance, dans le même ordre et avec les mêmes mots
- * partout où l'on repousse une date (carte PROCHAINE ACTION, ligne du tableau
- * « À faire », champ de date). Un seul endroit : « +3 j » ici et « +3 jours »
- * ailleurs, c'était déjà deux vocabulaires pour un seul geste.
- */
-export const RACCOURCIS_RELANCE: { label: string; jours: number }[] = [
-  { label: "Demain", jours: 1 },
-  { label: "+3 j", jours: 3 },
-  { label: "+1 sem", jours: 7 },
-];
+// Les choix de relance (jour + heure) vivent dans lib/crm/relance.ts (27/10) :
+// une seule table, un seul composant (ChoixRelance).
 
 const TZ = "Europe/Brussels";
 

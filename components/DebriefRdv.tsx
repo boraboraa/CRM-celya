@@ -5,9 +5,9 @@ import {
   cloturerRendezVousAction,
   deplacerRendezVousAction,
 } from "@/app/actions";
-import { RACCOURCIS_RELANCE } from "@/lib/constants";
 import { Icone } from "@/components/ui";
 import { ChampExtensible } from "@/components/ChampExtensible";
+import { ChoixRelance } from "@/components/ChoixRelance";
 import {
   ISSUES_TENUES,
   ISSUE_CHIP,
@@ -28,17 +28,6 @@ const QUAND: Record<"a_rappeler" | "suivi_email" | "pas_decroche", string> = {
   suivi_email: "Relancer quand ?",
   pas_decroche: "Rappeler quand ? (facultatif)",
 };
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/** Date locale décalée de N jours (le navigateur de Bora est à Bruxelles). */
-function shiftedDate(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 /** Ce qu'a donné le débrief, pour le parent qui l'affiche. */
 export type IssueEnvoyee =
@@ -169,41 +158,25 @@ export function DebriefRdv({
       </div>
 
       {(ouverte === "a_rappeler" || ouverte === "suivi_email" || ouverte === "pas_decroche") && (
-        <div
-          className="flex flex-wrap items-center gap-1 rounded-xl bg-indigo-500/[0.06] px-1.5 py-1 ring-1 ring-indigo-400/20"
-          role="group"
-          aria-label={QUAND[ouverte]}
-        >
-          <span className="pl-1 pr-0.5 text-[11px] text-indigo-200">{QUAND[ouverte]}</span>
-          {RACCOURCIS_RELANCE.map((r) => (
-            <button
-              key={r.label}
-              type="button"
-              disabled={pending}
-              onClick={() => envoyer(ouverte, shiftedDate(r.jours))}
-              className="min-h-[44px] rounded-lg px-2.5 text-[11px] text-slate-300 transition hover:bg-indigo-500/20 hover:text-indigo-100"
-            >
-              {r.label}
-            </button>
-          ))}
-          <input
-            type="date"
-            disabled={pending}
-            onChange={(e) => e.target.value && envoyer(ouverte, e.target.value)}
-            aria-label="Une date précise"
-            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
-          />
-          {ouverte === "pas_decroche" && (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => envoyer("pas_decroche")}
-              className="btn-link min-h-[44px] px-2 text-[11px]"
-            >
-              Sans relance
-            </button>
-          )}
-        </div>
+        // Le jour en liste, l'heure en un tap : c'est l'heure qui envoie
+        // (lib/crm/relance.ts — le même composant que la carte et « À faire »).
+        <ChoixRelance
+          titre={QUAND[ouverte]}
+          onChoisir={(valeur) => envoyer(ouverte, valeur)}
+          pending={pending}
+          extra={
+            ouverte === "pas_decroche" ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => envoyer("pas_decroche")}
+                className="btn-link min-h-[44px] px-2 text-[11px]"
+              >
+                Sans relance
+              </button>
+            ) : null
+          }
+        />
       )}
 
       {ouverte === "pas_interesse" && (

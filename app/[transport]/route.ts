@@ -1308,7 +1308,7 @@ function register(server: McpServer) {
       date: z
         .string()
         .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/, "Format attendu : YYYY-MM-DD ou YYYY-MM-DDTHH:mm.")
-        .describe("Date de relance (heure de Bruxelles)."),
+        .describe("Date de relance, en heure de Bruxelles : « YYYY-MM-DD » (la relance est alors à 9h) ou « YYYY-MM-DDTHH:mm » quand l'utilisateur a dit une heure (« rappeler demain à 16h » → « …T16:00 »). Ne devinez jamais l'heure : sans heure dite, 9h."),
       type: z.enum(["note", "rendez_vous"]).optional().describe("« rendez_vous » pose un vrai rendez-vous d'AGENDA — jour ET heure alors obligatoires (préférez « poser_rendez_vous », plus complet). Défaut « note » : simple relance."),
       note: z.string().optional().describe("Note facultative versée au journal en même temps."),
     },

@@ -51,7 +51,7 @@ const STYLE: Record<
     icon: "note",
   },
   appel_sans_reponse: {
-    label: "Appelé — pas de réponse",
+    label: "Appelé — pas décroché",
     dot: "bg-slate-500",
     chip: "bg-white/[0.04] text-slate-400 ring-white/10",
     icon: "telephone",

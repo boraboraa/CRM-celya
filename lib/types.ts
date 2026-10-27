@@ -6,12 +6,15 @@ export type UserRole = "admin" | "commercial";
  *  « À rappeler » (migration 026) : le rendez-vous a eu lieu, il faut
  *  rappeler la personne — ne pas confondre avec « À appeler ».
  *  « Essai gratuit » (migration 030) : le client essaie, gratuitement — le
- *  « win » d'un étudiant. Manuelle, et pas une fin de parcours. */
+ *  « win » d'un étudiant. Manuelle, et pas une fin de parcours.
+ *  « Suivi par email » (migration 032) : on a eu quelqu'un qui veut l'info
+ *  par mail — on y entre par le FAIT (le résultat d'appel ou le débrief). */
 export type ProspectStatus =
   | "a_appeler"
   | "contacte"
   | "rendez_vous"
   | "a_rappeler"
+  | "suivi_email"
   | "proposition"
   | "essai_gratuit"
   | "gagne"
@@ -121,6 +124,7 @@ export type CallOutcome =
   | "barrage"
   | "rappeler"
   | "interesse"
+  | "suivi_email"
   | "refus";
 
 export type Activity = {

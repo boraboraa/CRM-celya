@@ -180,7 +180,7 @@ export default async function TodoPage({
     // appliquée). Elle sert DEUX zones, d'où l'absence de filtre SQL :
     //   · « En attente de réponse » — dernier événement = mail sortant ;
     //   · « À appeler / à rappeler » — le résultat du dernier appel, affiché
-    //     sur la ligne (« Pas de réponse (3e fois) ») avant d'en passer un
+    //     sur la ligne (« Pas décroché (3e fois) ») avant d'en passer un
     //     autre. Filtrer ici aurait coûté une SIXIÈME requête sur l'écran le
     //     plus consulté ; le tri se fait en mémoire, juste en dessous.
     supabase.from("prospect_action_state").select(LAST_ACTION_SELECT).limit(500),

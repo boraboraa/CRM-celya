@@ -2,11 +2,14 @@
  * Les libellés des appels de Janet — module NEUTRE (ni serveur ni client), pur.
  */
 
-export const OUTCOME_LABEL_APPEL: Record<"sans_reponse" | "barrage" | "rappeler" | "interesse" | "refus", string> = {
+export const OUTCOME_LABEL_APPEL: Record<"sans_reponse" | "barrage" | "rappeler" | "interesse" | "suivi_email" | "refus", string> = {
   sans_reponse: "Pas de réponse",
   barrage: "Barrage",
   rappeler: "À rappeler",
   interesse: "Intéressé",
+  // Janet ne le pose jamais (033) : la clé n'existe que pour que le type
+  // suive celui des résultats d'appel de l'écran.
+  suivi_email: "Suivi par email",
   refus: "Pas intéressé",
 };
 

@@ -59,7 +59,7 @@ export const LAST_ACTION_ICON: Record<LastActionKind, IconeNom> = {
 export const LAST_ACTION_LABEL: Record<LastActionKind, string> = {
   email_sortant: "Mail envoyé",
   email_entrant: "Réponse reçue",
-  appel_sans_reponse: "Appelé, pas de réponse",
+  appel_sans_reponse: "Appelé, pas décroché",
   echange: "Échange eu",
   rendez_vous: "RDV",
   note_interne: "Note de repérage",

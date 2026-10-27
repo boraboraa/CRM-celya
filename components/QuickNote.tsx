@@ -402,7 +402,7 @@ export function QuickNote({
               {sansRepPastille && (
                 <Pastille onRetirer={() => masquer("sans_reponse")}>
                   <Icone nom="telephone" className="h-3 w-3" />
-                  Appelé, pas de réponse
+                  Appelé, pas décroché
                 </Pastille>
               )}
               {propositionPastille && (

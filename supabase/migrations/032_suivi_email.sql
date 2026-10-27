@@ -1,0 +1,29 @@
+-- ============================================================
+-- 032 — Une étape « Suivi par email » (27 octobre 2026, soir)
+--
+-- Après un appel, l'étudiant a souvent eu quelqu'un qui dit « envoyez-moi ça
+-- par mail ». Ce n'est ni « À rappeler » (on attend un mail, pas un appel), ni
+-- « Proposition » (rien n'est chiffré). Bora veut le VOIR dans le pipeline :
+-- une colonne à elle.
+--
+--   a_appeler → contacte → rendez_vous → a_rappeler → suivi_email
+--             → proposition → essai_gratuit → gagne / perdu
+--
+-- On y entre par un FAIT, jamais par le texte (lib/crm/status.ts) : un résultat
+-- d'appel « Suivi par email » (activities.outcome = 'suivi_email', 033), ou un
+-- rendez-vous débriefé « Suivi par email » (meetings.debrief_issue, 033).
+-- L'étape avance, ne recule jamais, ne passe jamais par-dessus un verrou.
+--
+-- SEULE dans sa migration, et c'est voulu (comme la 026 et la 030) : Postgres
+-- refuse d'utiliser une valeur d'enum dans la transaction qui l'a ajoutée
+-- (« unsafe use of new value »). La 033 — le résultat d'appel, les issues de
+-- débrief, les compteurs — s'applique donc APRÈS celle-ci.
+--
+-- Additive et compatible avec le code en production : aucune ligne ne prend
+-- la valeur tant que le code du même lot n'est pas déployé, et l'affichage
+-- tolère un statut inconnu (normalizeStatus).
+-- Non réversible au sens strict (Postgres ne retire pas une valeur d'enum) ;
+-- inerte tant qu'aucune fiche ne la porte.
+-- ============================================================
+
+alter type public.prospect_status add value if not exists 'suivi_email' before 'proposition';

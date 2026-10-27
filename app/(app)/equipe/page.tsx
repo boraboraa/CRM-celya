@@ -397,7 +397,7 @@ export default async function TeamPage({
                         </span>{" "}
                         <span className="text-slate-400">
                           {a.outcome === "sans_reponse"
-                            ? "Appelé, pas de réponse"
+                            ? "Appelé, pas décroché"
                             : ACTIVITY_LABEL[a.type as keyof typeof ACTIVITY_LABEL] ?? a.type}
                         </span>
                         {a.prospects && (

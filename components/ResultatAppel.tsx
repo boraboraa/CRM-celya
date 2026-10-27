@@ -149,7 +149,7 @@ export function ResultatAppel({
         setTexteEnregistre(texte.trim());
         setNote("Corrigé.");
         // Corrigé EN « à rappeler » : la date manque toujours, la carte le dit.
-        if (o === "rappeler") onRappeler?.();
+        if (o === "rappeler" || o === "suivi_email") onRappeler?.();
       });
       return;
     }
@@ -184,7 +184,7 @@ export function ResultatAppel({
       );
       // « À rappeler » : la date se choisit dans la ligne « Relancer » de la
       // carte, pas ici — on lui passe la main.
-      if (o === "rappeler") onRappeler?.();
+      if (o === "rappeler" || o === "suivi_email") onRappeler?.();
     });
   }
 
@@ -226,7 +226,7 @@ export function ResultatAppel({
 
   return (
     <div className={`space-y-2.5 ${className}`} aria-label="Résultat de l'appel">
-      {/* Cinq cibles LARGES : c'est un pouce qui vise, pas une souris. */}
+      {/* Six cibles LARGES : c'est un pouce qui vise, pas une souris. */}
       <div className="flex flex-wrap gap-1.5">
         {OUTCOME_ORDER.map((o) => {
           const actif = choisi === o;

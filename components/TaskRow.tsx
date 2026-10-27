@@ -53,7 +53,7 @@ export type TaskWithProspect = {
   rdv_a_debriefer?: { id: string; starts_at: string } | null;
   /**
    * La dernière action de la fiche (vue prospect_action_state), quand
-   * l'appelant l'a chargée. C'est elle qui dit « Pas de réponse (3e fois) »
+   * l'appelant l'a chargée. C'est elle qui dit « Pas décroché (3e fois) »
    * AVANT de rappeler — l'information qui manquait le plus dans « À faire ».
    * Seul « À faire » la charge : la fiche ne passe jamais `derniere_action`.
    */

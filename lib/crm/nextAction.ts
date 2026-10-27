@@ -93,7 +93,7 @@ function describeContext(last: LastEvent, contact: string | null): string {
     case "note_interne":
       return `Note de repérage du ${fmtDate(last.at)} — aucun échange encore eu.`;
     case "appel_sans_reponse":
-      return `Appelé le ${fmtDate(last.at)} — pas de réponse.`;
+      return `Appelé le ${fmtDate(last.at)} — pas décroché.`;
   }
 }
 

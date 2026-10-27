@@ -13,7 +13,8 @@
     { "ref": "a9", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-01T22:30:00Z", "pourquoi": "dimanche 23h30 à Bruxelles : semaine d'avant" },
     { "ref": "a10", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-01T23:10:00Z", "pourquoi": "lundi 0h10 à Bruxelles : cette semaine" },
     { "ref": "a11", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-08T23:00:00Z", "pourquoi": "lundi suivant 0h00 : semaine d'après" },
-    { "ref": "a12", "author": "V", "outcome": "interesse", "occurred_at": "2026-11-03T10:00:00Z", "pourquoi": "un autre auteur" }
+    { "ref": "a12", "author": "V", "outcome": "interesse", "occurred_at": "2026-11-03T10:00:00Z", "pourquoi": "un autre auteur" },
+    { "ref": "a13", "author": "U", "outcome": "suivi_email", "occurred_at": "2026-11-06T10:00:00Z", "pourquoi": "suivi par email : un appel ET une réponse, pas un intéressé (Bora, 27/10)" }
   ],
   "rdv": [
     { "ref": "m1", "created_by": "U", "owner": "U", "kind": "prospect", "status": "prevu", "created_at": "2026-11-03T10:05:00Z", "pourquoi": "posé cette semaine" },
@@ -29,7 +30,7 @@
     { "ref": "f4", "owner": "V", "created_by": "U", "created_at": "2026-11-03T09:00:00Z", "essai_gratuit_at": null, "pourquoi": "créée par U, attribuée à V : un numéro de U" }
   ],
   "attendu": {
-    "U": { "appels": 6, "reponses": 3, "interesses": 2, "rdv": 2, "essais": 2, "numeros": 2 },
+    "U": { "appels": 7, "reponses": 4, "interesses": 2, "rdv": 2, "essais": 2, "numeros": 2 },
     "V": { "appels": 1, "reponses": 1, "interesses": 1, "rdv": 0, "essais": 0, "numeros": 0 }
   }
 }

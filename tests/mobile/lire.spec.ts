@@ -95,9 +95,8 @@ test.describe("Prospects", () => {
   test("la première fiche est dans le premier écran", async ({ page }, info) => {
     const { mobile, role } = contexte(info);
     await page.goto(role === "admin" ? "/prospects?perimetre=moi" : "/prospects");
-    const premiere = mobile
-      ? page.locator("main ul > li.card").first()
-      : page.locator("main tbody tr").first();
+    // Des cartes sur toutes les tailles depuis le 27/10 (ListeProspects).
+    const premiere = page.locator("main ul > li.card").first();
     await expect(premiere).toBeVisible();
     await dansLePremierEcran(page, premiere);
     if (mobile) {

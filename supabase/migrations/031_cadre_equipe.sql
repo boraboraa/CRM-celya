@@ -377,9 +377,10 @@ comment on column public.prospects.starred_at is
 -- n'est pas soumis à la RLS ; le connecteur pose lui-même le porteur du jeton.
 -- ------------------------------------------------------------
 
-drop policy if exists prospects_insert on public.prospects;
-create policy prospects_insert on public.prospects
-  for insert to authenticated
+-- ALTER, pas « supprimer puis recréer » : la policy existe (001/016), seul son
+-- WITH CHECK change ; aucun instant sans policy, et rien que l'outil SQL du
+-- MCP prenne pour une écriture destructive.
+alter policy prospects_insert on public.prospects
   with check (public.is_member() and (public.is_admin() or owner_id = auth.uid()));
 
 -- Réattribuer des fiches : l'admin seul, en un geste, tracé au journal.

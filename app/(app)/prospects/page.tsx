@@ -17,6 +17,7 @@ import { PipelineBoard, type BoardProspect } from "@/components/PipelineBoard";
 import { STATUS_ORDER, STATUS_LABEL, STATUS_CHIP, normalizeStatus } from "@/lib/constants";
 import { ordonnerProspects } from "@/lib/crm/ordreProspects";
 import { todayBounds } from "@/lib/time";
+import { avecRepliColonne } from "@/lib/crm/tolerance";
 import {
   LAST_ACTION_SELECT,
   mapLastActions,
@@ -79,15 +80,20 @@ export default async function ProspectsPage({
   const viewer: PerimetreViewer = await getPerimetreViewer();
   const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
-  let query = filtrerProspects(
-    supabase
-      .from("prospects")
-      .select(
-        "id, company_name, contact_name, email, phone, city, status, notes, starred_at, confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name, email)"
-      ),
-    perimetre,
-    viewer
-  );
+  const statutFilter =
+    statut && statut !== "tous" && (STATUS_ORDER as string[]).includes(statut)
+      ? (statut as (typeof STATUS_ORDER)[number])
+      : null;
+  // « Priorité » (défaut) : la base trie par prochaine action, la page range
+  // ensuite les étoilées et le dû en tête (en mémoire — PostgREST ne trie pas
+  // sur une expression). Les deux bornes du jour viennent de lib/time.
+  const sort = tri && ["relance", "recent", "nom"].includes(tri) ? tri : "priorite";
+
+  // `starred_at` (031) : nommée seulement si la base la connaît — voir
+  // lib/crm/tolerance.ts. La requête est donc FABRIQUÉE, pas construite une fois.
+  const fabriquer = (avecEtoile: boolean) => {
+  const colonnes: string = `id, company_name, contact_name, email, phone, city, status, notes, ${avecEtoile ? "starred_at, " : ""}confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name, email)`;
+  let query = filtrerProspects(supabase.from("prospects").select(colonnes), perimetre, viewer);
 
   // La recherche — la même règle que la recherche globale de l'en-tête
   // (lib/crm/recherche.ts) : société, contact, email, ville, et le
@@ -103,18 +109,10 @@ export default async function ProspectsPage({
   }
   // Filtre d'étape poussé en SQL (sinon il s'appliquerait après .limit()
   // et fausserait résultats et compteur au-delà de 500 fiches).
-  const statutFilter =
-    statut && statut !== "tous" && (STATUS_ORDER as string[]).includes(statut)
-      ? (statut as (typeof STATUS_ORDER)[number])
-      : null;
   if (statutFilter) {
     query = query.eq("status", statutFilter);
   }
 
-  // « Priorité » (défaut) : la base trie par prochaine action, la page range
-  // ensuite les étoilées et le dû en tête (en mémoire — PostgREST ne trie pas
-  // sur une expression). Les deux bornes du jour viennent de lib/time.
-  const sort = tri && ["relance", "recent", "nom"].includes(tri) ? tri : "priorite";
   if (sort === "relance" || sort === "priorite") {
     query = query.order("next_action_at", { ascending: true, nullsFirst: false });
   } else if (sort === "nom") {
@@ -122,6 +120,8 @@ export default async function ProspectsPage({
   } else {
     query = query.order("updated_at", { ascending: false });
   }
+  return query.limit(500);
+  };
 
   // La « dernière action » de chaque fiche (canal + date) vient de la vue
   // prospect_action_state — la RLS s'y applique comme partout. Le périmètre,
@@ -137,14 +137,14 @@ export default async function ProspectsPage({
   // dès que la liste revient, sans attendre les trois autres lectures.
   const [[{ data, error }, appeleesParJanet], actionsRes, membresRes, rdvClosRes] =
     await Promise.all([
-      query.limit(500).then(
+      avecRepliColonne(fabriquer).then(
         async (res) =>
           [
             res,
             viewer.isAdmin && res.data?.length
               ? await fichesAppeleesParJanet(
                   supabase,
-                  (res.data as { id: string }[]).map((p) => p.id)
+                  (res.data as unknown as { id: string }[]).map((p) => p.id)
                 )
               : new Set<string>(),
           ] as const
@@ -191,7 +191,7 @@ export default async function ProspectsPage({
   const lastActions = mapLastActions(
     restreindreAuxProspects(
       (actionsRes.data ?? []) as unknown as LastActionRow[],
-      new Set(((data ?? []) as { id: string }[]).map((p) => p.id)),
+      new Set(((data ?? []) as unknown as { id: string }[]).map((p) => p.id)),
       perimetre
     )
   );

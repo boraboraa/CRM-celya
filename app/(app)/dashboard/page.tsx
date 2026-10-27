@@ -1,3 +1,4 @@
+import { avecRepliColonne } from "@/lib/crm/tolerance";
 import { lireMesObjectifs } from "@/lib/crm/lectureObjectifs";
 import { CarteObjectifs } from "@/components/CarteObjectifs";
 import { etoileesDabord } from "@/lib/crm/ordreProspects";
@@ -100,8 +101,10 @@ export default async function TodoPage({
   const viewer: PerimetreViewer = await getPerimetreViewer();
   const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
-  const TASK_SELECT =
-    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind, starred_at)";
+  // `starred_at` (031) n'est nommée que si la base la connaît : chaque lecture
+  // qui la porte passe par `avecRepliColonne` (lib/crm/tolerance.ts).
+  const TASK_SELECT = (e: boolean): string =>
+    `id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind${e ? ", starred_at" : ""})`;
 
   // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un
@@ -124,48 +127,54 @@ export default async function TodoPage({
     mesObjectifs,
   ] = await Promise.all([
     // En retard — les plus anciennes d'abord.
-    filtrerTaches(
-      supabase
-        .from("tasks")
-        .select(TASK_SELECT)
-        .eq("status", "a_faire")
-        .lt("due_at", start),
-      perimetre,
-      viewer
-    )
-      .order("due_at", { ascending: true })
-      .limit(100),
+    avecRepliColonne((e) =>
+      filtrerTaches(
+        supabase
+          .from("tasks")
+          .select(TASK_SELECT(e))
+          .eq("status", "a_faire")
+          .lt("due_at", start),
+        perimetre,
+        viewer
+      )
+        .order("due_at", { ascending: true })
+        .limit(100)
+    ),
 
     // Aujourd'hui.
-    filtrerTaches(
-      supabase
-        .from("tasks")
-        .select(TASK_SELECT)
-        .eq("status", "a_faire")
-        .gte("due_at", start)
-        .lte("due_at", end),
-      perimetre,
-      viewer
-    )
-      .order("due_at", { ascending: true })
-      .limit(100),
+    avecRepliColonne((e) =>
+      filtrerTaches(
+        supabase
+          .from("tasks")
+          .select(TASK_SELECT(e))
+          .eq("status", "a_faire")
+          .gte("due_at", start)
+          .lte("due_at", end),
+        perimetre,
+        viewer
+      )
+        .order("due_at", { ascending: true })
+        .limit(100)
+    ),
 
     // Réponses reçues — emails entrants rattachés, en attente de tri.
     // L'embed est !inner pour que le filtre de périmètre soit filtrant.
-    filtrerJointProspects(
-      supabase
-        .from("emails")
-        .select(
-          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id, starred_at)"
-        )
-        .eq("direction", "entrant")
-        .eq("triage", "a_traiter")
-        .not("prospect_id", "is", null),
-      perimetre,
-      viewer
-    )
-      .order("received_at", { ascending: false })
-      .limit(20),
+    avecRepliColonne((e) =>
+      filtrerJointProspects(
+        supabase
+          .from("emails")
+          .select(
+            `id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id${e ? ", starred_at" : ""})` as string
+          )
+          .eq("direction", "entrant")
+          .eq("triage", "a_traiter")
+          .not("prospect_id", "is", null),
+        perimetre,
+        viewer
+      )
+        .order("received_at", { ascending: false })
+        .limit(20)
+    ),
 
     // La dernière action de chaque fiche (vue prospect_action_state, RLS
     // appliquée). Elle sert DEUX zones, d'où l'absence de filtre SQL :
@@ -177,14 +186,16 @@ export default async function TodoPage({
     supabase.from("prospect_action_state").select(LAST_ACTION_SELECT).limit(500),
 
     // Les fiches encore ouvertes — celles qui peuvent peupler la zone calme.
-    filtrerProspects(
-      supabase
-        .from("prospects")
-        .select("id, company_name, contact_name, next_action_at, next_action_kind, starred_at")
-        .not("status", "in", "(gagne,perdu)"),
-      perimetre,
-      viewer
-    ).limit(500),
+    avecRepliColonne((e) =>
+      filtrerProspects(
+        supabase
+          .from("prospects")
+          .select(`id, company_name, contact_name, next_action_at, next_action_kind${e ? ", starred_at" : ""}` as string)
+          .not("status", "in", "(gagne,perdu)"),
+        perimetre,
+        viewer
+      ).limit(500)
+    ),
 
     // Les membres actifs — pour le sélecteur de périmètre (admin, ou porteur
     // de l'interrupteur d'équipe ; la liste est bornée au partage juste après).
@@ -339,11 +350,13 @@ export default async function TodoPage({
     // `city` complète l'adresse du rendez-vous quand elle n'a pas de code
     // postal — jamais `country`, qui n'est pas fiable (voir lib/crm/maps.ts).
     meetingProspectIds.length > 0
-      ? supabase
-          .from("prospects")
-          .select("id, company_name, contact_name, phone, city, status, starred_at")
-          .in("id", meetingProspectIds)
-      : Promise.resolve({ data: [] }),
+      ? avecRepliColonne((e) =>
+          supabase
+            .from("prospects")
+            .select(`id, company_name, contact_name, phone, city, status${e ? ", starred_at" : ""}` as string)
+            .in("id", meetingProspectIds)
+        )
+      : Promise.resolve({ data: [], error: null }),
     viewer.isAdmin && meetingsToday.length > 0
       ? rdvPosesParJanet(
           supabase,
@@ -351,7 +364,7 @@ export default async function TodoPage({
         )
       : Promise.resolve(new Set<string>()),
   ]);
-  for (const p of (fichesRdvRes.data ?? []) as {
+  for (const p of (fichesRdvRes.data ?? []) as unknown as {
     id: string;
     company_name: string;
     contact_name: string | null;

@@ -87,10 +87,12 @@ const {
   etatsDesFiches,
   lireCorrection,
   lireDeterministe,
+  ligneImport,
   morceaux,
   phraseCorrection,
   recapitulatif,
   PLAFOND_FICHES,
+  villeDeLAdresse,
 } = await import("./maListe.ts");
 const { AUCUN_DOUBLON } = await import("./doublons.ts");
 
@@ -372,6 +374,44 @@ verifie("liste ou correction ?", [
   estUnCollage("Garage B\nGarage C", 5),
   estUnCollage("mets-les toutes à Namur stp", 5),
 ], [true, false, false, true, true, false]);
+
+// --- L'adresse d'un tableau arrive dans la fiche (27/10) ---------------------
+console.log("\n— l'adresse du tableau, jusqu'à l'import —");
+{
+  const t = lireDeterministe(
+    `| Nom | Téléphone | Adresse |
+|---|---|---|
+| Garage Dupont | 081 22 33 44 | Rue de Fer 12, 5000 Namur |
+| Carrosserie Max | 0471 23 45 67 | Chaussée de Louvain 5 |
+| Kiné Lumière | 02 640 12 34 | Avenue Louise 54, 1050 Ixelles, Belgique |`,
+    SANS
+  );
+  const lignes = t.fiches.map(ligneImport);
+  verifie("la colonne Adresse est lue et part à l'import (address)",
+    lignes.map((l) => l.address),
+    ["Rue de Fer 12, 5000 Namur", "Chaussée de Louvain 5", "Avenue Louise 54, 1050 Ixelles, Belgique"]);
+  verifie("la ville lisible dans l'adresse part dans city (code postal + commune)",
+    lignes.map((l) => l.city), ["Namur", undefined, "Ixelles"]);
+  verifie("l'import garde l'étape « À appeler » et la source « Ma liste »",
+    [lignes[0].status, lignes[0].source], ["a_appeler", "Ma liste"]);
+  const v = lireDeterministe(
+    `| Nom | Téléphone | Adresse | Ville |
+|---|---|---|---|
+| Garage Dupont | 081 22 33 44 | Rue de Fer 12, 5000 Namur | Jambes |`,
+    SANS
+  );
+  verifie("une colonne Ville dite l'emporte sur l'adresse", v.fiches[0].city, "Jambes");
+  const lieu = lireDeterministe(
+    `| Société | Tel | Lieu |
+|---|---|---|
+| Boulangerie Paul | 0470 11 22 33 | Place Verte 3, 4000 Liège |`,
+    SANS
+  );
+  verifie("l'en-tête « Lieu » est une adresse", [lieu.fiches[0].address, lieu.fiches[0].city], ["Place Verte 3, 4000 Liège", "Liège"]);
+  verifie("villeDeLAdresse : France (5 chiffres), rien de lisible → null",
+    [villeDeLAdresse("12 cours Gambetta, 69007 Lyon"), villeDeLAdresse("Chaussée de Louvain 5"), villeDeLAdresse(null)],
+    ["Lyon", null, null]);
+}
 
 serveur.close();
 console.log(echecs === 0 ? `\nTous les cas passent (${ok}).` : `\n${echecs} cas en ÉCHEC.`);

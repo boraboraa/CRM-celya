@@ -71,7 +71,7 @@ export function MaListe({
     {
       de: "janet",
       texte:
-        "Collez votre liste — « nom + numéro » par ligne, un tableau, un copier-coller Google Maps, avec vos remarques au milieu si vous voulez. Je fais les fiches ; rien n'est créé avant votre clic sur « Importer ».",
+        "Collez votre liste — « nom + numéro » par ligne, ou un tableau, avec vos remarques au milieu si vous voulez. Je fais les fiches ; rien n'est créé avant votre clic sur « Importer ».",
     },
   ]);
   const [importee, setImportee] = useState<{ n: number; ignorees: string[] } | null>(null);
@@ -322,6 +322,13 @@ export function MaListe({
                         onBlur={reverifier}
                         placeholder="Téléphone"
                         className={`input min-h-[44px] py-1.5 ${f.phone ? "" : "ring-1 ring-amber-400/40"}`}
+                      />
+                      <input
+                        aria-label={`Adresse, ligne ${i + 1}`}
+                        value={f.address ?? ""}
+                        onChange={(ev) => modifier(i, "address", ev.target.value)}
+                        placeholder="Adresse"
+                        className="input min-h-[44px] py-1.5 sm:col-span-2 lg:col-span-2"
                       />
                       <input
                         aria-label={`Ville, ligne ${i + 1}`}

@@ -16,6 +16,12 @@ export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "e
 /** Les appels de Janet — admin seul, comme « Équipe » (la page le revérifie). */
 export const APPELS_IA_ITEM: NavItem = { href: "/appels-ia", label: "Appels IA", icon: "telephone" };
 export const ACCOUNT_ITEM: NavItem = { href: "/compte", label: "Compte", icon: "reglages" };
+/**
+ * « Coller ma liste » (27/10) : un raccourci de la barre LATÉRALE, sous les
+ * écrans — pas un écran de plus. Sur téléphone, il vit dans le « ＋ » de
+ * l'ajout rapide, jamais dans la barre du bas.
+ */
+export const MA_LISTE_ITEM: NavItem = { href: "/prospects/ma-liste", label: "Coller ma liste", icon: "plus" };
 /** Le classement d'équipe (031) — visible par tous les comptes actifs. */
 export const CLASSEMENT_ITEM: NavItem = { href: "/classement", label: "Classement", icon: "trophee" };
 

@@ -445,3 +445,261 @@ comment on function public.attribuer_prospects(uuid[], uuid) is
 
 revoke all on function public.attribuer_prospects(uuid[], uuid) from public, anon;
 grant execute on function public.attribuer_prospects(uuid[], uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- 6. Objectifs — la semaine, et la période
+--
+-- Bora fixe des objectifs à chaque étudiant : par SEMAINE (du lundi au
+-- dimanche, heure de Bruxelles) pour les appels, les réponses et les
+-- rendez-vous ; sur la PÉRIODE (depuis le début du Sales Trophy, le 2/11)
+-- pour les essais gratuits — deux essais en quelques semaines ne se
+-- découpent pas en semaines (décision de Bora, 27/10).
+--
+-- RLS : l'ADMIN écrit, seul. Chacun lit les siens ; un encadrant lit ceux
+-- qu'il encadre (`encadre`, 021 — à sens unique, comme la lecture des
+-- fiches). Rien pour `anon`. Les valeurs proposées par défaut à l'écran
+-- (60 / 15 / 3, 2 essais) ne sont PAS des règles : elles vivent dans le
+-- formulaire, Bora les ajuste.
+-- ------------------------------------------------------------
+
+create table if not exists public.objectifs (
+  user_id    uuid not null references public.crm_users(id) on delete cascade,
+  semaine    date not null,
+  appels     integer not null default 0,
+  reponses   integer not null default 0,
+  rdv        integer not null default 0,
+  updated_by uuid references public.crm_users(id),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, semaine),
+  -- La semaine est désignée par son LUNDI : deux saisies de la même semaine
+  -- ne peuvent pas coexister sous deux dates.
+  constraint objectifs_semaine_lundi check (extract(isodow from semaine) = 1),
+  constraint objectifs_positifs check (appels >= 0 and reponses >= 0 and rdv >= 0
+                                       and appels <= 10000 and reponses <= 10000 and rdv <= 1000)
+);
+
+create table if not exists public.objectifs_periode (
+  user_id    uuid not null references public.crm_users(id) on delete cascade,
+  debut      date not null,
+  essais     integer not null default 0,
+  updated_by uuid references public.crm_users(id),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, debut),
+  constraint objectifs_periode_positifs check (essais >= 0 and essais <= 1000)
+);
+
+comment on table public.objectifs is
+  'Objectifs de la semaine (031) : appels, réponses, RDV — la semaine désignée par son lundi. Admin écrit ; chacun lit les siens, l''encadrant ceux qu''il encadre.';
+comment on table public.objectifs_periode is
+  'Objectif de la période (031) : les essais gratuits depuis `debut` (le début du Sales Trophy). Mêmes droits que objectifs.';
+
+alter table public.objectifs enable row level security;
+alter table public.objectifs_periode enable row level security;
+revoke all on public.objectifs, public.objectifs_periode from anon;
+
+create policy objectifs_select on public.objectifs
+  for select to authenticated
+  using (public.is_member() and (public.is_admin() or user_id = auth.uid() or public.encadre(user_id)));
+create policy objectifs_ecriture on public.objectifs
+  for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+create policy objectifs_periode_select on public.objectifs_periode
+  for select to authenticated
+  using (public.is_member() and (public.is_admin() or user_id = auth.uid() or public.encadre(user_id)));
+create policy objectifs_periode_ecriture on public.objectifs_periode
+  for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+-- ------------------------------------------------------------
+-- 7. Compteurs et classement
+--
+-- La règle de comptage, UNE fois (`compteurs_pour`) — recopiée en TS dans
+-- lib/crm/compteurs.ts, et les deux jouent le même jeu de cas
+-- (compteurs.cas.json : test:objectifs et la recette 031).
+--
+--   appels      activités non brouillon, AVEC un résultat d'appel, SANS RDV
+--               rattaché (`meeting_id` : un débrief porte « intéressé » ou
+--               « refus » — ce n'est pas un appel), comptées à l'AUTEUR,
+--               datées par `occurred_at` ;
+--   réponses    résultat rappeler · intéressé · refus — on a eu le décideur
+--               (décision de Bora, 27/10 : un barrage est un appel, pas une
+--               réponse) ;
+--   intéressés  intéressé · rappeler ;
+--   rdv         rendez-vous de prospect CRÉÉS dans la période, non annulés,
+--               comptés à qui les a posés (`created_by`, à défaut le
+--               responsable) ;
+--   essais      fiches entrées en essai gratuit dans la période
+--               (`essai_gratuit_at`), comptées au responsable ;
+--   numéros     fiches créées dans la période, comptées à qui les a créées.
+--
+-- Bornes : [début, fin) en DATES de Bruxelles, converties ici.
+--
+-- Trois portes :
+--   compteurs_pour(users, début, fin)   la règle — service_role seul ;
+--   compteurs_de(user, début, fin)       moi, l'admin, ou mon encadrant —
+--                                         la semaine, ou la période ;
+--   classement_equipe(début, fin)        tout membre actif : des CHIFFRES
+--                                         par personne, jamais une fiche.
+-- `admin_team_overview` (015) lève hors admin : le classement a la sienne.
+-- ------------------------------------------------------------
+
+create or replace function public.compteurs_pour(p_users uuid[], p_debut date, p_fin date)
+returns table (
+  user_id uuid,
+  appels integer,
+  reponses integer,
+  interesses integer,
+  rdv integer,
+  essais integer,
+  numeros integer
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with bornes as (
+    select (p_debut::timestamp at time zone 'Europe/Brussels') as d,
+           (p_fin::timestamp at time zone 'Europe/Brussels') as f
+  ),
+  u as (select unnest(p_users) as id),
+  a as (
+    select a.author_id as id,
+           count(*) as appels,
+           count(*) filter (where a.outcome in ('rappeler', 'interesse', 'refus')) as reponses,
+           count(*) filter (where a.outcome in ('interesse', 'rappeler')) as interesses
+      from public.activities a, bornes b
+     where a.author_id = any(p_users)
+       and not coalesce(a.is_draft, false)
+       and a.outcome is not null
+       and a.meeting_id is null
+       and a.occurred_at >= b.d and a.occurred_at < b.f
+     group by a.author_id
+  ),
+  m as (
+    select coalesce(m.created_by, m.owner_id) as id, count(*) as rdv
+      from public.meetings m, bornes b
+     where coalesce(m.created_by, m.owner_id) = any(p_users)
+       and m.kind = 'prospect'
+       and m.status <> 'annule'
+       and m.created_at >= b.d and m.created_at < b.f
+     group by 1
+  ),
+  e as (
+    select p.owner_id as id, count(*) as essais
+      from public.prospects p, bornes b
+     where p.owner_id = any(p_users)
+       and p.essai_gratuit_at >= b.d and p.essai_gratuit_at < b.f
+     group by 1
+  ),
+  n as (
+    select p.created_by as id, count(*) as numeros
+      from public.prospects p, bornes b
+     where p.created_by = any(p_users)
+       and p.created_at >= b.d and p.created_at < b.f
+     group by 1
+  )
+  select u.id,
+         coalesce(a.appels, 0)::int,
+         coalesce(a.reponses, 0)::int,
+         coalesce(a.interesses, 0)::int,
+         coalesce(m.rdv, 0)::int,
+         coalesce(e.essais, 0)::int,
+         coalesce(n.numeros, 0)::int
+    from u
+    left join a on a.id = u.id
+    left join m on m.id = u.id
+    left join e on e.id = u.id
+    left join n on n.id = u.id;
+$$;
+
+comment on function public.compteurs_pour(uuid[], date, date) is
+  'La règle de comptage (031) — appels, réponses, intéressés, RDV, essais, numéros sur [début, fin) en dates de Bruxelles. Recopie : lib/crm/compteurs.ts. Service_role seul.';
+
+create or replace function public.compteurs_de(p_user uuid, p_debut date, p_fin date)
+returns table (
+  user_id uuid,
+  appels integer,
+  reponses integer,
+  interesses integer,
+  rdv integer,
+  essais integer,
+  numeros integer
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not (public.is_member()
+          and (p_user = auth.uid() or public.is_admin() or public.encadre(p_user))) then
+    raise exception 'compteurs_de : ces compteurs ne vous sont pas ouverts' using errcode = '42501';
+  end if;
+  if p_fin <= p_debut or p_fin - p_debut > 400 then
+    raise exception 'compteurs_de : période invalide' using errcode = '22023';
+  end if;
+  return query select * from public.compteurs_pour(array[p_user], p_debut, p_fin);
+end;
+$$;
+
+comment on function public.compteurs_de(uuid, date, date) is
+  'Compteurs d''une personne sur [début, fin) (031) — pour soi, l''admin, ou son encadrant.';
+
+create or replace function public.classement_equipe(p_debut date, p_fin date)
+returns table (
+  user_id uuid,
+  nom text,
+  appels integer,
+  reponses integer,
+  interesses integer,
+  rdv integer,
+  essais integer,
+  numeros integer
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  v_ids uuid[];
+begin
+  -- Un membre actif, ou le connecteur MCP (service_role : `auth.uid()` est
+  -- nul, le porteur du jeton a été vérifié actif en code) — le classement
+  -- est le même pour tous.
+  if not (public.is_member() or coalesce(auth.role(), '') = 'service_role') then
+    raise exception 'classement_equipe : réservé aux membres actifs' using errcode = '42501';
+  end if;
+  if p_fin <= p_debut or p_fin - p_debut > 400 then
+    raise exception 'classement_equipe : période invalide' using errcode = '22023';
+  end if;
+  -- Les participants : les COMMERCIAUX actifs qui ont un objectif posé
+  -- (décision de Bora, 27/10). Ni l'admin, ni un compte inactif, ni
+  -- quelqu'un hors du concours (Rémi n'a pas d'objectif : il n'y figure pas).
+  select array_agg(c.id) into v_ids
+    from public.crm_users c
+   where c.is_active and c.role = 'commercial'
+     and (exists (select 1 from public.objectifs o where o.user_id = c.id)
+          or exists (select 1 from public.objectifs_periode o where o.user_id = c.id));
+  if v_ids is null then return; end if;
+  return query
+    select k.user_id, coalesce(nullif(btrim(c.full_name), ''), split_part(c.email, '@', 1)),
+           k.appels, k.reponses, k.interesses, k.rdv, k.essais, k.numeros
+      from public.compteurs_pour(v_ids, p_debut, p_fin) k
+      join public.crm_users c on c.id = k.user_id
+     order by k.essais desc, k.rdv desc, k.reponses desc, k.appels desc, 2;
+end;
+$$;
+
+comment on function public.classement_equipe(date, date) is
+  'Classement d''équipe (031) : par participant (commercial actif avec un objectif), des CHIFFRES seulement. Tout membre actif.';
+
+revoke all on function public.compteurs_pour(uuid[], date, date) from public, anon, authenticated;
+grant execute on function public.compteurs_pour(uuid[], date, date) to service_role;
+revoke all on function public.compteurs_de(uuid, date, date) from public, anon;
+grant execute on function public.compteurs_de(uuid, date, date) to authenticated, service_role;
+revoke all on function public.classement_equipe(date, date) from public, anon;
+grant execute on function public.classement_equipe(date, date) to authenticated, service_role;

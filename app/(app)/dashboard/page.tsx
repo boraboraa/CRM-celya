@@ -1,3 +1,5 @@
+import { lireMesObjectifs } from "@/lib/crm/lectureObjectifs";
+import { CarteObjectifs } from "@/components/CarteObjectifs";
 import { etoileesDabord } from "@/lib/crm/ordreProspects";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
@@ -119,6 +121,7 @@ export default async function TodoPage({
     meetingsTodayRes,
     debriefRes,
     etatAppels,
+    mesObjectifs,
   ] = await Promise.all([
     // En retard — les plus anciennes d'abord.
     filtrerTaches(
@@ -239,6 +242,10 @@ export default async function TodoPage({
     // et la mise en page reste celle d'avant. Rien n'est demandé pour un
     // commercial (la RLS ne lui rendrait rien de toute façon).
     viewer.isAdmin ? lireEtatAppels(supabase) : Promise.resolve(null),
+
+    // Les objectifs de la semaine (031) — un commercial seul : l'admin n'est
+    // pas au classement. Tolérant : sans la 031, la carte ne s'affiche pas.
+    !viewer.isAdmin ? lireMesObjectifs(supabase, viewer.userId) : Promise.resolve(null),
   ]);
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
@@ -492,6 +499,8 @@ export default async function TodoPage({
       />
 
       <MemoireAFaire ids={ordre} />
+
+      {mesObjectifs?.disponible && <CarteObjectifs donnees={mesObjectifs} />}
 
       {/* La colonne « Appels » de Janet — admin seul. Sans elle (commercial,
           migration 025 absente), le contenu est rendu tel quel. */}

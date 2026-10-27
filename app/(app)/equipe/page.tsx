@@ -11,6 +11,8 @@ import {
   encadrementDisponible,
 } from "@/lib/crm/access";
 import { fmtDate, fmtDateTime, ACTIVITY_LABEL } from "@/lib/constants";
+import { ObjectifsEquipe, type LigneObjectifs } from "@/components/ObjectifsEquipe";
+import { DEBUT_SALES_TROPHY, ajouterJours, jourBruxelles, lundiDe } from "@/lib/crm/compteurs";
 
 /**
  * Équipe — le seul écran qui dise, pour chaque compte : qui c'est, si sa
@@ -87,7 +89,10 @@ export default async function TeamPage({
   // `create or replace`) — un geste risqué en production pour une case à
   // cocher. `lirePorteurs` est une lecture de cinq lignes, tolérante à
   // l'absence de la colonne : la page rend donc aussi avant la migration 020.
-  const [overviewRes, recentRes, porteurs, liens, encadrementEnService] = await Promise.all([
+  // Les objectifs (031) : cette semaine et la suivante, et la période.
+  const lundi = lundiDe(jourBruxelles());
+  const lundiSuivant = ajouterJours(lundi, 7);
+  const [overviewRes, recentRes, porteurs, liens, encadrementEnService, objectifsRes, objectifsPeriodeRes] = await Promise.all([
     supabase.rpc("admin_team_overview", { p_since: since }),
     supabase
       .from("activities")
@@ -100,6 +105,9 @@ export default async function TeamPage({
     lireLiensEncadrement(supabase),
     // …et l'ÉCRITURE aussi : sans la table, pas de cases à cocher.
     encadrementDisponible(supabase),
+    // Tolérantes : sans la 031, la section « Objectifs » le dit.
+    supabase.from("objectifs").select("user_id, semaine, appels, reponses, rdv").in("semaine", [lundi, lundiSuivant]),
+    supabase.from("objectifs_periode").select("user_id, essais").eq("debut", DEBUT_SALES_TROPHY),
   ]);
 
   const rows = (overviewRes.data ?? []) as Row[];
@@ -138,6 +146,28 @@ export default async function TeamPage({
     parAuteur.set(a.author_id, list);
   }
 
+  // Les objectifs : les commerciaux actifs, les étudiants (encadrés) d'abord.
+  const objectifsDisponibles = !objectifsRes.error && !objectifsPeriodeRes.error;
+  const parSemaine = new Map<string, Record<string, { appels: number; reponses: number; rdv: number }>>();
+  for (const o of (objectifsRes.data ?? []) as { user_id: string; semaine: string; appels: number; reponses: number; rdv: number }[]) {
+    const m = parSemaine.get(o.user_id) ?? {};
+    m[o.semaine] = { appels: o.appels, reponses: o.reponses, rdv: o.rdv };
+    parSemaine.set(o.user_id, m);
+  }
+  const essaisDe = new Map(
+    ((objectifsPeriodeRes.data ?? []) as { user_id: string; essais: number }[]).map((o) => [o.user_id, o.essais])
+  );
+  const lignesObjectifs: LigneObjectifs[] = rows
+    .filter((r) => r.is_active && r.role === "commercial")
+    .map((r) => ({
+      userId: r.user_id,
+      nom: r.full_name ?? r.email,
+      etudiant: encadrantsDe.has(r.user_id),
+      parSemaine: parSemaine.get(r.user_id) ?? {},
+      essais: essaisDe.get(r.user_id) ?? null,
+    }))
+    .sort((a, b) => Number(b.etudiant) - Number(a.etudiant) || a.nom.localeCompare(b.nom, "fr"));
+
   const incomplets = rows.filter(
     (r) => r.is_active && (!r.mailbox || !r.mcp_connected)
   ).length;
@@ -162,6 +192,23 @@ export default async function TeamPage({
           <CreateUserForm />
         </div>
       </details>
+
+      {/* ---- Les objectifs (031) : semaine et période, par personne ---- */}
+      {objectifsDisponibles ? (
+        lignesObjectifs.length > 0 && (
+          <ObjectifsEquipe
+            lignes={lignesObjectifs}
+            semaines={[
+              [lundi, "Cette semaine"],
+              [lundiSuivant, "Semaine prochaine"],
+            ]}
+          />
+        )
+      ) : (
+        <p className="mb-6 max-w-3xl text-xs text-slate-500">
+          Objectifs et classement : pas encore disponibles — ils demandent la migration 031.
+        </p>
+      )}
 
       {/* ---- Bandeau : période + alerte de configuration ---- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

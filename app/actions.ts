@@ -25,6 +25,7 @@ import { doublonsEquipe } from "@/lib/crm/doublonsEquipe";
 import { estDoublonEquipe, phraseDoublon } from "@/lib/crm/doublons";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import { normaliserSecteur } from "@/lib/crm/secteurs";
+import { DEBUT_SALES_TROPHY, lundiDe } from "@/lib/crm/compteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
   poserRendezVous,
@@ -1225,4 +1226,69 @@ export async function importProspectsAction(
     revalidatePath("/dashboard");
   }
   return result;
+}
+
+// =====================================================================
+// Objectifs (031) — l'admin seul ; la RLS le revérifie (`objectifs_ecriture`)
+// =====================================================================
+
+/**
+ * Pose les objectifs d'une SEMAINE (appels, réponses, RDV) et ceux de la
+ * PÉRIODE (essais, depuis le début du Sales Trophy) pour une ou plusieurs
+ * personnes. Une valeur absente ne crée rien ; la semaine est désignée par
+ * son lundi (la base le vérifie aussi).
+ */
+export async function poserObjectifsAction(input: {
+  semaine: string;
+  lignes: {
+    userId: string;
+    appels: number | null;
+    reponses: number | null;
+    rdv: number | null;
+    essais: number | null;
+  }[];
+}): Promise<ActionState> {
+  const ctx = await requireAdmin();
+  if (!ctx) return { error: "Seul l'administrateur pose les objectifs." };
+  const { supabase, userId } = ctx;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.semaine) || lundiDe(input.semaine) !== input.semaine) {
+    return { error: "Semaine invalide : elle se désigne par son lundi." };
+  }
+  const n = (v: number | null) =>
+    v === null || v === undefined || !Number.isFinite(v) ? null : Math.max(0, Math.min(10000, Math.round(v)));
+  const lignes = (Array.isArray(input.lignes) ? input.lignes : []).slice(0, 100);
+  const semaine = lignes
+    .filter((l) => [l.appels, l.reponses, l.rdv].some((v) => n(v) !== null))
+    .map((l) => ({
+      user_id: l.userId,
+      semaine: input.semaine,
+      appels: n(l.appels) ?? 0,
+      reponses: n(l.reponses) ?? 0,
+      rdv: Math.min(1000, n(l.rdv) ?? 0),
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    }));
+  const periode = lignes
+    .filter((l) => n(l.essais) !== null)
+    .map((l) => ({
+      user_id: l.userId,
+      debut: DEBUT_SALES_TROPHY,
+      essais: Math.min(1000, n(l.essais)!),
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    }));
+  if (semaine.length === 0 && periode.length === 0) return { error: "Rien à enregistrer." };
+  if (semaine.length) {
+    const { error } = await supabase.from("objectifs").upsert(semaine, { onConflict: "user_id,semaine" });
+    if (error) return { error: estTableAbsente(error) ? "Les objectifs demandent la migration 031." : error.message };
+  }
+  if (periode.length) {
+    const { error } = await supabase.from("objectifs_periode").upsert(periode, { onConflict: "user_id,debut" });
+    if (error) return { error: estTableAbsente(error) ? "Les objectifs demandent la migration 031." : error.message };
+  }
+  revalidatePath("/equipe");
+  revalidatePath("/dashboard");
+  revalidatePath("/classement");
+  const k = new Set([...semaine.map((x) => x.user_id), ...periode.map((x) => x.user_id)]).size;
+  return { success: `Objectifs enregistrés pour ${k} personne${k > 1 ? "s" : ""}.` };
 }

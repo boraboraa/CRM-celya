@@ -2103,6 +2103,15 @@ Depuis octobre 2026 (appels IA, **admin seul, vérifié en code**) :
 `importer_prospects` (source « Claude », jamais réécrite par l'IA). Migration
 `025` absente : chacun répond qu'elle n'est pas appliquée, sans rien écrire.
 
+Depuis le 27 octobre (le cadre de l'équipe de vente, `031`) : `ajouter_note`
+porte `resultat` (les cinq valeurs ; « refus » exige `motif`) ;
+`importer_prospects` et `creer_prospect` vérifient les doublons de TOUTE
+l'équipe (`doublons_equipe_pour`, au nom du porteur du jeton — un commercial
+ne recrée jamais la fiche d'un autre) et rangent le secteur dans la liste
+fixe ; `debriefer_rendez_vous` connaît l'issue `essai` ; deux outils en
+lecture, **`mes_objectifs`** (le porteur du jeton seul) et **`classement`**
+(les chiffres de `/classement`).
+
 Trois précautions dictées par la règle des faits (4 août) :
 
 - `mettre_a_jour_statut` **verrouille** la fiche — sa description le dit, pour

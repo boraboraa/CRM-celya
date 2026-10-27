@@ -16,10 +16,30 @@ export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "e
 /** Les appels de Janet — admin seul, comme « Équipe » (la page le revérifie). */
 export const APPELS_IA_ITEM: NavItem = { href: "/appels-ia", label: "Appels IA", icon: "telephone" };
 export const ACCOUNT_ITEM: NavItem = { href: "/compte", label: "Compte", icon: "reglages" };
+/** Le classement d'équipe (031) — visible par tous les comptes actifs. */
+export const CLASSEMENT_ITEM: NavItem = { href: "/classement", label: "Classement", icon: "trophee" };
 
-/** La barre latérale (ordinateur) : les écrans de terrain, puis ceux de l'admin. */
+const parHrefDans = (liste: NavItem[], href: string): NavItem => {
+  const item = liste.find((i) => i.href === href);
+  if (!item) throw new Error(`Onglet inconnu : ${href}`);
+  return item;
+};
+
+/**
+ * La barre latérale (ordinateur). L'admin voit l'ÉQUIPE avant l'agenda (Bora,
+ * 27/10) : À faire · Prospects · Classement · Équipe · Agenda · Appels IA.
+ * Un commercial garde son ordre de terrain, et gagne le classement en fin.
+ */
 export function navOrdinateur(role: string): NavItem[] {
-  return role === "admin" ? [...NAV_ITEMS, ADMIN_ITEM, APPELS_IA_ITEM] : NAV_ITEMS;
+  if (role !== "admin") return [...NAV_ITEMS, CLASSEMENT_ITEM];
+  return [
+    parHrefDans(NAV_ITEMS, "/dashboard"),
+    parHrefDans(NAV_ITEMS, "/prospects"),
+    CLASSEMENT_ITEM,
+    ADMIN_ITEM,
+    parHrefDans(NAV_ITEMS, "/agenda"),
+    APPELS_IA_ITEM,
+  ];
 }
 
 /**
@@ -31,11 +51,7 @@ export type OngletMobile =
   | { type: "ajout" }
   | { type: "plus"; items: NavItem[] };
 
-const parHref = (href: string): NavItem => {
-  const item = NAV_ITEMS.find((i) => i.href === href);
-  if (!item) throw new Error(`Onglet inconnu : ${href}`);
-  return item;
-};
+const parHref = (href: string): NavItem => parHrefDans(NAV_ITEMS, href);
 
 /**
  * La barre du bas — tirée des MÊMES entrées que la barre latérale, jamais
@@ -44,18 +60,21 @@ const parHref = (href: string): NavItem => {
  * « Plus » (Équipe, Appels IA, Compte) : ce ne sont pas des écrans de
  * terrain, ils restent à un tap sans prendre la place d'un onglet.
  *
- * Le compte d'un commercial passe par l'avatar de l'en-tête.
+ * Le compte d'un commercial passe par l'avatar de l'en-tête ; son classement,
+ * par la carte d'objectifs de « À faire ».
+ *
+ * L'admin (27/10) : « Classement » prend la place d'« Agenda », qui passe
+ * dans « Plus » avec Équipe, Appels IA et Compte.
  */
 export function ongletsMobiles(role: string): OngletMobile[] {
-  const terrain: OngletMobile[] = [
+  const debut: OngletMobile[] = [
     { type: "lien", item: parHref("/dashboard") },
     { type: "lien", item: parHref("/prospects") },
     { type: "ajout" },
-    { type: "lien", item: parHref("/agenda") },
   ];
-  if (role !== "admin") return terrain;
-  const plus = navOrdinateur(role).filter((i) => !NAV_ITEMS.includes(i));
-  return [...terrain, { type: "plus", items: [...plus, ACCOUNT_ITEM] }];
+  if (role !== "admin") return [...debut, { type: "lien", item: parHref("/agenda") }];
+  const plus = navOrdinateur(role).filter((i) => !debut.some((o) => o.type === "lien" && o.item === i) && i !== CLASSEMENT_ITEM);
+  return [...debut, { type: "lien", item: CLASSEMENT_ITEM }, { type: "plus", items: [...plus, ACCOUNT_ITEM] }];
 }
 
 /** L'onglet est-il celui de la page courante ? (`/prospects/123` → Prospects) */

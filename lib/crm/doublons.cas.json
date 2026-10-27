@@ -1,0 +1,35 @@
+{
+  "_note": "UN SEUL jeu de cas pour les DEUX copies des clés de doublon : lib/crm/doublons.ts (npm run test:doublons) et public.cle_telephone / public.cle_societe (recette 031). Chaque cas : [saisie, clé attendue (null = pas de clé), pourquoi].",
+  "telephone": [
+    ["081 22 33 44", "81223344", "fixe namurois, format national"],
+    ["+32 81 22 33 44", "81223344", "le même, international — l'ancienne clé le ratait"],
+    ["0032 81 22 33 44", "81223344", "le même, préfixe 0032"],
+    ["+32 (0)81 22.33.44", "81223344", "le même, zéro de liaison"],
+    ["0470 12 34 56", "470123456", "mobile, national"],
+    ["+32 470 12 34 56", "470123456", "mobile, international"],
+    ["0032 470 12 34 56", "470123456", "mobile, 0032"],
+    ["02/640.12.34", "26401234", "Bruxelles, barre et points"],
+    ["0032 2 640 12 34", "26401234", "Bruxelles, 0032"],
+    ["+32 2 640 12 34", "26401234", "Bruxelles, international"],
+    ["+32 71 22 33 44", "71223344", "Charleroi : ne se confond pas avec un mobile 0471"],
+    ["0471 22 33 44", "471223344", "un mobile 0471, distinct de Charleroi"],
+    ["+33 1 42 68 53 00", "33142685300", "étranger : tous les chiffres"],
+    ["112", null, "trop court"],
+    ["", null, "vide"],
+    [null, null, "absent"]
+  ],
+  "societe": [
+    ["Garage Dupont", "garagedupont", "simple"],
+    ["Garage Dupont SPRL", "garagedupont", "forme juridique retirée"],
+    ["GARAGE DUPONT srl", "garagedupont", "majuscules, srl"],
+    ["Garage Dupont SA SPRL", "garagedupont", "deux formes collées"],
+    ["Cabinet dentaire Smile", "cabinetdentairesmile", "espaces retirés"],
+    ["Clinique Vétérinaire de l'Étang", "cliniqueveterinairedeletang", "accents et apostrophe"],
+    ["Saint-Gilles Auto", "saintgillesauto", "« sa » au début d'un mot n'est pas une forme"],
+    ["Vasa NV", "vasa", "« sa » en fin de mot non plus, nv retiré"],
+    ["Bar", null, "trop court"],
+    ["SA", null, "forme seule"],
+    ["", null, "vide"],
+    [null, null, "absent"]
+  ]
+}

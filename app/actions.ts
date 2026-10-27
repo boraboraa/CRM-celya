@@ -20,8 +20,12 @@ import {
   isConfidenceLevel,
 } from "@/lib/crm/confidence";
 import { entreeFormulaire } from "@/lib/crm/ligneProspect";
-import { createProspectCore } from "@/lib/crm/prospects";
+import { createProspectCore, nomsDesProprietaires } from "@/lib/crm/prospects";
+import { doublonsEquipe } from "@/lib/crm/doublonsEquipe";
+import { estDoublonEquipe, phraseDoublon } from "@/lib/crm/doublons";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
+import { normaliserSecteur } from "@/lib/crm/secteurs";
+import { DEBUT_SALES_TROPHY, lundiDe } from "@/lib/crm/compteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
   poserRendezVous,
@@ -92,13 +96,19 @@ export async function createProspectAction(fd: FormData) {
   // est conservée telle quelle (la dédup a déjà été proposée à l'extraction).
   // La lecture du formulaire est celle de l'ajout rapide (ligneProspect.ts) :
   // un champ absent vaut null, la ligne insérée a toujours les mêmes clés.
+  const session = await getSession();
   const result = await createProspectCore(
     supabase,
     userId,
-    entreeFormulaire((k) => fd.get(k))
+    entreeFormulaire((k) => fd.get(k)),
+    // Une fiche déjà suivie par un autre membre ne se recrée pas (031).
+    { equipe: { isAdmin: session?.me?.role === "admin" }, force: fd.get("forcer") === "1" }
   );
 
   if (result.error) throw new Error(result.error);
+  if (result.doublonEquipe) {
+    throw new Error(`Cette société est ${result.doublonEquipe}. Demandez à l'administrateur de vous l'attribuer.`);
+  }
 
   revalidatePath("/prospects");
   redirect(`/prospects/${result.id}`);
@@ -121,17 +131,22 @@ export async function createProspectAction(fd: FormData) {
  * on renvoie quand même vers la fiche, où le geste se refait.
  */
 export async function ajoutRapideAction(input: {
-  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address", string>>;
+  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address" | "sector", string>>;
   echange: Omit<SaveExchangeInput, "prospectId"> | null;
-}): Promise<{ id?: string; error?: string; erreurEchange?: string }> {
+  /** Admin seulement : créer malgré une fiche déjà suivie dans l'équipe. */
+  forcer?: boolean;
+}): Promise<{ id?: string; error?: string; erreurEchange?: string; doublonEquipe?: string }> {
   const { supabase, userId } = await currentUserId();
   if (!input.champs.company_name?.trim()) return { error: "Le nom de la société est requis." };
+  const session = await getSession();
 
   const fiche = await createProspectCore(
     supabase,
     userId,
-    entreeFormulaire((k) => input.champs[k as keyof typeof input.champs] ?? null)
+    entreeFormulaire((k) => input.champs[k as keyof typeof input.champs] ?? null),
+    { equipe: { isAdmin: session?.me?.role === "admin" }, force: input.forcer === true }
   );
+  if (fiche.doublonEquipe) return { doublonEquipe: fiche.doublonEquipe };
   if (fiche.error || !fiche.id) return { error: fiche.error ?? "La fiche n'a pas pu être créée." };
 
   let erreurEchange: string | undefined;
@@ -144,6 +159,76 @@ export async function ajoutRapideAction(input: {
   revalidatePath("/prospects");
   revalidatePath("/dashboard");
   return { id: fiche.id, erreurEchange };
+}
+
+/**
+ * L'étoile d'une fiche (031) — un tap, optimiste côté écran. La base tranche :
+ * `prospects_update` n'accepte que le responsable (ou l'admin), donc un
+ * encadrant qui toucherait l'étoile de son étudiant modifie ZÉRO ligne — on
+ * le dit au lieu de faire croire que c'est fait.
+ */
+export async function etoilerProspectAction(prospectId: string, etoile: boolean): Promise<ActionState> {
+  const { supabase } = await currentUserId();
+  const { data, error } = await supabase
+    .from("prospects")
+    .update({ starred_at: etoile ? new Date().toISOString() : null })
+    .eq("id", prospectId)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) return { error: "Seul le responsable de la fiche peut l'étoiler." };
+  revalidateProspect(prospectId);
+  return {};
+}
+
+/**
+ * Réattribuer des fiches (031) — l'admin seul, revérifié EN BASE
+ * (`attribuer_prospects` lève 42501 hors admin). Les relances ouvertes et les
+ * rendez-vous à venir suivent ; une ligne au journal de chaque fiche.
+ */
+export async function attribuerProspectsAction(
+  ids: string[],
+  ownerId: string
+): Promise<{ error?: string; n?: number }> {
+  const { supabase } = await currentUserId();
+  const propres = [...new Set(ids.filter((x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)))];
+  if (propres.length === 0) return { error: "Aucune fiche sélectionnée." };
+  if (propres.length > 500) return { error: "500 fiches au plus par attribution." };
+  const { data, error } = await supabase.rpc("attribuer_prospects", { p_ids: propres, p_owner: ownerId });
+  if (error) {
+    return {
+      error:
+        error.code === "42501"
+          ? "Seul l'administrateur attribue une fiche."
+          : error.code === "PGRST202"
+            ? "L'attribution demande la migration 031, pas encore appliquée."
+            : error.message,
+    };
+  }
+  revalidatePath("/prospects");
+  revalidatePath("/dashboard");
+  revalidatePath("/agenda");
+  return { n: typeof data === "number" ? data : propres.length };
+}
+
+/**
+ * « Déjà suivie dans l'équipe ? » — pour l'ajout rapide, à la frappe (031).
+ * La base répond par des booléens : rien sur la fiche d'un autre. `peutForcer`
+ * dit si le compte (admin) peut créer malgré tout.
+ */
+export async function doublonEquipeAction(input: {
+  telephone?: string | null;
+  societe?: string | null;
+}): Promise<{ phrase: string | null; peutForcer: boolean }> {
+  const { supabase } = await currentUserId();
+  const session = await getSession();
+  const isAdmin = session?.me?.role === "admin";
+  const { doublons } = await doublonsEquipe(supabase, [
+    { telephone: input.telephone ?? null, societe: input.societe ?? null },
+  ]);
+  const d = doublons[0];
+  if (!estDoublonEquipe(d) || d.aMoi) return { phrase: null, peutForcer: isAdmin };
+  const noms = await nomsDesProprietaires(supabase, [d.proprietaire]);
+  return { phrase: phraseDoublon(d, d.proprietaire ? noms.get(d.proprietaire) : null), peutForcer: isAdmin };
 }
 
 export async function updateProspectAction(fd: FormData) {
@@ -168,7 +253,7 @@ export async function updateProspectAction(fd: FormData) {
     email: str(fd, "email")?.toLowerCase() ?? null,
     phone: str(fd, "phone"),
     website: str(fd, "website"),
-    sector: str(fd, "sector"),
+    sector: normaliserSecteur(str(fd, "sector")),
     // Stockée TELLE QUELLE : adresse libre ou lien Maps, on ne réécrit pas.
     address: str(fd, "address"),
     city: str(fd, "city"),
@@ -1129,12 +1214,81 @@ export async function importProspectsAction(
   ownerId: string | null
 ): Promise<ImportResult> {
   const { supabase, userId } = await currentUserId();
+  // Seul l'admin choisit le responsable d'un import (031 : `prospects_insert`
+  // refuserait de toute façon une fiche posée au nom d'un autre).
+  const session = await getSession();
+  const owner = session?.me?.role === "admin" ? ownerId : userId;
 
-  const result = await importProspectsCore(supabase, userId, rows, ownerId);
+  const result = await importProspectsCore(supabase, userId, rows, owner);
 
   if (result.inserted > 0) {
     revalidatePath("/prospects");
     revalidatePath("/dashboard");
   }
   return result;
+}
+
+// =====================================================================
+// Objectifs (031) — l'admin seul ; la RLS le revérifie (`objectifs_ecriture`)
+// =====================================================================
+
+/**
+ * Pose les objectifs d'une SEMAINE (appels, réponses, RDV) et ceux de la
+ * PÉRIODE (essais, depuis le début du Sales Trophy) pour une ou plusieurs
+ * personnes. Une valeur absente ne crée rien ; la semaine est désignée par
+ * son lundi (la base le vérifie aussi).
+ */
+export async function poserObjectifsAction(input: {
+  semaine: string;
+  lignes: {
+    userId: string;
+    appels: number | null;
+    reponses: number | null;
+    rdv: number | null;
+    essais: number | null;
+  }[];
+}): Promise<ActionState> {
+  const ctx = await requireAdmin();
+  if (!ctx) return { error: "Seul l'administrateur pose les objectifs." };
+  const { supabase, userId } = ctx;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.semaine) || lundiDe(input.semaine) !== input.semaine) {
+    return { error: "Semaine invalide : elle se désigne par son lundi." };
+  }
+  const n = (v: number | null) =>
+    v === null || v === undefined || !Number.isFinite(v) ? null : Math.max(0, Math.min(10000, Math.round(v)));
+  const lignes = (Array.isArray(input.lignes) ? input.lignes : []).slice(0, 100);
+  const semaine = lignes
+    .filter((l) => [l.appels, l.reponses, l.rdv].some((v) => n(v) !== null))
+    .map((l) => ({
+      user_id: l.userId,
+      semaine: input.semaine,
+      appels: n(l.appels) ?? 0,
+      reponses: n(l.reponses) ?? 0,
+      rdv: Math.min(1000, n(l.rdv) ?? 0),
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    }));
+  const periode = lignes
+    .filter((l) => n(l.essais) !== null)
+    .map((l) => ({
+      user_id: l.userId,
+      debut: DEBUT_SALES_TROPHY,
+      essais: Math.min(1000, n(l.essais)!),
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    }));
+  if (semaine.length === 0 && periode.length === 0) return { error: "Rien à enregistrer." };
+  if (semaine.length) {
+    const { error } = await supabase.from("objectifs").upsert(semaine, { onConflict: "user_id,semaine" });
+    if (error) return { error: estTableAbsente(error) ? "Les objectifs demandent la migration 031." : error.message };
+  }
+  if (periode.length) {
+    const { error } = await supabase.from("objectifs_periode").upsert(periode, { onConflict: "user_id,debut" });
+    if (error) return { error: estTableAbsente(error) ? "Les objectifs demandent la migration 031." : error.message };
+  }
+  revalidatePath("/equipe");
+  revalidatePath("/dashboard");
+  revalidatePath("/classement");
+  const k = new Set([...semaine.map((x) => x.user_id), ...periode.map((x) => x.user_id)]).size;
+  return { success: `Objectifs enregistrés pour ${k} personne${k > 1 ? "s" : ""}.` };
 }

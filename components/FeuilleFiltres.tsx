@@ -61,9 +61,11 @@ export function FeuilleFiltres({
 
       <FeuilleBas ouvert={ouvert} onFermer={fermer} titre="Filtres">
         <div className="space-y-5">
-          <Groupe titre="Affichage">
-            <Segments liens={vues} onChoisir={fermer} />
-          </Groupe>
+          {vues.length > 0 && (
+            <Groupe titre="Affichage">
+              <Segments liens={vues} onChoisir={fermer} />
+            </Groupe>
+          )}
           {perimetre && (
             <Groupe titre="Les fiches de">
               <ListeOptionsPerimetre options={perimetre} onChoisir={fermer} />

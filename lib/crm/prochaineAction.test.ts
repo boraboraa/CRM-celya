@@ -285,6 +285,13 @@ console.log("\n— 9. fiche_close_ne_reclame_rien —");
     ["a_appeler", "contacte", "rendez_vous", "proposition"].map(ficheClose),
     [false, false, false, false]
   );
+  // L'essai gratuit (030) n'est PAS une fin de parcours : sa relance de fin
+  // d'essai et son débrief en attente restent réclamés.
+  verifie("essai gratuit : ouverte", ficheClose("essai_gratuit"), false);
+  const essaiPasse = fiche([], [RDV_ALAIN], LE_30, "essai_gratuit");
+  verifie("essai + RDV passé non débriefé : il réclame son débrief", essaiPasse.aDebriefer, true);
+  const lEssai = lireProchaineAction(RDV_ALAIN.starts_at, "rendez_vous", LE_30, "essai_gratuit");
+  verifie("…et la liste le dit", lEssai.rien, false);
 
   // gagne + RDV à venir (installation) : il s'affiche, comme sur une fiche ouverte.
   const installe = fiche([], [RDV_ALAIN], LE_22, "gagne");

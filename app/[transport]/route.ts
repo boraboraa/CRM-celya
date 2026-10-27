@@ -85,6 +85,8 @@ import { verifyJwt } from "@/lib/mcp/jwt";
 import { SCOPE } from "@/lib/mcp/oauth";
 import { SUPABASE_URL } from "@/lib/env";
 import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
+import { DEBUT_SALES_TROPHY, ZERO, phraseObjectifs, type Compteurs } from "@/lib/crm/compteurs";
+import { lireClassement, periodesClassement } from "@/lib/crm/lectureObjectifs";
 import { saveExchangeCore } from "@/lib/crm/exchange";
 import {
   poserRendezVous,
@@ -119,6 +121,8 @@ import {
   STATUS_LABEL,
   ACTIVITY_LABEL,
   STATUS_ORDER,
+  OUTCOME_ORDER,
+  isCallOutcome,
   fmtDate,
   fmtDateTime,
 } from "@/lib/constants";
@@ -911,10 +915,20 @@ function register(server: McpServer) {
           // Sans ce scope, l'avertissement de doublon nommerait les sociétés
           // des autres — le service_role voit tout.
           scope: viewer,
+          // …et l'équipe entière, au nom du porteur du jeton (031) : une
+          // fiche déjà suivie par un autre membre ne se recrée pas.
+          equipe: { viewerId: viewer.userId, isAdmin: viewer.isAdmin },
         }
       );
 
       if (result.error) return fail(`Erreur : ${result.error}`);
+      if (result.doublonEquipe) {
+        return fail(
+          viewer.isAdmin
+            ? `⚠️ Rien créé : cette société est ${result.doublonEquipe}. Relancez avec « forcer: true » si c'est bien une autre fiche.`
+            : `Rien créé : cette société est ${result.doublonEquipe}. Elle appartient à qui l'a enregistrée la première ; seul l'administrateur peut la réattribuer.`
+        );
+      }
       if (result.duplicates) {
         return json(
           `⚠️ Doublon(s) possible(s) — rien créé. Vérifiez, puis relancez avec « forcer: true » si c'est bien une nouvelle fiche.`,
@@ -958,7 +972,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, a_rappeler (le rendez-vous a eu lieu, il faut rappeler la personne — ne pas confondre avec a_appeler), proposition, gagne, perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, a_rappeler (le rendez-vous a eu lieu, il faut rappeler la personne — ne pas confondre avec a_appeler), proposition, essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1005,7 +1019,7 @@ function register(server: McpServer) {
   // --- ajouter_note ---------------------------------------------------------
   server.tool(
     "ajouter_note",
-    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. Si la note mentionne un rendez-vous daté, passez « rdv_le » (et « lieu ») : le rendez-vous est posé dans l'agenda en même temps. Si la note mentionne un rendez-vous dont le JOUR ou l'HEURE manque, POSEZ LA QUESTION à l'utilisateur. Ne posez jamais une relance générique à la place : le rendez-vous serait perdu. Pour une simple relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie.",
+    "Ajoute une activité au journal d'un prospect (note, email ou rendez_vous). L'étape s'ajuste ensuite toute seule à partir des FAITS enregistrés — ne forcez pas « statut » sans raison. Si la note mentionne un rendez-vous daté, passez « rdv_le » (et « lieu ») : le rendez-vous est posé dans l'agenda en même temps. Si la note mentionne un rendez-vous dont le JOUR ou l'HEURE manque, POSEZ LA QUESTION à l'utilisateur. Ne posez jamais une relance générique à la place : le rendez-vous serait perdu. Pour une simple relance, utilisez « planifier_relance ». Pour un texte non envoyé (brouillon d'email), passez « brouillon: true » : il sera rangé hors chronologie. APRÈS UN APPEL, passez « resultat » (ce qu'a donné l'appel) : c'est lui que la carte affiche et que les objectifs comptent.",
     {
       id: z.string().optional(),
       nom: z.string().optional(),
@@ -1040,12 +1054,26 @@ function register(server: McpServer) {
         .enum(STATUS_ENUM)
         .optional()
         .describe("Étape imposée. VERROUILLE la fiche — à n'utiliser que sur demande explicite."),
-      motif: z.string().optional().describe("Raison de la perte (si statut = perdu)."),
+      motif: z
+        .string()
+        .optional()
+        .describe("Raison de la perte (si statut = perdu), ou POURQUOI il n'est pas intéressé (resultat = refus, OBLIGATOIRE)."),
+      resultat: z
+        .enum(OUTCOME_ORDER as [string, ...string[]])
+        .optional()
+        .describe(
+          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler), « interesse » (intéressé), « refus » (pas intéressé — « motif » OBLIGATOIRE ; l'étape ne passe PAS en Perdu). Seul « sans_reponse » n'atteste pas d'un échange. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+        ),
     },
     async (args, extra) => {
       const ctx = await context(extra);
       if ("error" in ctx) return fail(ctx.error);
       const { admin, viewer } = ctx;
+      // « Pas intéressé » sans pourquoi ne s'exploite pas : même exigence que
+      // l'écran (ResultatAppel). On le refuse AVANT d'écrire quoi que ce soit.
+      if (args.resultat === "refus" && !args.motif?.trim()) {
+        return fail("« refus » (pas intéressé) demande « motif » : pourquoi, en une phrase. Posez la question à l'utilisateur.");
+      }
       const resolved = await resolveProspect(admin, viewer, { id: args.id, nom: args.nom });
       if ("error" in resolved) return fail(resolved.error);
       const refus = await refusSiPasProprietaire(admin, viewer, resolved);
@@ -1074,9 +1102,12 @@ function register(server: McpServer) {
         // Défaut prudent côté connecteur : sans déclaration explicite, une
         // note écrite par Claude n'atteste pas d'un échange (l'interface, elle,
         // coche la case par défaut — la saisie y est humaine).
-        isExchange: args.echange === true,
+        // Un résultat d'appel autre que « pas de réponse » atteste qu'on a eu
+        // quelqu'un — la même règle que l'écran (enregistrerResultatAction).
+        isExchange: args.resultat ? args.resultat !== "sans_reponse" : args.echange === true,
         isDraft: args.brouillon === true,
         proposalSent: args.proposition_envoyee === true,
+        outcome: isCallOutcome(args.resultat) ? args.resultat : null,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
@@ -1609,16 +1640,16 @@ function register(server: McpServer) {
   // débrief fait par Claude est indiscernable d'un débrief fait à la main.
   server.tool(
     "debriefer_rendez_vous",
-    "Dit ce qu'a donné un rendez-vous PASSÉ (le débrief) : « a_rappeler » (intéressé, à rappeler — « rappeler_le » OBLIGATOIRE ; l'étape passe en « À rappeler »), « proposition » (proposition envoyée — l'étape passe en « Proposition »), « signe » (l'étape passe en « Gagné », verrouillée), « pas_interesse » (« raison » OBLIGATOIRE, versée en raison de perte ; l'étape passe en « Perdu », verrouillée, et les relances ouvertes sont annulées) ou « annule » (le rendez-vous n'a pas eu lieu ; pour le REPORTER, utilisez « deplacer_rendez_vous »). N'utilisez une issue QUE si l'utilisateur l'a dite : ne devinez jamais « signé » ou « pas intéressé ». S'il manque la date de rappel ou la raison, POSEZ LA QUESTION. Les rendez-vous à débriefer sont listés par « a_faire » (rdv_a_debriefer). Note : un échange, un résultat d'appel ou un email posé après le rendez-vous le clôt déjà tout seul (« tenu »).",
+    "Dit ce qu'a donné un rendez-vous PASSÉ (le débrief) : « a_rappeler » (intéressé, à rappeler — « rappeler_le » OBLIGATOIRE ; l'étape passe en « À rappeler »), « proposition » (proposition envoyée — l'étape passe en « Proposition »), « essai » (essai gratuit démarré — l'étape passe en « Essai gratuit », verrouillée ; « rappeler_le » facultatif pour la fin d'essai), « signe » (l'étape passe en « Gagné », verrouillée), « pas_interesse » (« raison » OBLIGATOIRE, versée en raison de perte ; l'étape passe en « Perdu », verrouillée, et les relances ouvertes sont annulées) ou « annule » (le rendez-vous n'a pas eu lieu ; pour le REPORTER, utilisez « deplacer_rendez_vous »). N'utilisez une issue QUE si l'utilisateur l'a dite : ne devinez jamais « signé » ou « pas intéressé ». S'il manque la date de rappel ou la raison, POSEZ LA QUESTION. Les rendez-vous à débriefer sont listés par « a_faire » (rdv_a_debriefer). Note : un échange, un résultat d'appel ou un email posé après le rendez-vous le clôt déjà tout seul (« tenu »).",
     {
       id: z.string().describe("Identifiant du rendez-vous (« a_faire » → rdv_a_debriefer, ou « agenda »)."),
       issue: z
-        .enum(["a_rappeler", "proposition", "signe", "pas_interesse", "annule"])
+        .enum(["a_rappeler", "proposition", "essai", "signe", "pas_interesse", "annule"])
         .describe("Ce qu'a donné le rendez-vous."),
       rappeler_le: z
         .string()
         .optional()
-        .describe("Pour « a_rappeler » (OBLIGATOIRE) ; facultatif pour « proposition » et « annule » : « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm »."),
+        .describe("Pour « a_rappeler » (OBLIGATOIRE) ; facultatif pour « proposition », « essai » (la fin d'essai) et « annule » : « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm »."),
       raison: z.string().optional().describe("Pour « pas_interesse » : pourquoi, en une phrase (OBLIGATOIRE)."),
       compte_rendu: z.string().optional().describe("Compte rendu en une ligne, versé au journal (facultatif)."),
     },
@@ -1802,7 +1833,7 @@ function register(server: McpServer) {
   // --- importer_prospects ---------------------------------------------------
   server.tool(
     "importer_prospects",
-    "Crée des prospects en lot, avec dédup ligne par ligne (email). Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION — le résumé de ce qui serait créé / ignoré — sans rien écrire. Repassez avec « confirmer: true » pour exécuter réellement l'import. « brief » par ligne (facultatif, RÉSERVÉ À L'ADMINISTRATEUR) : le brief d'appel que Janet, l'IA vocale de Celya, lira avant d'appeler la fiche — si un autre compte en passe un, RIEN n'est importé.",
+    "Crée des prospects en lot, avec dédup ligne par ligne : dans le lot lui-même (e-mail, téléphone, nom de société), puis dans TOUTE l'équipe (téléphone et nom — une fiche déjà suivie par un autre membre est ignorée et signalée « déjà suivie dans l'équipe », sans que son responsable soit nommé, sauf pour l'administrateur), puis sur l'e-mail. Le secteur est rangé dans la liste fixe du CRM (« garage » → « Garage / carrosserie », inconnu → « Autre »). Par défaut (« confirmer » absent ou faux), renvoie une SIMULATION — le résumé de ce qui serait créé / ignoré — sans rien écrire. Repassez avec « confirmer: true » pour exécuter réellement l'import. « brief » par ligne (facultatif, RÉSERVÉ À L'ADMINISTRATEUR) : le brief d'appel que Janet, l'IA vocale de Celya, lira avant d'appeler la fiche — si un autre compte en passe un, RIEN n'est importé.",
     {
       prospects: z
         .array(
@@ -1813,11 +1844,12 @@ function register(server: McpServer) {
             phone: z.string().optional(),
             website: z.string().optional(),
             sector: z.string().optional(),
+            address: z.string().optional().describe("Adresse postale, ou lien Google Maps (stocké tel quel)."),
             city: z.string().optional(),
             status: z.string().optional(),
             source: z.string().optional(),
             value_estimate: z.string().optional(),
-            notes: z.string().optional(),
+            notes: z.string().optional().describe("« Ce qu'on sait » de la société — affiché en tête de fiche dès « À appeler »."),
             brief: BRIEF_APPEL.optional().describe(
               "RÉSERVÉ À L'ADMINISTRATEUR. Le brief d'appel de Janet pour cette fiche (faits vérifiés seulement)."
             ),
@@ -1850,7 +1882,9 @@ function register(server: McpServer) {
         lignes,
         viewer.userId,
         // Les ids créés, ligne par ligne : il les faut pour écrire les briefs.
-        { dryRun: !args.confirmer, rendreIds: nbBriefs > 0 }
+        // `viewerId` : la vérification d'équipe se fait au nom du porteur du
+        // jeton (service_role : `auth.uid()` est nul).
+        { dryRun: !args.confirmer, rendreIds: nbBriefs > 0, viewerId: viewer.userId }
       );
       if (result.error) return fail(`Erreur : ${result.error}`);
       const absente = nbBriefs > 0 ? await migration025Absente(admin) : null;
@@ -2317,6 +2351,81 @@ function register(server: McpServer) {
           })),
           a_reprendre: [...aReprendre.values()],
         }
+      );
+    }
+  );
+
+  // --- mes_objectifs (031) -------------------------------------------------
+  server.tool(
+    "mes_objectifs",
+    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « pas intéressé » — on a eu le décideur ; un barrage est un appel, pas une réponse), intéressés, rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
+    {},
+    async (_args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const { semaine, trophy } = periodesClassement();
+      // service_role : la règle elle-même (`compteurs_pour`), pour le seul
+      // porteur du jeton — jamais un identifiant venu d'un paramètre.
+      const [sem, per, obj, objPer] = await Promise.all([
+        admin.rpc("compteurs_pour", { p_users: [viewer.userId], p_debut: semaine.debut, p_fin: semaine.fin }),
+        admin.rpc("compteurs_pour", { p_users: [viewer.userId], p_debut: trophy.debut, p_fin: trophy.fin }),
+        admin.from("objectifs").select("appels, reponses, rdv").eq("user_id", viewer.userId).eq("semaine", semaine.debut).maybeSingle(),
+        admin.from("objectifs_periode").select("essais").eq("user_id", viewer.userId).eq("debut", DEBUT_SALES_TROPHY).maybeSingle(),
+      ]);
+      if (sem.error || per.error) {
+        return fail("Les objectifs ne sont pas encore en place (migration 031 non appliquée).");
+      }
+      const c = ((sem.data ?? []) as Compteurs[])[0] ?? ZERO;
+      const essaisPeriode = (((per.data ?? []) as Compteurs[])[0] ?? ZERO).essais;
+      const o = obj.data as { appels: number; reponses: number; rdv: number } | null;
+      const op = objPer.data as { essais: number } | null;
+      const objectifs = o || op
+        ? { appels: o?.appels ?? null, reponses: o?.reponses ?? null, rdv: o?.rdv ?? null, essaisPeriode: op?.essais ?? null }
+        : null;
+      return json(`Semaine du ${semaine.debut} : ${phraseObjectifs(c, essaisPeriode, objectifs)}.${objectifs ? "" : " (Aucun objectif posé : l'administrateur les fixe depuis « Équipe ».)"}`, {
+        semaine: semaine.debut,
+        compteurs: c,
+        essais_depuis_le_debut: essaisPeriode,
+        debut_sales_trophy: DEBUT_SALES_TROPHY,
+        objectifs,
+      });
+    }
+  );
+
+  // --- classement (031) ----------------------------------------------------
+  server.tool(
+    "classement",
+    "Le classement de l'équipe — les MÊMES chiffres que l'écran /classement : par participant (commerciaux actifs qui ont un objectif), appels, réponses, intéressés, rendez-vous, essais gratuits, numéros ajoutés. Des chiffres seulement : aucune fiche, aucun nom de prospect. Ordre : essais, puis RDV, puis réponses, puis appels.",
+    {
+      periode: z
+        .enum(["semaine", "depuis_le_debut"])
+        .optional()
+        .describe("« semaine » (défaut, du lundi au dimanche) ou « depuis_le_debut » (depuis le début du Sales Trophy)."),
+    },
+    async (args, extra) => {
+      const ctx = await context(extra);
+      if ("error" in ctx) return fail(ctx.error);
+      const { admin, viewer } = ctx;
+      const p = periodesClassement();
+      const bornes = args.periode === "depuis_le_debut" ? p.trophy : p.semaine;
+      const { disponible, lignes } = await lireClassement(admin, bornes.debut, bornes.fin);
+      if (!disponible) return fail("Le classement n'est pas encore en place (migration 031 non appliquée).");
+      return json(
+        lignes.length
+          ? `Classement ${args.periode === "depuis_le_debut" ? `depuis le ${DEBUT_SALES_TROPHY}` : `de la semaine du ${bornes.debut}`} — ${lignes.length} participant(s).`
+          : "Personne au classement pour l'instant (aucun objectif posé).",
+        lignes.map((l, i) => ({
+          rang: i + 1,
+          nom: l.nom,
+          moi: l.user_id === viewer.userId,
+          appels: l.appels,
+          reponses: l.reponses,
+          interesses: l.interesses,
+          rdv: l.rdv,
+          essais: l.essais,
+          numeros_ajoutes: l.numeros,
+        }))
       );
     }
   );

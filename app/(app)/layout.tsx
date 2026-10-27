@@ -8,6 +8,8 @@ import { BarreOnglets } from "@/components/BarreOnglets";
 import { AjoutRapide } from "@/components/AjoutRapide";
 import { BoutonRecherche, RechercheGlobale } from "@/components/RechercheGlobale";
 import { navOrdinateur, ongletsMobiles } from "@/lib/nav";
+import { Suspense } from "react";
+import { MemoirePerimetre } from "@/components/MemoirePerimetre";
 
 function SignOutButton() {
   return (
@@ -94,6 +96,10 @@ export default async function AppLayout({
         <BarreOnglets onglets={ongletsMobiles(me.role)} />
         {/* L'ajout rapide, UNE fois : le « ＋ » et le raccourci d'application l'ouvrent. */}
         <AjoutRapide />
+        {/* Le dernier périmètre choisi, mémorisé dans le navigateur (27/10). */}
+        <Suspense fallback={null}>
+          <MemoirePerimetre />
+        </Suspense>
         {/* La fenêtre de recherche, UNE fois : les deux boutons l'ouvrent. */}
         <RechercheGlobale />
       </div>

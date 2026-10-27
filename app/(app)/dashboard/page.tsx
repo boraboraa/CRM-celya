@@ -1,3 +1,7 @@
+import { avecRepliColonne } from "@/lib/crm/tolerance";
+import { lireMesObjectifs } from "@/lib/crm/lectureObjectifs";
+import { CarteObjectifs } from "@/components/CarteObjectifs";
+import { etoileesDabord } from "@/lib/crm/ordreProspects";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
@@ -97,8 +101,10 @@ export default async function TodoPage({
   const viewer: PerimetreViewer = await getPerimetreViewer();
   const perimetre = lirePerimetre(params, viewer, await perimetreMemorise());
 
-  const TASK_SELECT =
-    "id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind)";
+  // `starred_at` (031) n'est nommée que si la base la connaît : chaque lecture
+  // qui la porte passe par `avecRepliColonne` (lib/crm/tolerance.ts).
+  const TASK_SELECT = (e: boolean): string =>
+    `id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind${e ? ", starred_at" : ""})`;
 
   // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un
@@ -118,50 +124,57 @@ export default async function TodoPage({
     meetingsTodayRes,
     debriefRes,
     etatAppels,
+    mesObjectifs,
   ] = await Promise.all([
     // En retard — les plus anciennes d'abord.
-    filtrerTaches(
-      supabase
-        .from("tasks")
-        .select(TASK_SELECT)
-        .eq("status", "a_faire")
-        .lt("due_at", start),
-      perimetre,
-      viewer
-    )
-      .order("due_at", { ascending: true })
-      .limit(100),
+    avecRepliColonne((e) =>
+      filtrerTaches(
+        supabase
+          .from("tasks")
+          .select(TASK_SELECT(e))
+          .eq("status", "a_faire")
+          .lt("due_at", start),
+        perimetre,
+        viewer
+      )
+        .order("due_at", { ascending: true })
+        .limit(100)
+    ),
 
     // Aujourd'hui.
-    filtrerTaches(
-      supabase
-        .from("tasks")
-        .select(TASK_SELECT)
-        .eq("status", "a_faire")
-        .gte("due_at", start)
-        .lte("due_at", end),
-      perimetre,
-      viewer
-    )
-      .order("due_at", { ascending: true })
-      .limit(100),
+    avecRepliColonne((e) =>
+      filtrerTaches(
+        supabase
+          .from("tasks")
+          .select(TASK_SELECT(e))
+          .eq("status", "a_faire")
+          .gte("due_at", start)
+          .lte("due_at", end),
+        perimetre,
+        viewer
+      )
+        .order("due_at", { ascending: true })
+        .limit(100)
+    ),
 
     // Réponses reçues — emails entrants rattachés, en attente de tri.
     // L'embed est !inner pour que le filtre de périmètre soit filtrant.
-    filtrerJointProspects(
-      supabase
-        .from("emails")
-        .select(
-          "id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id)"
-        )
-        .eq("direction", "entrant")
-        .eq("triage", "a_traiter")
-        .not("prospect_id", "is", null),
-      perimetre,
-      viewer
-    )
-      .order("received_at", { ascending: false })
-      .limit(20),
+    avecRepliColonne((e) =>
+      filtrerJointProspects(
+        supabase
+          .from("emails")
+          .select(
+            `id, from_email, subject, body_text, received_at, intent, intent_confidence, intent_summary, proposed_due_at, prospects!inner(id, company_name, owner_id${e ? ", starred_at" : ""})` as string
+          )
+          .eq("direction", "entrant")
+          .eq("triage", "a_traiter")
+          .not("prospect_id", "is", null),
+        perimetre,
+        viewer
+      )
+        .order("received_at", { ascending: false })
+        .limit(20)
+    ),
 
     // La dernière action de chaque fiche (vue prospect_action_state, RLS
     // appliquée). Elle sert DEUX zones, d'où l'absence de filtre SQL :
@@ -173,14 +186,16 @@ export default async function TodoPage({
     supabase.from("prospect_action_state").select(LAST_ACTION_SELECT).limit(500),
 
     // Les fiches encore ouvertes — celles qui peuvent peupler la zone calme.
-    filtrerProspects(
-      supabase
-        .from("prospects")
-        .select("id, company_name, contact_name, next_action_at, next_action_kind")
-        .not("status", "in", "(gagne,perdu)"),
-      perimetre,
-      viewer
-    ).limit(500),
+    avecRepliColonne((e) =>
+      filtrerProspects(
+        supabase
+          .from("prospects")
+          .select(`id, company_name, contact_name, next_action_at, next_action_kind${e ? ", starred_at" : ""}` as string)
+          .not("status", "in", "(gagne,perdu)"),
+        perimetre,
+        viewer
+      ).limit(500)
+    ),
 
     // Les membres actifs — pour le sélecteur de périmètre (admin, ou porteur
     // de l'interrupteur d'équipe ; la liste est bornée au partage juste après).
@@ -238,6 +253,10 @@ export default async function TodoPage({
     // et la mise en page reste celle d'avant. Rien n'est demandé pour un
     // commercial (la RLS ne lui rendrait rien de toute façon).
     viewer.isAdmin ? lireEtatAppels(supabase) : Promise.resolve(null),
+
+    // Les objectifs de la semaine (031) — un commercial seul : l'admin n'est
+    // pas au classement. Tolérant : sans la 031, la carte ne s'affiche pas.
+    !viewer.isAdmin ? lireMesObjectifs(supabase, viewer.userId) : Promise.resolve(null),
   ]);
 
   const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
@@ -251,9 +270,14 @@ export default async function TodoPage({
   const aMoi = (ownerId: string | null | undefined) =>
     viewer.isAdmin || ownerId === viewer.userId;
 
-  const replies = (
-    (repliesRes.data ?? []) as unknown as ReplyCardEmail[]
-  ).filter((e) => aMoi(e.prospects?.owner_id));
+  // Les étoilées en tête de CHAQUE zone (031) — jamais une zone de plus :
+  // l'ordre propre à la zone vaut ensuite (lib/crm/ordreProspects.ts).
+  const replies = etoileesDabord(
+    ((repliesRes.data ?? []) as unknown as (ReplyCardEmail & {
+      prospects?: { starred_at?: string | null } | null;
+    })[]).filter((e) => aMoi(e.prospects?.owner_id)),
+    (e) => Boolean(e.prospects?.starred_at)
+  );
   const membres = (membresRes.data ?? []) as {
     id: string;
     full_name: string | null;
@@ -316,6 +340,7 @@ export default async function TodoPage({
       phone: string | null;
       city: string | null;
       status: string;
+      starred_at?: string | null;
     }
   >();
   // Les fiches des rendez-vous, et — pour l'admin — ceux que Janet a posés
@@ -325,11 +350,13 @@ export default async function TodoPage({
     // `city` complète l'adresse du rendez-vous quand elle n'a pas de code
     // postal — jamais `country`, qui n'est pas fiable (voir lib/crm/maps.ts).
     meetingProspectIds.length > 0
-      ? supabase
-          .from("prospects")
-          .select("id, company_name, contact_name, phone, city, status")
-          .in("id", meetingProspectIds)
-      : Promise.resolve({ data: [] }),
+      ? avecRepliColonne((e) =>
+          supabase
+            .from("prospects")
+            .select(`id, company_name, contact_name, phone, city, status${e ? ", starred_at" : ""}` as string)
+            .in("id", meetingProspectIds)
+        )
+      : Promise.resolve({ data: [], error: null }),
     viewer.isAdmin && meetingsToday.length > 0
       ? rdvPosesParJanet(
           supabase,
@@ -337,13 +364,14 @@ export default async function TodoPage({
         )
       : Promise.resolve(new Set<string>()),
   ]);
-  for (const p of (fichesRdvRes.data ?? []) as {
+  for (const p of (fichesRdvRes.data ?? []) as unknown as {
     id: string;
     company_name: string;
     contact_name: string | null;
     phone: string | null;
     city: string | null;
     status: string;
+    starred_at: string | null;
   }[]) {
     meetingProspects.set(p.id, p);
   }
@@ -351,9 +379,9 @@ export default async function TodoPage({
   // un RDV perso, jamais une fiche gagnée ou perdue (023 : sa fiche ne le dit
   // plus, cette zone non plus), UN SEUL rendez-vous par fiche (le plus récent ;
   // la base clôt les plus anciens « remplacés » dès qu'il est débriefé, 027).
-  const debriefMeetings: DebriefMeeting[] = rdvADebriefer(
-    aDebriefer,
-    (id) => meetingProspects.get(id)?.status
+  const debriefMeetings: DebriefMeeting[] = etoileesDabord(
+    rdvADebriefer(aDebriefer, (id) => meetingProspects.get(id)?.status),
+    (m) => Boolean(m.prospect_id && meetingProspects.get(m.prospect_id)?.starred_at)
   ).map((m) => ({
       id: m.id,
       title: m.title,
@@ -396,8 +424,15 @@ export default async function TodoPage({
     return rdv ? { ...t, rdv_a_debriefer: rdv } : t;
   };
 
-  const overdue = overdueAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
-  const today = todayAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief);
+  const etoilee = (t: TaskWithProspect) => Boolean(t.prospects?.starred_at);
+  const overdue = etoileesDabord(
+    overdueAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief),
+    etoilee
+  );
+  const today = etoileesDabord(
+    todayAll.filter(inZone1).map(avecDerniereAction).map(avecDebrief),
+    etoilee
+  );
 
   // Le résultat du prédicat, pas le prédicat : `TaskList` est un composant
   // CLIENT, et une fonction ne traverse pas la frontière serveur → client
@@ -421,7 +456,7 @@ export default async function TodoPage({
       .filter((id) => !dueIds.has(id) && !replyIds.has(id))
   );
 
-  const waiting: WaitingProspect[] = openProspectRows
+  const waitingTries: WaitingProspect[] = openProspectRows
     .filter((p) => calmIds.has(p.id))
     .map((p) => ({
       ...p,
@@ -439,6 +474,9 @@ export default async function TodoPage({
         new Date(b.next_action_at).getTime()
       );
     });
+  const waiting = etoileesDabord(waitingTries, (p) =>
+    Boolean((p as WaitingProspect & { starred_at?: string | null }).starred_at)
+  );
 
   // L'ordre des lignes de l'écran, pour « Fiche suivante » sur la fiche
   // ouverte d'ici — exactement ce qui s'affiche, dans l'ordre des zones.
@@ -474,6 +512,8 @@ export default async function TodoPage({
       />
 
       <MemoireAFaire ids={ordre} />
+
+      {mesObjectifs?.disponible && <CarteObjectifs donnees={mesObjectifs} />}
 
       {/* La colonne « Appels » de Janet — admin seul. Sans elle (commercial,
           migration 025 absente), le contenu est rendu tel quel. */}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { TRIS } from "@/lib/crm/filtresProspects";
 
 /**
  * Recherche, étape et tri de /prospects — À LA FRAPPE (18/10). Il fallait
@@ -100,6 +101,9 @@ export function FiltresProspects({
         />
       </div>
 
+      {/* Depuis le 27/10, l'étape a ses PUCES sur la page : le menu n'est rendu
+          que si on lui passe des étapes. */}
+      {etapes.length > 0 && (
       <div>
         <label className="label" htmlFor="statut">
           Étape
@@ -118,6 +122,7 @@ export function FiltresProspects({
           ))}
         </select>
       </div>
+      )}
 
       {avecTri && (
         <div>
@@ -126,13 +131,15 @@ export function FiltresProspects({
           </label>
           <select
             id="tri"
-            value={tri || "recent"}
-            onChange={(e) => aller({ tri: e.target.value === "recent" ? null : e.target.value })}
+            value={tri || "priorite"}
+            onChange={(e) => aller({ tri: e.target.value === "priorite" ? null : e.target.value })}
             className="input"
           >
-            <option value="recent">Activité récente</option>
-            <option value="relance">Prochaine action</option>
-            <option value="nom">Nom</option>
+            {Object.entries(TRIS).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
           </select>
         </div>
       )}

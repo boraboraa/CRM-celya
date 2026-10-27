@@ -5,6 +5,38 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 27 octobre 2026 — le cadre de l'équipe de vente
+
+Pour le démarrage des quatre étudiants du Sales Trophy (lundi 2 novembre).
+Relu en base le 27/10 : **88 fiches le matin, 115 en fin de journée** (les
+étudiants commencent à saisir), la `029` appliquée (les `025` à `029`
+le sont toutes), les quatre comptes étudiants (Aissata, estelia, hakim,
+meryem — 0 fiche chacun), et **8 lignes d'encadrement** (Collins et Nathan
+encadrent chacun les quatre). Collins a **3** fiches (pas 1).
+
+Le lot est sur la branche `claude/youthful-lovelace-2kjwtf`, un commit par
+fonctionnalité. Deux migrations, **écrites, PAS appliquées** — Bora les
+applique **dans cet ordre, SÉPARÉMENT** : la **`030`** seule (la valeur d'enum
+`essai_gratuit` : Postgres refuse de l'utiliser dans la transaction qui l'a
+créée), puis la **`031`**, puis la fusion (Vercel). Le code tourne AVANT la
+031 (lectures tolérantes, `lib/crm/tolerance.ts`) : rien ne casse si la fusion
+part la première, les écrans neufs disent seulement « pas encore disponible ».
+Voir « Le cadre de l'équipe de vente ».
+
+La 031 **écrit des données** une fois : la normalisation des secteurs
+(52 fiches sur 98 à 15h le 27/10, **70 en fin de journée** — la base grossit :
+le chiffre réel sera celui du jour de l'application ; « garage » → « Garage /
+carrosserie »…). Rien d'autre. Recette rejouée sur la version finale
+(md5 `9d84716e…`) : **63 OK, 0 faute**, assertions « essai gratuit » sautées
+jusqu'à la 030.
+
+Comptes de banc du 27/10 : `mobile-commercial@celya.test` recréé, puis
+**supprimé** (`crm-admin delete_user`, ses 7 fiches retirées) ;
+`mobile-admin@celya.test` réactivé pour le banc et la mesure, puis
+**redésactivé, mot de passe remplacé par une valeur aléatoire que personne ne
+garde, 0 ligne rattachée** — la suppression SQL a buté sur la confirmation de
+l'outil MCP (piège connu) : **toujours à supprimer depuis `/equipe`**.
+
 ## État au 20 octobre 2026 — l'écran Appels IA rendu évident
 
 La `025` est **appliquée**, l'edge function `appels-ia-annexe` **déployée**, la
@@ -478,13 +510,14 @@ les mélanger, c'est un jour ouvrir la sécurité en croyant élargir le confort
 |---|---|
 | `crm_users` | comptes équipe : `role` (admin/commercial), `is_active`, `must_change_password`, `voit_equipe` (l'interrupteur d'équipe, migration `020` — gardé par `guard_profile_privileges`, personne ne se le coche) |
 | `supervision` | l'encadrement (migration `021`) : `(encadrant_id, commercial_id)`, clé primaire composée, une ligne par couple. **À SENS UNIQUE** — l'encadrant VOIT, l'encadré ne gagne rien. RLS : lecture bornée aux lignes qui me désignent, **écriture admin seul**. Ne pas confondre avec `voit_equipe`, qui est réciproque |
-| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at` |
+| `prospects` | fiche prospect : société + contact principal fusionnés, `status` (l'étape), `status_locked` / `status_locked_at` (le verrou), `status_auto_reason` / `status_auto_at` (pourquoi l'étape a bougé seule), `proposal_sent_at`, `value_estimate`, `probability` + `weighted_value` (**conservées en base mais plus affichées ni saisies**, voir Confiance), `confidence_level` / `confidence_reason` / `confidence_locked` / `confidence_at` (la confiance IA, migration `011`), `address` (l'adresse OU un lien Maps collé, migration `018`), `owner_id`, `next_action_at`, `last_contact_at`, `sector` (**liste fixe** depuis la `031`, rangée par trigger — `lib/crm/secteurs.ts`), `notes` (« **Ce qu'on sait** », en tête de fiche), `starred_at` (l'étoile, `031`), `essai_gratuit_at` (dernière entrée en essai, `031`) |
 | `activities` | l'historique des échanges : `note`, `email`, `rendez_vous` (`prospect_id`) + `is_draft` (brouillon, hors chronologie), `is_exchange` (la note atteste-t-elle d'un échange réel) et `outcome` — le RÉSULTAT d'appel, colonne de 001 réactivée le 7 août, **bornée le 2 septembre** (migration `019`, contrainte `activities_outcome_connu`) à cinq valeurs : `sans_reponse` · `barrage` · `rappeler` · `interesse` · `refus`. Reste en `text` : on borne, on ne convertit pas. `meeting_id` (migration `027`) : le RDV dont parle la ligne (débrief, report, clôture automatique) — une ligne rattachée ne déclenche jamais le débrief implicite |
 | `tasks` | relances : `due_at`, `priority`, `status` (`prospect_id`) |
 | `meetings` | l'AGENDA (migration `017`, 31 août) : rendez-vous avec début ET fin, `kind` (`prospect`/`perso`), `location`, `status` (`prevu`/`confirme`/`honore`/`annule`/`reporte`), `debriefed_at`, `debrief_issue` (migration `027` : `a_rappeler`/`proposition`/`signe`/`pas_interesse` au débrief, `suite_posee` au débrief implicite, `remplace` pour un RDV clos par un plus récent), `owner_id`. RLS : chacun les siens, l'admin tout. **Toute lecture passe par la vue `meetings_visibles`** (un RDV perso d'un autre membre = « Occupé », sans lieu ni notes — Rémi est indépendant, lire ses RDV privés serait un élément de requalification) |
 | `emails` | emails entrants/sortants (`prospect_id`, `message_id` unique = idempotence, `in_reply_to`) + tri des réponses (`triage`, `intent`, `intent_confidence`, `intent_summary`, `proposed_due_at`) |
 | `email_accounts` | boîte SMTP/IMAP de Bora : hôtes Zoho, `credentials_secret_id` (→ Vault), `last_sync_at`, `sync_cursor`, `sync_error` — RLS fermée |
 | `mcp_oauth_clients` / `mcp_oauth_codes` / `mcp_oauth_tokens` | état du serveur OAuth du connecteur MCP (migration `008`) — **RLS fermée sans policy** comme `email_accounts`, seul le `service_role` y accède. Ne pas « corriger » l'absence de policy. |
+| `objectifs` · `objectifs_periode` | les objectifs (migration `031`, **pas appliquée**) : par SEMAINE (désignée par son lundi — appels, réponses, RDV) et sur la PÉRIODE du Sales Trophy (essais). **L'admin écrit** ; chacun lit les siens, l'encadrant ceux qu'il encadre. Les compteurs ne sont PAS stockés : `compteurs_pour` les calcule. Voir « Le cadre de l'équipe de vente » |
 | `appels_ia_reglages` · `appels_ia_campagnes` · `appels_ia_file` · `appels_ia` · `appels_ia_opposition` · `appels_ia_briefs` · `appels_ia_scripts` | les appels IA de Janet (migration `025`, **pas appliquée**) : réglages (ligne unique), campagnes, file d'appel (une ligne vivante par fiche), un appel par ligne (un seul en cours, index unique partiel), opposition par numéro composé, brief d'appel par fiche, quatre scripts. **Admin seul** : une policy `is_admin()` par table, rien pour `anon`. Les secrets (clé OpenAI, identifiants SIP) sont au **Vault**, jamais dans ces tables. Voir « Appels IA » |
 
 Triggers utiles : une activité met à jour `prospects.last_contact_at` ; une
@@ -526,12 +559,14 @@ l'ancienne app de comptabilité, qui avait déjà un `profiles`. Ce schéma comp
 a été entièrement supprimé le 2 août à la demande de Bora, sauvegarde remise
 au préalable.
 
-### Les sept étapes — et la règle qui remplace la mécanique
+### Les huit étapes — et la règle qui remplace la mécanique
 
 Statuts (`prospect_status`) : `a_appeler` → `contacte` → `rendez_vous` →
 `a_rappeler` (migration `026`, 18/10 : le RDV a eu lieu, il faut rappeler la
-personne — voir « Débriefer là où on travaille ») → `proposition` → `gagne` /
-`perdu` (migration `007_simplification`, 3 août :
+personne — voir « Débriefer là où on travaille ») → `proposition` →
+`essai_gratuit` (migration `030`, 27/10 : le client essaie gratuitement — le
+« win » d'un étudiant ; MANUELLE, pas une fin de parcours — voir « Le cadre de
+l'équipe de vente ») → `gagne` / `perdu` (migration `007_simplification`, 3 août :
 sans_reponse/contact_etabli/rappel_programme → contacte, rdv → rendez_vous ;
 `activity_type` réduit à note/email/rendez_vous, appel/reunion/whatsapp/
 linkedin migrés vers note ; colonnes `call_attempts`, `last_outcome`,
@@ -1054,6 +1089,156 @@ et le report qui remplacent, et **rejoue Carrosserie carsystem**. Côté
 TypeScript : **`npm run test:debrief`** (issues, zone, étape « À rappeler »,
 libellés).
 
+### Le cadre de l'équipe de vente (migrations `030` et `031`, 27 octobre — ÉCRITES, PAS APPLIQUÉES)
+
+Les étudiants font leur recherche ailleurs (souvent avec leur propre IA) et
+collent leur liste dans le CRM AVANT d'appeler ; puis le cycle existant (cinq
+pastilles, relance datée à la main, l'étape suit les faits). Bora fixe des
+objectifs, attribue des fiches, et veut une compétition visible. Le « win »
+d'un étudiant, c'est un client **en essai gratuit**. Une décision par point,
+prise avec Bora le 27/10 :
+
+**1. L'étape « Essai gratuit »** (`essai_gratuit`, 030) — entre « Proposition »
+et « Gagné » : `STATUS_RANK` 5, Gagné/Perdu passent à 6. **Manuelle**
+(`MANUAL_ONLY`), jamais déduite ; sarcelle, pictogramme `cadeau`. **Pas une
+fin de parcours** : la 023 ne regarde que gagne/perdu, donc une fiche en essai
+garde ses relances (la fin d'essai) et ses débriefs. `prospects.essai_gratuit_at`
+(031) est posée par un trigger BEFORE à CHAQUE entrée dans l'étape, jamais
+effacée — c'est elle que comptent objectifs et classement. **Issue de débrief
+« Essai gratuit démarré »** (`essai`) à côté de « Signé » : la fiche passe en
+essai, verrouillée ; « Et ensuite ? » reste offert (la date de fin d'essai).
+
+**2. Les secteurs : une liste fixe** (`lib/crm/secteurs.ts`) — quinze secteurs,
+`normaliserSecteur` (« garage », « Carrosserie », « Dentiste »… → la liste ;
+inconnu → « Autre » ; vide → null). Écrite DEUX fois : en TS (formulaires,
+ajout rapide, import, « Ma liste », MCP) et en SQL (`normaliser_secteur` +
+trigger sur `prospects`, pour le service_role, Janet et le SQL direct). **Un
+seul jeu de cas**, `secteurs.cas.json` (test:secteurs ET la recette). Pas de
+CHECK : il casserait un écrivain ancien au lieu de ranger sa valeur.
+`secteurDe` (le script de Janet) passe par une **correspondance explicite** :
+l'expression régulière prenait « Auto-école » pour un garage.
+
+**3. Les doublons dans toute l'équipe** — la RLS empêche un étudiant de VOIR
+les fiches d'un autre, donc de savoir qu'elles existent : la règle « au premier
+qui l'enregistre » était invérifiable, et l'import ne dédoublonnait que sur
+l'e-mail (une liste Maps n'en a presque jamais). `doublons_equipe` (031,
+`security definer`) répond par des **BOOLÉENS** : `par_telephone`,
+`par_societe`, `a_moi` ; l'id d'une fiche seulement si elle est à moi ; le
+responsable **seulement pour l'admin**. Deux portes, une règle (forme de la
+029) : `doublons_equipe_pour(viewer, …)` pour le service_role (MCP), et
+`doublons_equipe(…)` qui lit `auth.uid()`. Les clés (`cle_telephone`,
+`cle_societe`) sont la recopie de `lib/crm/doublons.ts`, jeu de cas commun
+`doublons.cas.json`. ⚠ **L'ancienne `phoneKey` ratait les fixes** (« 081 22 33
+44 » et « +32 81 22 33 44 » donnaient deux clés) : corrigée — et les 8
+derniers chiffres n'auraient pas suffi (Charleroi 071 / mobile 0471). Branchée
+sur : l'import CSV et `importer_prospects` (le lot, puis l'équipe, puis
+l'e-mail), « Ma liste », l'ajout rapide, le formulaire et `creer_prospect` —
+**un commercial ne recrée jamais la fiche d'un autre** ; l'admin peut forcer.
+
+**4. « Ma liste »** (`/prospects/ma-liste`, lien depuis Prospects et depuis le
+＋ du téléphone) — un fil avec **Janet** : on colle, elle range, on relit, **un
+clic pour importer** (`importProspectsCore`, étape « À appeler », source « Ma
+liste »). L'état vit en mémoire, aucune table. **Le déterministe d'abord**
+(`lib/crm/maListe.ts`, pur) : lignes « nom + numéro » (séparateurs « - », « : »,
+tabulation, « ; », puces), tableaux markdown (colonnes reconnues à l'en-tête) et
+remarques sur leur propre ligne (minuscule, tiret, « NB : »…) se lisent SANS
+modèle. Le modèle (`lib/crm/maListeIA.ts`) ne lit que ce que le code ne sait
+pas lire — le collage entier, en trois morceaux de 4 000 caractères au plus,
+en parallèle. **Plafond : 80 fiches / 12 000 caractères** par collage (trois
+morceaux tiennent sous la minute d'une fonction Vercel ; on colle la suite
+ensuite). Ce que rend le modèle est **validé contre le collage** : un numéro
+absent du texte est RETIRÉ (« jamais inventé »), un nom introuvable signalé.
+Ce que l'étudiant DIT d'une société va dans `notes` (« Ce qu'on sait »), jamais
+dans les champs. Corrections par message : le code d'abord (`lireCorrection` :
+« enlève la 3 », « le secteur c'est kiné », « la ville c'est Namur pour la
+2 »), le modèle ensuite (opérations validées, liste blanche de champs), et le
+tableau reste éditable. Assistant indisponible : la lecture du code, l'écran
+dit ce qui n'a pas été lu et propose le CSV — jamais de blocage. Tout ce qui
+revient du navigateur repasse par `rangerFiche`.
+
+**5. L'étoile** (`prospects.starred_at`, 031) — un tap, optimiste
+(`BoutonEtoile`), sur la carte et au titre de la fiche. Écrite par
+`prospects_update` : **l'encadrant la VOIT, ne la pose pas**. Les étoilées
+passent en tête de la liste et **en tête de chaque zone** de « À faire » —
+jamais une zone de plus (`etoileesDabord`).
+
+**6. L'aperçu des prospects refait** — UNE carte par fiche, téléphone et
+ordinateur (`ListeProspects`) : étoile, étape, « Ce qu'on sait » dès « À
+appeler » (tronqué, entier au tap), prochaine action, dernier résultat,
+Appeler. Ordre par défaut **« Priorité »** (`lib/crm/ordreProspects.ts`) :
+étoilées, puis dû (retard + aujourd'hui), puis le reste par prochaine action,
+puis rien de prévu. L'étape est une **rangée de puces**, plus de bascule ; les
+colonnes restent à `?vue=colonnes` (« Pipeline d'équipe », lien pour qui voit
+plusieurs portefeuilles). « Ce qu'on sait » est monté en tête de fiche (il
+était sous la chronologie).
+
+**7. Objectifs** (031) — `objectifs` (la SEMAINE, désignée par son lundi :
+appels, réponses, RDV) et `objectifs_periode` (les ESSAIS sur la période,
+depuis `DEBUT_SALES_TROPHY` = 2/11 — décision de Bora : deux essais ne se
+découpent pas en semaines). RLS : **l'admin écrit**, chacun lit les siens,
+l'encadrant ceux qu'il encadre. Saisie dans `/equipe` (« Appliquer à tous les
+étudiants » = les encadrés) ; valeurs PROPOSÉES 60 · 15 · 3 · 2, jamais codées
+en base. En haut de « À faire » : « Cette semaine : 23/60 appels · 6/15
+réponses · 1/3 RDV · 0/2 essais » (`CarteObjectifs`, commercial seul).
+
+**8. Les compteurs et le classement** — la règle UNE fois en SQL
+(`compteurs_pour`, service_role) et sa recopie TS (`lib/crm/compteurs.ts`),
+même jeu de cas `compteurs.cas.json` (test:objectifs ET la recette) :
+
+| Compteur | Ce qui compte |
+|---|---|
+| appels | activité non brouillon, AVEC un `outcome`, **SANS `meeting_id`** (un débrief porte « intéressé »/« refus » : ce n'est pas un appel) — à l'auteur, par `occurred_at` |
+| réponses | `rappeler` · `interesse` · `refus` — on a eu le décideur ; **un barrage est un appel, pas une réponse** (Bora, 27/10) |
+| intéressés | `interesse` · `rappeler` |
+| rdv | RDV de prospect CRÉÉS dans la période, non annulés — à `created_by` (à défaut le responsable) |
+| essais | `essai_gratuit_at` dans la période — au responsable |
+| numéros | fiches créées dans la période — à `created_by` |
+
+Semaine du lundi au dimanche, **en dates de Bruxelles** (bornes converties en
+SQL ; testé à l'heure d'été et d'hiver). Trois portes : `compteurs_pour`
+(service_role), `compteurs_de(user, début, fin)` (soi, l'admin, l'encadrant),
+`classement_equipe(début, fin)` (tout membre actif, et le service_role — des
+CHIFFRES par personne, jamais une fiche). Participants : **les commerciaux
+actifs qui ont un objectif posé** (Rémi n'y figure pas, ni l'admin). Ordre :
+essais, RDV, réponses, appels. `/classement` : « Cette semaine » / « Depuis le
+2 novembre ». **Navigation** : côté admin, « Classement » prend la place
+d'« Agenda » (ordinateur : À faire · Prospects · Classement · Équipe · Agenda ·
+Appels IA ; téléphone : À faire · Prospects · ＋ · Classement · Plus avec
+Agenda) ; un commercial garde ses quatre onglets, le classement s'ouvre depuis
+sa carte d'objectifs (et la barre latérale sur ordinateur).
+
+**9. L'attribution** — sélection multiple + « Attribuer à… » (admin) sur la
+liste, et « Pour… » dans « Ma liste » et l'import. `attribuer_prospects`
+(031, `security invoker`, revérifie l'admin — 42501) : la fiche, ses
+**relances ouvertes** et ses **RDV À VENIR** suivent (Bora, 27/10), les RDV
+passés restent à l'ancien, une ligne au journal (« Fiche attribuée à Hakim
+(par Bora) »). ⚠ **`prospects_insert` est fermé** (031, `alter policy`) : il
+n'exigeait que `is_member()`, un commercial pouvait créer une fiche AU NOM d'un
+autre — désormais `is_admin() or owner_id = auth.uid()` (le trigger
+`prospects_set_owner` remplit un owner nul AVANT ce contrôle). La règle des
+90 jours (`32-remuneration`) n'est PAS dans le dépôt : on trace, on n'applique
+rien.
+
+**10. Le connecteur MCP** — `ajouter_note` gagne `resultat` (les cinq
+valeurs ; « refus » exige `motif`, sans passer en Perdu ; un résultat autre que
+`sans_reponse` atteste un échange, comme l'écran) ; `importer_prospects` et
+`creer_prospect` : doublons d'équipe, secteur rangé ; `essai_gratuit` partout ;
+`debriefer_rendez_vous(essai)` ; **`mes_objectifs`** et **`classement`** en
+lecture (le porteur du jeton seul).
+
+**Tests** : `test:secteurs`, `test:doublons`, `test:ma-liste` (contre un FAUX
+fournisseur HTTP local : les sept collages réels — nom + numéro, séparateurs,
+tableau markdown, Google Maps bruité, remarques mêlées, formats de numéros,
+doublons — plus la panne et la configuration absente), `test:objectifs` ;
+`test:debrief`, `test:prochaine-action`, `test:filtres`, `test:nav`,
+`test:equipe`, `test:appels` étendus. Banc : `tests/mobile/ma-liste.spec.ts`.
+
+**Recette** : `supabase/recettes/031_assembler.sh` (+ `031_corps.sql`),
+différentielle, en transaction ANNULÉE contre la production, la migration
+jouée verbatim (md5 vérifié dans le rapport), les trois jeux de cas JSON
+injectés. Les assertions qui posent l'étape `essai_gratuit` sont SAUTÉES tant
+que la 030 n'est pas appliquée — **à rejouer après elle**.
+
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
 **La probabilité chiffrée à la main est retirée de l'interface** (décision de
@@ -1123,7 +1308,9 @@ rien sur l'état du compte (ni 500, ni « compte en attente »).
 
 `/dashboard` (**À faire**) · `/agenda` (depuis le 31 août — voir « L'agenda »)
 · `/prospects` (+ `/prospects/[id]`, `/prospects/nouveau`,
-`/prospects/import`) · `/equipe` (admin) · `/appels-ia` (admin, octobre 2026 —
+`/prospects/import`, `/prospects/ma-liste` — « Ma liste », 27/10) ·
+`/classement` (tout membre actif, 27/10 — des chiffres, jamais une fiche) ·
+`/equipe` (admin ; la saisie des objectifs depuis le 27/10) · `/appels-ia` (admin, octobre 2026 —
 les appels de Janet, voir « Appels IA » ; lien du menu après « Équipe », admin
 seul) ·
 et en périphérie : `/compte` (liens vers `/reglages-email` et `/emails`, et —
@@ -1919,6 +2106,15 @@ Depuis octobre 2026 (appels IA, **admin seul, vérifié en code**) :
 `importer_prospects` (source « Claude », jamais réécrite par l'IA). Migration
 `025` absente : chacun répond qu'elle n'est pas appliquée, sans rien écrire.
 
+Depuis le 27 octobre (le cadre de l'équipe de vente, `031`) : `ajouter_note`
+porte `resultat` (les cinq valeurs ; « refus » exige `motif`) ;
+`importer_prospects` et `creer_prospect` vérifient les doublons de TOUTE
+l'équipe (`doublons_equipe_pour`, au nom du porteur du jeton — un commercial
+ne recrée jamais la fiche d'un autre) et rangent le secteur dans la liste
+fixe ; `debriefer_rendez_vous` connaît l'issue `essai` ; deux outils en
+lecture, **`mes_objectifs`** (le porteur du jeton seul) et **`classement`**
+(les chiffres de `/classement`).
+
 Trois précautions dictées par la règle des faits (4 août) :
 
 - `mettre_a_jour_statut` **verrouille** la fiche — sa description le dit, pour
@@ -2640,10 +2836,12 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
-`npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
+`npm run test:secteurs`, `npm run test:doublons`, `npm run test:ma-liste`,
+`npm run test:objectifs`, `npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
-sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, rien ne
-sort de la machine). L'edge function `appels-ia-annexe` se vérifie à part,
+sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, et
+`test:ma-liste` un faux fournisseur MiniMax **local** : rien ne sort de la
+machine). L'edge function `appels-ia-annexe` se vérifie à part,
 `deno check` dans une copie isolée (le `package.json` du dépôt fait chercher à
 Deno des types npm absents) : voir « Appels IA ». **`test:frontiere` n'est pas un test de règle mais un test de
 STRUCTURE** — il relit la frontière serveur → client, que ni `tsc` ni
@@ -2833,6 +3031,31 @@ porter sur chacun d'eux, pas seulement sur `index.ts`.
 ---
 
 ## Pièges déjà rencontrés — ne pas les redécouvrir
+
+**Une réponse RSC qui porte un `Set-Cookie`, et l'en-tête `rsc` que le
+middleware ne voit pas (27 octobre 2026).** Mesuré en production : chaque
+bascule du sélecteur de périmètre (« Toute l'équipe » ↔ un étudiant) refaisait
+un rendu serveur, même pour revenir à un écran vu deux secondes plus tôt (0,47
+à 0,77 s par geste, médianes sur 5) — et chaque réponse portait le
+`Set-Cookie` du périmètre mémorisé, posé par le middleware. Le cookie est
+désormais écrit par le NAVIGATEUR (`MemoirePerimetre`, nouveau nom non
+`httpOnly`, `celya_perim`) ; le middleware ne le pose plus que sur un
+chargement complet. ⚠ Le premier correctif testait `request.headers.get("rsc")`
+— **Next retire cet en-tête avant le middleware**, le test ne mordait jamais.
+C'est `Sec-Fetch-Dest: document` qui dit un chargement complet. Vérifié en
+local : plus aucun `Set-Cookie` sur les réponses RSC. **Le gain en production
+n'est PAS mesuré** (aperçu inaccessible) : à mesurer après la fusion. Et le
+banc local ne peut pas trancher : sur `next start`, une navigation « même page,
+autres paramètres » ne s'applique pas toujours (voir « Le téléphone d'abord »)
+— reproduit le 27/10, avec ou sans cookie.
+
+**L'outil d'écriture de fichier décode les `\uXXXX` (27 octobre 2026).** Écrire
+un fichier TypeScript qui contient `/\u00a0/g` ou `[\u0300-\u036f]` par
+l'outil d'écriture y a mis les CARACTÈRES (une espace insécable littérale, des
+diacritiques combinants) au lieu des séquences — même comportement, mais
+illisible et fragile. Même piège que l'`apply_migration` de la 025. Contrôle :
+`grep -n "u00a0" fichier` doit trouver la séquence ; sinon, la réécrire en
+Python avec `chr(92) + "u00a0"`.
 
 **Élargir une LECTURE élargit l'ÉCRITURE, en silence (19 septembre 2026).**
 `activities_insert` avait pour `WITH CHECK` `is_member() AND EXISTS(prospects…)`
@@ -3369,6 +3592,22 @@ mensonge. Le fil repart proprement au prochain envoi vers chacun.)*
    refusé (23514) ; les rattacher, cocher ou supprimer reste possible (recette
    `supabase/recettes/028.sql`, **7 OK** le 18/10). La `028` est indépendante
    des autres.
+8sexies. **Le cadre de l'équipe de vente (27/10)** — branche
+   `claude/youthful-lovelace-2kjwtf`. Dans cet ordre : **la `030` SEULE**
+   (`apply_migration`), **puis la `031`**, puis **rejouer la recette 031**
+   (`supabase/recettes/031_assembler.sh` — après la 030, ses assertions
+   « essai gratuit » ne sont plus sautées), puis la fusion. Vérifier après la
+   031 : `normaliser_secteur`, `doublons_equipe`, `classement_equipe`,
+   `attribuer_prospects` existent ; `objectifs` et `objectifs_periode` ont leur
+   RLS ; `prospects_insert` exige `is_admin() or owner_id = auth.uid()` ; plus
+   aucun secteur hors liste. Le code tourne avant comme après (lectures
+   tolérantes). Ensuite, depuis `/equipe` : **poser les objectifs** des
+   étudiants (sans objectif, personne n'est au classement) ; et **supprimer
+   `mobile-admin@celya.test`** (désactivé, mot de passe aléatoire, 0 ligne).
+   À faire après la fusion : **la recette réelle MiniMax** de « Ma liste »
+   (collages 1, 3 et 5 de `test:ma-liste`) et **la mesure du sélecteur de
+   périmètre** en production — ni l'une ni l'autre n'ont pu se faire le 27/10
+   (aperçu Vercel inaccessible depuis la session, voir l'état du jour).
 8quinquies. **Appliquer la migration `029`** (`appels_ia_simuler_inscription`)
    **avant la fusion** de `claude/nifty-cray-jp3l9i` — additive, indépendante.
    Vérifier après coup : la fonction existe, `authenticated` peut l'exécuter,

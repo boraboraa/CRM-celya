@@ -31,6 +31,8 @@ import {
   scopeJoinedProspects,
   type Viewer,
 } from "./access.ts";
+import { AUCUN_DOUBLON, phraseDoublon } from "./doublons.ts";
+import { ZERO, ordreClassement } from "./compteurs.ts";
 import {
   lirePerimetre,
   peutElargir,
@@ -715,6 +717,53 @@ verifie(
   relanceEnLecture({ userId: COLLINS, isAdmin: false }, ETU_A),
   true
 );
+
+// ---------------------------------------------------------------------------
+// Le cadre de l'équipe de vente (031, 27/10) — ce que la cloison laisse passer
+// ---------------------------------------------------------------------------
+// La règle des doublons d'équipe, du classement et des objectifs vit en SQL
+// (031 : `doublons_equipe`, `classement_equipe`, policies d'objectifs),
+// éprouvée par la recette. Ici, la moitié TypeScript : ce que l'écran et le
+// connecteur en FONT ne doit rien ajouter à ce que la base a voulu dire.
+console.log("\n— 031 : doublons, classement, étoile, attribution —");
+
+// Un étudiant apprend « déjà suivie dans l'équipe »… sans apprendre par qui :
+// la base ne remplit `proprietaire` que pour l'admin, et la phrase ne nomme
+// personne sans lui — même si un appelant lui passait un nom par erreur.
+verifie(
+  "doublon d'équipe vu par un étudiant : ni nom, ni fiche",
+  [phraseDoublon({ ...AUCUN_DOUBLON, parTelephone: true }, "Hakim"), AUCUN_DOUBLON.ficheId],
+  ["déjà suivie dans l'équipe (même téléphone)", null]
+);
+verifie(
+  "doublon d'équipe vu par l'admin : le responsable est nommé",
+  phraseDoublon({ ...AUCUN_DOUBLON, parSociete: true, proprietaire: ETU_B }, "Meryem"),
+  "déjà suivie dans l'équipe — par Meryem (même nom)"
+);
+
+// Le classement ne transporte QUE des compteurs : aucune clé de fiche ne doit
+// pouvoir s'y glisser (la page et l'outil MCP rendent ces lignes telles quelles).
+const ligneClassement = { user_id: ETU_A, nom: "Aissata", ...ZERO, appels: 12 };
+verifie(
+  "une ligne de classement : un nom et six compteurs, rien sur une fiche",
+  Object.keys(ordreClassement([ligneClassement])[0]).sort(),
+  ["appels", "essais", "interesses", "nom", "numeros", "rdv", "reponses", "user_id"]
+);
+
+// L'étoile s'écrit par `prospects_update` — la même frontière que modifier la
+// fiche : l'encadrant VOIT l'étoile de son étudiant, il ne la pose pas.
+verifie(
+  "étoile : l'encadrant ne peut pas étoiler la fiche de son étudiant",
+  canEditProspect(COLLINS_ENCADRANT, ETU_A),
+  false
+);
+verifie("étoile : l'étudiant étoile la sienne", canEditProspect(viewer({ userId: ETU_A }), ETU_A), true);
+verifie("étoile : l'admin peut", canEditProspect(BORA_ADMIN, ETU_A), true);
+
+// L'attribution : seul l'admin (`attribuer_prospects` lève 42501 sinon, et
+// `prospects_insert` refuse une fiche posée au nom d'un autre). En TS : un
+// commercial ne peut pas éditer la fiche d'un autre, donc ne peut pas la donner.
+verifie("attribution : un commercial ne touche pas la fiche d'un collègue", canEditProspect(COLLINS_PORTEUR, NATHAN), false);
 
 console.log(
   echecs === 0 ? "\nTous les cas passent." : `\n${echecs} cas en ÉCHEC.`

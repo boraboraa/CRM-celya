@@ -24,9 +24,15 @@ export const FILTRES_RAPIDES = {
 } as const;
 export type FiltreRapide = keyof typeof FILTRES_RAPIDES;
 
+/**
+ * « Priorité » est le défaut depuis le 27/10 (lib/crm/ordreProspects.ts) :
+ * étoilées, puis ce qui est dû, puis le reste. « Activité récente » — l'ancien
+ * défaut — reste un choix.
+ */
 export const TRIS = {
-  recent: "Activité récente",
+  priorite: "Priorité",
   relance: "Prochaine action",
+  recent: "Activité récente",
   nom: "Nom",
 } as const;
 export type Tri = keyof typeof TRIS;
@@ -48,7 +54,7 @@ export function hrefProspects(
   const sp = new URLSearchParams();
   if (v.q?.trim()) sp.set("q", v.q.trim());
   if (v.statut && v.statut !== "tous") sp.set("statut", v.statut);
-  if (v.tri && v.tri !== "recent") sp.set("tri", v.tri);
+  if (v.tri && v.tri !== "priorite" && Object.prototype.hasOwnProperty.call(TRIS, v.tri)) sp.set("tri", v.tri);
   if (v.vue === "colonnes") sp.set("vue", "colonnes");
   if (estFiltre(v.filtre ?? undefined)) sp.set("filtre", v.filtre!);
   if (v.perimetre) sp.set("perimetre", v.perimetre);
@@ -90,7 +96,7 @@ export function filtresActifs(
       retirer: hrefProspects(params, { filtre: null }),
     });
   }
-  if (params.vue !== "colonnes" && (params.tri === "relance" || params.tri === "nom")) {
+  if (params.vue !== "colonnes" && (params.tri === "relance" || params.tri === "nom" || params.tri === "recent")) {
     out.push({
       cle: "tri",
       label: `Tri : ${TRIS[params.tri]}`,

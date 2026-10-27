@@ -41,12 +41,16 @@ export const STATUS_RANK: Record<ProspectStatus, number> = {
   rendez_vous: 2,
   a_rappeler: 3,
   proposition: 4,
-  gagne: 5,
-  perdu: 5,
+  // L'essai gratuit (030) passe devant la proposition et derrière l'issue :
+  // aucun fait ne la déduit (MANUAL_ONLY), mais une fiche en essai ne doit
+  // pas reculer en « Proposition » quand un devis est (re)marqué envoyé.
+  essai_gratuit: 5,
+  gagne: 6,
+  perdu: 6,
 };
 
 /** Étapes qui ne s'obtiennent qu'à la main, jamais par déduction. */
-export const MANUAL_ONLY: ProspectStatus[] = ["gagne", "perdu"];
+export const MANUAL_ONLY: ProspectStatus[] = ["essai_gratuit", "gagne", "perdu"];
 
 export function isManualOnly(status: ProspectStatus): boolean {
   return MANUAL_ONLY.includes(status);

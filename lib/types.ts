@@ -4,13 +4,16 @@ export type UserRole = "admin" | "commercial";
  *  « À appeler » est une colonne (la liste des entreprises à démarcher),
  *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape.
  *  « À rappeler » (migration 026) : le rendez-vous a eu lieu, il faut
- *  rappeler la personne — ne pas confondre avec « À appeler ». */
+ *  rappeler la personne — ne pas confondre avec « À appeler ».
+ *  « Essai gratuit » (migration 030) : le client essaie, gratuitement — le
+ *  « win » d'un étudiant. Manuelle, et pas une fin de parcours. */
 export type ProspectStatus =
   | "a_appeler"
   | "contacte"
   | "rendez_vous"
   | "a_rappeler"
   | "proposition"
+  | "essai_gratuit"
   | "gagne"
   | "perdu";
 
@@ -57,7 +60,12 @@ export type Prospect = {
   currency: string;
   owner_id: string | null;
   tags: string[];
+  /** « Ce qu'on sait » — affiché en tête de fiche dès « À appeler » (27/10). */
   notes: string | null;
+  /** Étoilée par son responsable (031) : en tête de la liste et de « À faire ». */
+  starred_at?: string | null;
+  /** Dernière entrée en « Essai gratuit » (031) — compte les essais. */
+  essai_gratuit_at?: string | null;
   /**
    * La prochaine action, c'est le prochain rendez-vous de la fiche tant qu'il
    * n'est pas débriefé ; sinon, sa relance la plus proche — sauf relance posée

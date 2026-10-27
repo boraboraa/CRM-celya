@@ -70,7 +70,11 @@ export type IconeNom =
   | "loupe"
   | "suivant"
   | "points"
-  | "sortie";
+  | "sortie"
+  | "cadeau"
+  | "etoile"
+  | "trophee"
+  | "cible";
 
 /** Le combiné, réutilisé par « téléphone barré ». */
 const COMBINE = (
@@ -102,6 +106,34 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
     <>
       <path d="M2.8 8h10" />
       <path d="M9.4 4.4 13 8l-3.6 3.6" />
+    </>
+  ),
+  /** L'essai gratuit (031) : le paquet et son nœud. */
+  cadeau: (
+    <>
+      <path d="M2.4 6.2h11.2v2.6H2.4zM3.4 8.8h9.2v5H3.4z" />
+      <path d="M8 6.2v7.6" />
+      <path d="M8 6.2C6.6 3.4 4.2 3.6 4.6 5.2c.3 1 3.4 1 3.4 1Zm0 0c1.4-2.8 3.8-2.6 3.4-1-.3 1-3.4 1-3.4 1Z" />
+    </>
+  ),
+  /** L'étoile d'une fiche (031). Pleine quand `className` porte un fill. */
+  etoile: (
+    <path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6Z" />
+  ),
+  /** Le classement d'équipe (031). */
+  trophee: (
+    <>
+      <path d="M4.6 2.4h6.8v3.4a3.4 3.4 0 0 1-6.8 0Z" />
+      <path d="M4.6 3.6H2.4a2.4 2.4 0 0 0 2.4 2.8M11.4 3.6h2.2a2.4 2.4 0 0 1-2.4 2.8" />
+      <path d="M8 9.2v2.6M5.4 13.6h5.2M6.2 13.6l.6-1.8h2.4l.6 1.8" />
+    </>
+  ),
+  /** Les objectifs de la semaine (031). */
+  cible: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <circle cx="8" cy="8" r="3.4" />
+      <circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none" />
     </>
   ),
   /** « Plus » — trois points, l'onglet des écrans qui ne sont pas de terrain. */

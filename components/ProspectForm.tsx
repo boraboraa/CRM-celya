@@ -1,4 +1,5 @@
 import { AdresseField } from "@/components/AdresseField";
+import { SECTEURS, estSecteurFixe } from "@/lib/crm/secteurs";
 import {
   STATUS_ORDER,
   STATUS_LABEL,
@@ -127,13 +128,25 @@ export function ProspectForm({
           <label className="label" htmlFor="sector">
             Secteur
           </label>
-          <input
+          {/* La liste fixe (031). Une valeur d'avant la normalisation reste
+              proposée telle quelle, pour ne rien effacer au réenregistrement :
+              le serveur la range dans la liste. */}
+          <select
             id="sector"
             name="sector"
             defaultValue={prospect?.sector ?? ""}
             className={cls("sector")}
-            placeholder="Horeca, garage, cabinet…"
-          />
+          >
+            <option value="">—</option>
+            {prospect?.sector && !estSecteurFixe(prospect.sector) && (
+              <option value={prospect.sector}>{prospect.sector}</option>
+            )}
+            {SECTEURS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* L'adresse — UN SEUL champ : adresse libre ou lien Maps collé.
@@ -262,7 +275,7 @@ export function ProspectForm({
 
         <div className="sm:col-span-2">
           <label className="label" htmlFor="notes">
-            Notes générales
+            Ce qu&apos;on sait
           </label>
           <textarea
             id="notes"

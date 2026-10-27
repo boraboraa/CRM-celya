@@ -1,0 +1,35 @@
+{
+  "_note": "UN SEUL jeu de cas pour les DEUX copies de la règle de comptage : lib/crm/compteurs.ts (npm run test:objectifs) et public.compteurs_pour (recette 031, qui insère ces lignes dans une transaction annulée — U, V et ADMIN y sont trois comptes réels). La semaine du lundi 2/11/2026 (heure d'hiver : minuit à Bruxelles = 23:00 UTC la veille).",
+  "semaine": { "debut": "2026-11-02", "fin": "2026-11-09" },
+  "activites": [
+    { "ref": "a1", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-02T08:00:00Z", "pourquoi": "appel, pas une réponse" },
+    { "ref": "a2", "author": "U", "outcome": "barrage", "occurred_at": "2026-11-03T09:00:00Z", "pourquoi": "barrage : un appel, PAS une réponse (Bora, 27/10)" },
+    { "ref": "a3", "author": "U", "outcome": "rappeler", "occurred_at": "2026-11-03T10:00:00Z", "pourquoi": "appel, réponse, intéressé" },
+    { "ref": "a4", "author": "U", "outcome": "interesse", "occurred_at": "2026-11-04T10:00:00Z", "pourquoi": "appel, réponse, intéressé" },
+    { "ref": "a5", "author": "U", "outcome": "refus", "occurred_at": "2026-11-04T11:00:00Z", "pourquoi": "appel, réponse, pas intéressé" },
+    { "ref": "a6", "author": "U", "outcome": "interesse", "meeting": true, "occurred_at": "2026-11-05T10:00:00Z", "pourquoi": "ligne de DÉBRIEF (meeting_id) : pas un appel" },
+    { "ref": "a7", "author": "U", "outcome": "interesse", "draft": true, "occurred_at": "2026-11-05T11:00:00Z", "pourquoi": "brouillon : rien" },
+    { "ref": "a8", "author": "U", "outcome": null, "occurred_at": "2026-11-05T12:00:00Z", "pourquoi": "note sans résultat : pas un appel" },
+    { "ref": "a9", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-01T22:30:00Z", "pourquoi": "dimanche 23h30 à Bruxelles : semaine d'avant" },
+    { "ref": "a10", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-01T23:10:00Z", "pourquoi": "lundi 0h10 à Bruxelles : cette semaine" },
+    { "ref": "a11", "author": "U", "outcome": "sans_reponse", "occurred_at": "2026-11-08T23:00:00Z", "pourquoi": "lundi suivant 0h00 : semaine d'après" },
+    { "ref": "a12", "author": "V", "outcome": "interesse", "occurred_at": "2026-11-03T10:00:00Z", "pourquoi": "un autre auteur" }
+  ],
+  "rdv": [
+    { "ref": "m1", "created_by": "U", "owner": "U", "kind": "prospect", "status": "prevu", "created_at": "2026-11-03T10:05:00Z", "pourquoi": "posé cette semaine" },
+    { "ref": "m2", "created_by": "U", "owner": "U", "kind": "prospect", "status": "annule", "created_at": "2026-11-03T11:00:00Z", "pourquoi": "annulé : rien" },
+    { "ref": "m3", "created_by": "U", "owner": "U", "kind": "perso", "status": "prevu", "created_at": "2026-11-03T12:00:00Z", "pourquoi": "personnel : rien" },
+    { "ref": "m4", "created_by": null, "owner": "U", "kind": "prospect", "status": "honore", "created_at": "2026-11-04T09:00:00Z", "pourquoi": "sans auteur : compté au responsable" },
+    { "ref": "m5", "created_by": "U", "owner": "U", "kind": "prospect", "status": "reporte", "created_at": "2026-10-30T09:00:00Z", "pourquoi": "posé avant la semaine" }
+  ],
+  "fiches": [
+    { "ref": "f1", "owner": "U", "created_by": "U", "created_at": "2026-11-04T09:00:00Z", "essai_gratuit_at": "2026-11-05T09:00:00Z", "pourquoi": "numéro ajouté, essai démarré" },
+    { "ref": "f2", "owner": "U", "created_by": "ADMIN", "created_at": "2026-11-04T09:00:00Z", "essai_gratuit_at": null, "pourquoi": "créée par l'admin pour U : pas un numéro de U" },
+    { "ref": "f3", "owner": "U", "created_by": "U", "created_at": "2026-10-20T09:00:00Z", "essai_gratuit_at": "2026-11-06T09:00:00Z", "pourquoi": "créée avant, essai cette semaine" },
+    { "ref": "f4", "owner": "V", "created_by": "U", "created_at": "2026-11-03T09:00:00Z", "essai_gratuit_at": null, "pourquoi": "créée par U, attribuée à V : un numéro de U" }
+  ],
+  "attendu": {
+    "U": { "appels": 6, "reponses": 3, "interesses": 2, "rdv": 2, "essais": 2, "numeros": 2 },
+    "V": { "appels": 1, "reponses": 1, "interesses": 1, "rdv": 0, "essais": 0, "numeros": 0 }
+  }
+}

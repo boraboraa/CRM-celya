@@ -126,6 +126,6 @@ export async function ficheAvecRdvPasse(role: Role, nom: string): Promise<{ id: 
 
 /** Les pages internes à parcourir pour le test de largeur. */
 export const PAGES: Record<Role, string[]> = {
-  commercial: ["/dashboard", "/prospects", "/prospects?vue=colonnes", "/agenda", "/compte", "/prospects/nouveau"],
-  admin: ["/dashboard", "/prospects", "/prospects?vue=colonnes", "/agenda", "/compte", "/equipe", "/appels-ia", "/prospects/nouveau"],
+  commercial: ["/dashboard", "/prospects", "/prospects?vue=colonnes", "/agenda", "/compte", "/prospects/nouveau", "/prospects/ma-liste", "/classement"],
+  admin: ["/dashboard", "/prospects", "/prospects?vue=colonnes", "/agenda", "/compte", "/equipe", "/appels-ia", "/prospects/nouveau", "/prospects/ma-liste", "/classement"],
 };

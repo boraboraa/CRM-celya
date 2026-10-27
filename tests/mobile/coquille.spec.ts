@@ -27,7 +27,7 @@ test("la barre d'onglets : en bas, sous le pouce, ≥ 44 px", async ({ page }, i
   expect(box.y + box.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1);
 
   const attendus = role === "admin"
-    ? ["À faire", "Prospects", "Nouveau prospect", "Agenda", "Plus"]
+    ? ["À faire", "Prospects", "Nouveau prospect", "Classement", "Plus"]
     : ["À faire", "Prospects", "Nouveau prospect", "Agenda"];
   const libelles = await barre.locator("a, button").evaluateAll((els) =>
     els.map((e) => (e.getAttribute("aria-label") ?? e.textContent ?? "").trim())
@@ -41,14 +41,14 @@ test("la barre d'onglets : en bas, sous le pouce, ≥ 44 px", async ({ page }, i
   await expect(barre.getByRole("link", { name: "À faire" })).toHaveAttribute("aria-current", "page");
 });
 
-test("« Plus » (admin) : Équipe, Appels IA, Compte, Se déconnecter", async ({ page }, info) => {
+test("« Plus » (admin) : Équipe, Agenda, Appels IA, Compte, Se déconnecter", async ({ page }, info) => {
   const { role, mobile } = contexte(info);
   test.skip(!mobile || role !== "admin", "admin sur téléphone");
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Plus" }).click();
   const feuille = page.getByRole("dialog", { name: "Plus" });
   await expect(feuille).toBeVisible();
-  for (const nom of ["Équipe", "Appels IA", "Compte"]) {
+  for (const nom of ["Équipe", "Agenda", "Appels IA", "Compte"]) {
     await expect(feuille.getByRole("link", { name: nom })).toBeVisible();
   }
   await expect(feuille.getByRole("button", { name: "Se déconnecter" })).toBeVisible();

@@ -169,6 +169,32 @@ function chevauche(span: Span, autres: Span[]): boolean {
 
 const PONCTUATION = /[.,;:!?\n]/;
 
+/** Les civilités, en texte NORMALISÉ (minuscules, sans accents). */
+const CIVILITES = "madame|monsieur|mademoiselle|mme|mlle|mr|m";
+/** Les fonctions qu'on dit au téléphone, en texte NORMALISÉ. */
+const FONCTIONS =
+  "gerante|gerant|patronne|patron|proprietaire|responsable|directrice|directeur|secretaire|comptable|associee|associe|fondatrice|fondateur|chef d'atelier|receptionniste|assistante|assistant|manager";
+/** Ce qui suit « avec » ou « parlé à » sans être un nom. */
+const MOTS_OUTILS = /^(le|la|les|l|de|du|des|et|a|au|aux|pour|qui|est|un|une|son|sa|ses|lui|elle|il|on|ce|cette|mon|ma)$/;
+/** Ce qui suit une civilité sans être un nom : « appeler Mme demain ». */
+const MOTS_DU_TEMPS =
+  /^(demain|aujourd'hui|aujourd|ce|cet|cette|matin|soir|midi|apres|prochain|prochaine|semaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|rappelle|rappeler|absent|absente)$/;
+/**
+ * Un nom de SOCIÉTÉ n'est pas une personne : « avec Garage Dupont », « parlé à
+ * Carrosserie Max ». Le premier mot suffit à le reconnaître.
+ */
+const MOTS_SOCIETE =
+  /^(garage|carrosserie|cabinet|restaurant|brasserie|boulangerie|pharmacie|societe|sprl|srl|sa|asbl|sas|sarl|entreprise|groupe|clinique|centre|salon|institut|agence|auto|autos|moto|motos|immo|hotel|cafe|bar|atelier|garages)$/;
+function estSociete(valeur: string): boolean {
+  const premier = valeur
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^(madame|monsieur|mademoiselle|mme|mlle|mr|m)\.?\s+/, "")
+    .split(/\s+/)[0];
+  return MOTS_SOCIETE.test(premier ?? "");
+}
+
 export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
   const resultat: Raccourci = { segments: [] };
   if (!texte.trim()) return resultat;
@@ -283,8 +309,17 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
   if (relanceTrigger) marque(relanceTrigger, "relance");
 
   // ---- 2. Le contact ------------------------------------------------------
-  // « le gérant c'est Marc » · « contact Marc » · « avec Prénom Nom » (les
-  // majuscules du texte d'origine départagent « avec Marc » d'« avec le devis »).
+  // Le NOM de la personne, et sa fonction quand elle est dite — versés dans le
+  // même champ (`prospects.contact_name`) : « Mme Lambert (gérante) » (décision
+  // de Bora, 27/10 : pas de colonne de plus). Les formules, dans cet ordre :
+  //   « le gérant c'est Marc » · « Mme Lambert, la gérante » · « parlé à
+  //   Mme Lambert » · « avec M. Dupont » · « j'ai eu Marc Dupont » ·
+  //   « contact : Marc » · « avec Prénom Nom » (les majuscules départagent
+  //   « avec Marc » d'« avec le devis »).
+  // Jamais : une civilité sans nom (« appeler Mme »), ni un nom de société
+  // (« avec Garage Dupont »). Le texte d'origine fait foi pour l'écriture
+  // (accents, majuscules) ; un nom dicté en minuscules après une civilité est
+  // remis en majuscule.
   const litNomApres = (finNorm: number, majuscules: boolean): Trouve<string> | null => {
     const reste = norm.slice(finNorm);
     const m = /^\s*([a-z][a-z'-]+)(\s+([a-z][a-z'-]+))?/.exec(reste);
@@ -304,7 +339,7 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
         if (!majuscules) {
           // « contact marc dupont » : on s'arrête au premier mot si le second
           // ressemble à un mot-outil.
-          if (!/^(le|la|les|de|du|des|et|a|au|pour|qui|est)$/.test(m[3])) {
+          if (!MOTS_OUTILS.test(m[3])) {
             b = span3.b;
             nom = `${nom} ${nom3}`;
           }
@@ -317,30 +352,151 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
     return { valeur: nom.trim(), span: { a, b } };
   };
 
+  /** La fonction dite juste APRÈS le nom : « Mme Lambert, la gérante ». */
+  const fonctionApres = (finNorm: number): { mot: string; span: Span } | null => {
+    const m = new RegExp(`^\\s*,?\\s*(?:(?:le|la|l'|sa|son)\\s*)?(${FONCTIONS})\\b`).exec(norm.slice(finNorm));
+    if (!m) return null;
+    const a = finNorm + m[0].length - m[1].length;
+    const span = { a, b: finNorm + m[0].length };
+    const o = orig(span);
+    return { mot: texte.slice(o.debut, o.fin).toLowerCase(), span };
+  };
+
+  /**
+   * Une civilité suivie d'un nom, lue à partir de `debutNorm` : « Mme
+   * Lambert », « M. Dupont », « madame lambert » (dicté). Le nom est remis en
+   * majuscule ; une civilité sans nom ne donne rien.
+   */
+  const litCivilite = (debutNorm: number): Trouve<string> | null => {
+    const reste = norm.slice(debutNorm);
+    const m = new RegExp(`^\\s*(${CIVILITES})(\\.?)\\s+([a-z][a-z'-]+)(\\s+([a-z][a-z'-]+))?`).exec(reste);
+    if (!m) return null;
+    if (MOTS_OUTILS.test(m[3]) || MOTS_DU_TEMPS.test(m[3])) return null;
+    const a = debutNorm + m[0].indexOf(m[1]);
+    let b = debutNorm + m[0].indexOf(m[3], m[1].length) + m[3].length;
+    const oCiv = orig({ a, b: a + m[1].length + m[2].length });
+    const civBrute = texte.slice(oCiv.debut, oCiv.fin);
+    const civ = civBrute[0].toUpperCase() + civBrute.slice(1);
+    const motOrig = (sa: number, sb: number) => {
+      const o = orig({ a: sa, b: sb });
+      const w = texte.slice(o.debut, o.fin);
+      return w[0].toUpperCase() + w.slice(1);
+    };
+    const a3 = debutNorm + m[0].indexOf(m[3], m[1].length);
+    let nom = motOrig(a3, a3 + m[3].length);
+    if (m[5] && !MOTS_OUTILS.test(m[5]) && !new RegExp(`^(${FONCTIONS})$`).test(m[5])) {
+      const a5 = debutNorm + m[0].lastIndexOf(m[5]);
+      const o5 = orig({ a: a5, b: a5 + m[5].length });
+      const w5 = texte.slice(o5.debut, o5.fin);
+      // Le second mot n'est retenu que s'il a été écrit en majuscule (« Mme
+      // Lambert Dupont ») : « madame lambert rappelle » ne garde que Lambert.
+      if (w5[0] === w5[0].toUpperCase()) {
+        nom = `${nom} ${w5}`;
+        b = a5 + m[5].length;
+      }
+    }
+    return { valeur: `${civ} ${nom}`.replace(/\s+/g, " ").trim(), span: { a, b } };
+  };
+
   let contact: Trouve<string> | null = null;
-  const gerant =
-    /\b(le\s+)?(gerant|gerante|patron|patronne|proprietaire|responsable|directeur|directrice)\s+(c\s*'?\s*est|est)\b/g;
-  gerant.lastIndex = 0;
-  const mGerant = gerant.exec(norm);
-  if (mGerant) contact = litNomApres(mGerant.index + mGerant[0].length, false);
-  if (!contact) {
-    const mContact = /\bcontact\s*:?/g.exec(norm);
-    if (mContact) contact = litNomApres(mContact.index + mContact[0].length, false);
+  let fonction: { mot: string; span: Span } | null = null;
+
+  // a. « le gérant c'est Marc »
+  {
+    const re = new RegExp(`\\b(?:le\\s+|la\\s+|l'\\s*)?(${FONCTIONS})\\s+(c\\s*'?\\s*est|est)\\b`, "g");
+    const m = re.exec(norm);
+    if (m) {
+      // « c'est Marc » se dicte en minuscules ; « est » seul ne précède un
+      // nom qu'en MAJUSCULE (« la gérante est absente » n'est pas un nom).
+      const cEst = m[2].startsWith("c");
+      const c = litCivilite(m.index + m[0].length) ?? litNomApres(m.index + m[0].length, !cEst);
+      if (c && !estSociete(c.valeur)) {
+        contact = c;
+        const a = m.index + m[0].indexOf(m[1]);
+        const o = orig({ a, b: a + m[1].length });
+        fonction = { mot: texte.slice(o.debut, o.fin).toLowerCase(), span: { a: m.index, b: m.index + m[0].length } };
+      }
+    }
   }
+
+  // b. Une civilité suivie d'un nom, n'importe où : « parlé à Mme Lambert »,
+  //    « avec M. Dupont », « Madame lambert rappelle ».
   if (!contact) {
-    const avec = /\bavec\b/g;
+    const re = new RegExp(`(?:^|[^a-z])(${CIVILITES})(?=[\\s.])`, "g");
     let m: RegExpExecArray | null;
-    while ((m = avec.exec(norm))) {
-      const c = litNomApres(m.index + m[0].length, true);
-      if (c && !chevauche(c.span, pris)) {
+    while ((m = re.exec(norm))) {
+      const debutCiv = m.index + m[0].length - m[1].length;
+      const c = litCivilite(debutCiv);
+      if (c && !chevauche(c.span, pris) && !estSociete(c.valeur)) {
         contact = c;
         break;
       }
     }
   }
+
+  // b'. « Marc Dupont, le patron » — le nom écrit en MAJUSCULE juste avant
+  //     « , le / la <fonction> ».
+  if (!contact) {
+    const re = new RegExp(`,\\s*(?:(?:le|la|l'|sa|son)\\s*)?(${FONCTIONS})\\b`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(norm))) {
+      const avant = texte.slice(0, map[m.index] ?? 0);
+      const mn = /([A-ZÀ-ÖØ-Þ][\p{L}'’-]+)(?:\s+([A-ZÀ-ÖØ-Þ][\p{L}'’-]+))?\s*$/u.exec(avant);
+      if (!mn) continue;
+      const debutOrig = avant.length - mn[0].trimEnd().length - (mn[0].length - mn[0].trimEnd().length);
+      const valeur = mn[0].trim();
+      const span = spanDepuisOrigine(debutOrig, debutOrig + valeur.length);
+      if (!span || chevauche(span, pris) || estSociete(valeur) || MOTS_OUTILS.test(valeur.toLowerCase())) continue;
+      contact = { valeur, span };
+      const a = m.index + m[0].length - m[1].length;
+      const o = orig({ a, b: m.index + m[0].length });
+      fonction = { mot: texte.slice(o.debut, o.fin).toLowerCase(), span: { a: m.index + 1, b: m.index + m[0].length } };
+      break;
+    }
+  }
+
+  // c. « parlé à Marc Dupont », « j'ai eu Marc », « eu Marc au téléphone » —
+  //    un prénom en MAJUSCULE après le verbe (sinon « eu un souci » passerait).
+  if (!contact) {
+    const re = /\b(parle\s+(?:a|avec)|j'ai\s+eu|ai\s+eu|eu\s+en\s+ligne)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(norm))) {
+      const c = litNomApres(m.index + m[0].length, true);
+      if (c && !chevauche(c.span, pris) && !estSociete(c.valeur) && !MOTS_OUTILS.test(c.valeur.toLowerCase())) {
+        contact = c;
+        break;
+      }
+    }
+  }
+
+  // d. « contact : Marc »
+  if (!contact) {
+    const mContact = /\bcontact\s*:?/g.exec(norm);
+    if (mContact) {
+      const c = litCivilite(mContact.index + mContact[0].length) ?? litNomApres(mContact.index + mContact[0].length, false);
+      if (c && !estSociete(c.valeur)) contact = c;
+    }
+  }
+
+  // e. « avec Prénom Nom »
+  if (!contact) {
+    const avec = /\bavec\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = avec.exec(norm))) {
+      const c = litNomApres(m.index + m[0].length, true);
+      if (c && !chevauche(c.span, pris) && !estSociete(c.valeur)) {
+        contact = c;
+        break;
+      }
+    }
+  }
+
   if (contact && !chevauche(contact.span, pris)) {
-    resultat.contact = contact.valeur;
+    // La fonction : dite avant (« le gérant c'est… ») ou juste après le nom.
+    fonction = fonction ?? fonctionApres(contact.span.b);
+    resultat.contact = fonction ? `${contact.valeur} (${fonction.mot})` : contact.valeur;
     marque(contact.span, "contact");
+    if (fonction && !chevauche(fonction.span, pris)) marque(fonction.span, "contact");
   }
 
   // ---- 3. Le jour ---------------------------------------------------------

@@ -162,6 +162,7 @@ export function ProspectJournal({
             isAdmin={isAdmin}
             onOptimistic={ajouter}
             rdvAVenir={rdvAVenir}
+            contactActuel={contactName}
           />
         ) : prospectEmail ? (
           <EmailComposer

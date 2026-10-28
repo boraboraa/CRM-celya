@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { phraseContact, propositionContact } from "@/lib/crm/contactPropose";
 import { saveExchangeAction } from "@/app/actions";
 import { analyzeNoteAction } from "@/app/ai-actions";
 import { STATUS_LABEL } from "@/lib/constants";
@@ -41,8 +42,14 @@ export function QuickNote({
   isAdmin = false,
   onOptimistic,
   rdvAVenir = null,
+  contactActuel = null,
 }: {
   prospectId: string;
+  /**
+   * Le contact de la fiche : la pastille « Contact → … » ne l'écrase jamais
+   * en silence — elle dit « Remplacer … par … ? » (lib/crm/contactPropose.ts).
+   */
+  contactActuel?: string | null;
   /**
    * Début (ISO) du prochain rendez-vous à venir. Une relance tapée reste
    * possible ; la note dit seulement qu'un rendez-vous est prévu (024).
@@ -136,8 +143,11 @@ export function QuickNote({
     Boolean(raccourcis?.sansReponse) && !masques.has("sans_reponse");
   const propositionPastille =
     Boolean(raccourcis?.propositionEnvoyee) && !masques.has("proposition");
-  const contactPastille =
-    raccourcis?.contact && !masques.has("contact") ? raccourcis.contact : null;
+  const contactPropose =
+    raccourcis?.contact && !masques.has("contact")
+      ? propositionContact(raccourcis.contact, contactActuel)
+      : null;
+  const contactPastille = contactPropose?.valeur ?? null;
   const perduSuggestion =
     raccourcis?.suggestionPerdu && !masques.has("perdu")
       ? raccourcis.suggestionPerdu
@@ -402,7 +412,7 @@ export function QuickNote({
               {sansRepPastille && (
                 <Pastille onRetirer={() => masquer("sans_reponse")}>
                   <Icone nom="telephone" className="h-3 w-3" />
-                  Appelé, pas de réponse
+                  Appelé, pas décroché
                 </Pastille>
               )}
               {propositionPastille && (
@@ -411,10 +421,10 @@ export function QuickNote({
                   Proposition envoyée
                 </Pastille>
               )}
-              {contactPastille && (
+              {contactPropose && (
                 <Pastille onRetirer={() => masquer("contact")}>
                   <Icone nom="personne" className="h-3 w-3" />
-                  {contactPastille}
+                  {phraseContact(contactPropose)}
                 </Pastille>
               )}
               {/* L'étape posée à la main : la seule qui verrouille la fiche. */}

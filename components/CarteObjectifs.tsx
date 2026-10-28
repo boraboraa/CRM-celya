@@ -28,12 +28,18 @@ export function CarteObjectifs({ donnees }: { donnees: MesObjectifs }) {
           <Icone nom="cible" className="h-4 w-4 text-celya-blue" />
           Cette semaine
         </h2>
-        <p className="min-w-0 flex-1 text-xs text-slate-300">
+        {/* Téléphone : la phrase passe SOUS le titre (pleine largeur) — ou
+            disparaît quand les barres disent déjà la même chose. */}
+        <p
+          className={`order-last min-w-0 basis-full text-xs text-slate-300 sm:order-none sm:basis-0 sm:flex-1 ${
+            objectifs ? "hidden sm:block" : ""
+          }`}
+        >
           {phraseObjectifs(semaine, essaisPeriode, objectifs)}
         </p>
         <Link
           href="/classement"
-          className="inline-flex min-h-[44px] items-center gap-1.5 text-xs font-medium text-celya-blue hover:underline"
+          className="ml-auto inline-flex min-h-[44px] items-center gap-1.5 text-xs font-medium text-celya-blue hover:underline"
         >
           <Icone nom="trophee" className="h-3.5 w-3.5" />
           Classement
@@ -46,7 +52,9 @@ export function CarteObjectifs({ donnees }: { donnees: MesObjectifs }) {
             return (
               <li key={b.libelle} className="min-w-0">
                 <p className="flex items-baseline justify-between text-[11px] text-slate-400">
-                  <span className="truncate">{b.libelle}</span>
+                  <span className="truncate" title={b.libelle}>
+                    {b.libelle}
+                  </span>
                   <span className="tabular-nums text-slate-200">
                     {b.n}
                     {b.cible ? `/${b.cible}` : ""}

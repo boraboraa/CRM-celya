@@ -114,7 +114,7 @@ cas("« pdr » : appel sans réponse, pas un échange", () => {
   const l = lire("pdr");
   assert.equal(l.echange?.noAnswer, true);
   assert.equal(l.echange?.isExchange, false);
-  assert.ok(l.pastilles.includes("Appelé, pas de réponse"));
+  assert.ok(l.pastilles.includes("Appelé, pas décroché"));
 });
 
 cas("« Repéré, pas encore contacté » : note de repérage, la fiche reste « À appeler »", () => {

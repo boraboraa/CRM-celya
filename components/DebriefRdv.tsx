@@ -5,9 +5,10 @@ import {
   cloturerRendezVousAction,
   deplacerRendezVousAction,
 } from "@/app/actions";
-import { RACCOURCIS_RELANCE } from "@/lib/constants";
 import { Icone } from "@/components/ui";
 import { ChampExtensible } from "@/components/ChampExtensible";
+import { ChoixRelance } from "@/components/ChoixRelance";
+import { PastilleContact } from "@/components/PastilleContact";
 import {
   ISSUES_TENUES,
   ISSUE_CHIP,
@@ -17,16 +18,17 @@ import {
   type IssueDebrief,
 } from "@/lib/crm/debrief";
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
+/** Les issues qui attendent un complément avant de partir. */
+type IssueDepliee = "a_rappeler" | "suivi_email" | "pas_interesse" | "pas_decroche";
+const DEPLIEES: IssueDebrief[] = ["a_rappeler", "suivi_email", "pas_interesse", "pas_decroche"];
+const estDepliee = (i: IssueDebrief): i is IssueDepliee => DEPLIEES.includes(i);
 
-/** Date locale décalée de N jours (le navigateur de Bora est à Bruxelles). */
-function shiftedDate(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+/** Ce que demande le panneau des dates, par issue. */
+const QUAND: Record<"a_rappeler" | "suivi_email" | "pas_decroche", string> = {
+  a_rappeler: "Rappeler quand ?",
+  suivi_email: "Relancer quand ?",
+  pas_decroche: "Rappeler quand ? (facultatif)",
+};
 
 /** Ce qu'a donné le débrief, pour le parent qui l'affiche. */
 export type IssueEnvoyee =
@@ -40,10 +42,11 @@ export type IssueEnvoyee =
  * règle de lib/crm/debrief.ts — la même que l'outil MCP.
  *
  * Un tap suffit pour l'issue : « Proposition envoyée » et « Signé » partent
- * tout de suite. « Intéressé — à rappeler » déplie les dates (un tap de plus,
- * c'est la date qui envoie) ; « Pas intéressé » déplie la raison, exigée. Le
- * compte rendu reste facultatif. En secondaire, « N'a pas eu lieu » →
- * Reporter (nouvelle date) ou Annulé.
+ * tout de suite. « Intéressé — à rappeler » et « Suivi par email » déplient les
+ * dates (un tap de plus, c'est la date qui envoie) ; « Pas intéressé » déplie la
+ * raison, exigée. Le compte rendu reste facultatif. En secondaire, « N'a pas eu
+ * lieu » → Pas décroché (la relance est proposée, jamais exigée), Reporter
+ * (nouvelle date connue) ou Annulé.
  *
  * `pendant` est appelé DANS la transition, avant l'appel serveur : c'est là
  * que le parent retire la ligne de façon optimiste (elle revient seule si le
@@ -51,10 +54,15 @@ export type IssueEnvoyee =
  */
 export function DebriefRdv({
   meetingId,
+  prospectId,
+  contactActuel = null,
   pendant,
   apres,
 }: {
   meetingId: string;
+  /** La fiche du RDV : sans elle, pas de pastille « Contact → … ». */
+  prospectId?: string | null;
+  contactActuel?: string | null;
   pendant?: () => void;
   apres?: (r: IssueEnvoyee) => void;
 }) {
@@ -64,7 +72,7 @@ export function DebriefRdv({
   const [compteRendu, setCompteRendu] = useState("");
   const [raison, setRaison] = useState("");
   /** L'issue dépliée qui attend son complément (date ou raison). */
-  const [ouverte, setOuverte] = useState<"a_rappeler" | "pas_interesse" | null>(null);
+  const [ouverte, setOuverte] = useState<IssueDepliee | null>(null);
   /** « N'a pas eu lieu » : Reporter / Annulé. */
   const [pasEuLieu, setPasEuLieu] = useState(false);
   const [report, setReport] = useState(false);
@@ -115,7 +123,7 @@ export function DebriefRdv({
 
   function choisir(issue: IssueDebrief) {
     setErreur(undefined);
-    if (issue === "a_rappeler" || issue === "pas_interesse") {
+    if (estDepliee(issue)) {
       setOuverte((o) => (o === issue ? null : issue));
       return;
     }
@@ -133,19 +141,19 @@ export function DebriefRdv({
         className="input py-1.5 text-xs"
       />
 
-      {/* Téléphone : les cinq issues en grille de deux — « Pas intéressé »,
-          la dernière, prend toute la ligne : aucune issue orpheline. */}
+      {prospectId && (
+        <PastilleContact prospectId={prospectId} texte={compteRendu} contactActuel={contactActuel} />
+      )}
+
+      {/* Téléphone : les six issues en grille de deux (une issue impaire, la
+          dernière, prendrait toute la ligne : aucune orpheline). */}
       <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap" role="group" aria-label="Ce qu'a donné le rendez-vous">
         {ISSUES_TENUES.map((issue, i) => (
           <button
             key={issue}
             type="button"
             disabled={pending}
-            aria-expanded={
-              issue === "a_rappeler" || issue === "pas_interesse"
-                ? ouverte === issue
-                : undefined
-            }
+            aria-expanded={estDepliee(issue) ? ouverte === issue : undefined}
             onClick={() => choisir(issue)}
             className={`inline-flex min-h-[48px] items-center justify-center gap-1.5 rounded-xl px-2.5 text-center text-xs font-medium leading-tight ring-1 transition sm:min-h-[44px] sm:justify-start sm:px-3 sm:text-left ${ISSUE_CHIP[issue]} ${
               ISSUES_TENUES.length % 2 === 1 && i === ISSUES_TENUES.length - 1 ? "col-span-2 sm:col-span-1" : ""
@@ -159,32 +167,26 @@ export function DebriefRdv({
         ))}
       </div>
 
-      {ouverte === "a_rappeler" && (
-        <div
-          className="flex flex-wrap items-center gap-1 rounded-xl bg-indigo-500/[0.06] px-1.5 py-1 ring-1 ring-indigo-400/20"
-          role="group"
-          aria-label="Rappeler quand ?"
-        >
-          <span className="pl-1 pr-0.5 text-[11px] text-indigo-200">Rappeler quand&nbsp;?</span>
-          {RACCOURCIS_RELANCE.map((r) => (
-            <button
-              key={r.label}
-              type="button"
-              disabled={pending}
-              onClick={() => envoyer("a_rappeler", shiftedDate(r.jours))}
-              className="min-h-[44px] rounded-lg px-2.5 text-[11px] text-slate-300 transition hover:bg-indigo-500/20 hover:text-indigo-100"
-            >
-              {r.label}
-            </button>
-          ))}
-          <input
-            type="date"
-            disabled={pending}
-            onChange={(e) => e.target.value && envoyer("a_rappeler", e.target.value)}
-            aria-label="Rappeler à une date précise"
-            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
-          />
-        </div>
+      {(ouverte === "a_rappeler" || ouverte === "suivi_email" || ouverte === "pas_decroche") && (
+        // Le jour en liste, l'heure en un tap : c'est l'heure qui envoie
+        // (lib/crm/relance.ts — le même composant que la carte et « À faire »).
+        <ChoixRelance
+          titre={QUAND[ouverte]}
+          onChoisir={(valeur) => envoyer(ouverte, valeur)}
+          pending={pending}
+          extra={
+            ouverte === "pas_decroche" ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => envoyer("pas_decroche")}
+                className="btn-link min-h-[44px] px-2 text-[11px]"
+              >
+                Sans relance
+              </button>
+            ) : null
+          }
+        />
       )}
 
       {ouverte === "pas_interesse" && (
@@ -236,6 +238,16 @@ export function DebriefRdv({
             >
               <Icone nom="report" className="h-3 w-3" />
               Reporter
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => choisir("pas_decroche")}
+              aria-expanded={ouverte === "pas_decroche"}
+              className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium ring-1 transition ${ISSUE_CHIP.pas_decroche}`}
+            >
+              <Icone nom={ISSUE_ICON.pas_decroche} className="h-3 w-3" />
+              {ISSUE_LABEL.pas_decroche}
             </button>
             <button
               type="button"

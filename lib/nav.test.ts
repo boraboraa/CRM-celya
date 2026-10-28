@@ -6,6 +6,7 @@ import {
   APPELS_IA_ITEM,
   ACCOUNT_ITEM,
   CLASSEMENT_ITEM,
+  MA_LISTE_ITEM,
   navOrdinateur,
   ongletsMobiles,
   ongletActif,
@@ -75,6 +76,14 @@ cas("ordinateur : l'admin voit l'équipe avant l'agenda", () => {
 cas("un commercial voit le classement sur ordinateur, pas dans sa barre du bas (quatre onglets)", () => {
   assert.ok(navOrdinateur("commercial").includes(CLASSEMENT_ITEM));
   assert.ok(!JSON.stringify(ongletsMobiles("commercial")).includes(CLASSEMENT_ITEM.href));
+});
+
+cas("« Coller ma liste » : un raccourci de la barre latérale, jamais un onglet (ni écran, ni barre du bas)", () => {
+  assert.equal(MA_LISTE_ITEM.href, "/prospects/ma-liste");
+  for (const role of ["admin", "commercial"]) {
+    assert.ok(!navOrdinateur(role).includes(MA_LISTE_ITEM));
+    assert.ok(!JSON.stringify(ongletsMobiles(role)).includes(MA_LISTE_ITEM.href));
+  }
 });
 
 cas("onglet actif : la fiche allume « Prospects », pas « /prospectsX »", () => {

@@ -19,14 +19,16 @@ test.describe("À faire", () => {
     await dansLePremierEcran(page, premiere, 2);
   });
 
-  test("téléphone : titre seul, débriefs en lignes compactes", async ({ page }, info) => {
+  test("débriefs en lignes compactes — téléphone ET ordinateur", async ({ page }, info) => {
     const { mobile, role } = contexte(info);
-    test.skip(!mobile || role !== "commercial", "commercial sur téléphone (4 RDV de test)");
+    test.skip(role !== "commercial", "commercial (4 RDV de test)");
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
-    await expect(page.getByText("Trois états, jamais mélangés")).toBeHidden();
-    await expect(page.locator("main").getByRole("link", { name: "+ Nouveau prospect" })).toBeHidden();
-    // Trois lignes, puis « Voir les N ».
+    if (mobile) {
+      await expect(page.getByText("Trois états, jamais mélangés")).toBeHidden();
+      await expect(page.locator("main").getByRole("link", { name: "+ Nouveau prospect" })).toBeHidden();
+    }
+    // Trois lignes, puis « Voir les N » — sur les deux écrans (28/10).
     const lignes = page.locator("#a-debriefer").getByRole("button", { name: /Débriefer$/ });
     await expect(lignes).toHaveCount(3);
     const voir = page.getByRole("button", { name: /^Voir les \d+$/ });
@@ -34,6 +36,16 @@ test.describe("À faire", () => {
     await voir.click();
     expect(await lignes.count()).toBeGreaterThan(3);
     await ciblesTactiles(page.locator("#a-debriefer"));
+    // Aucune issue affichée tant qu'on n'a rien ouvert.
+    await expect(page.locator("#a-debriefer").getByRole("group", { name: "Ce qu'a donné le rendez-vous" })).toHaveCount(0);
+    if (!mobile) {
+      // Ordinateur : le clic DÉPLIE l'issue sous la ligne, sans feuille.
+      await lignes.first().click();
+      await expect(page.locator("#a-debriefer").getByRole("group", { name: "Ce qu'a donné le rendez-vous" })).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.locator("#a-debriefer").getByRole("button", { name: /Replier$/ }).click();
+      await expect(page.locator("#a-debriefer").getByRole("group", { name: "Ce qu'a donné le rendez-vous" })).toHaveCount(0);
+    }
   });
 
   test("téléphone : une ligne d'actions sous le titre de la relance", async ({ page }, info) => {
@@ -95,8 +107,8 @@ test.describe("Prospects", () => {
   test("la première fiche est dans le premier écran", async ({ page }, info) => {
     const { mobile, role } = contexte(info);
     await page.goto(role === "admin" ? "/prospects?perimetre=moi" : "/prospects");
-    // Des cartes sur toutes les tailles depuis le 27/10 (ListeProspects).
-    const premiere = page.locator("main ul > li.card").first();
+    // UNE ligne par fiche, dans un seul cadre, depuis le 27/10 au soir.
+    const premiere = page.locator("main ul.card > li").first();
     await expect(premiere).toBeVisible();
     await dansLePremierEcran(page, premiere);
     if (mobile) {
@@ -104,6 +116,23 @@ test.describe("Prospects", () => {
       await expect(page.locator("main table")).toBeHidden();
       await expect(premiere.getByText(/ZZ Test mobile/)).toBeVisible();
     }
+  });
+
+  test("« Liste | Pipeline » : visible pour tous, et le dernier choix est retenu", async ({ page }) => {
+    await page.goto("/prospects?perimetre=moi");
+    const bascule = page.getByRole("group", { name: "Affichage" }).filter({ visible: true }).first();
+    await expect(bascule.getByRole("link", { name: "Pipeline" })).toHaveAttribute("href", /vue=colonnes/);
+    // Choisir le pipeline (on charge l'URL du lien — voir la note plus bas),
+    // puis revenir sur /prospects sans paramètre : c'est le pipeline qui revient.
+    await page.goto("/prospects?vue=colonnes&perimetre=moi");
+    await expect(page.locator("main section h2").first()).toBeVisible();
+    await page.waitForTimeout(300); // le cookie est écrit au montage
+    await page.goto("/prospects?perimetre=moi");
+    await expect(page.locator("main section h2").first()).toBeVisible();
+    await expect(page.locator("main ul.card")).toHaveCount(0);
+    // Et « Liste » l'emporte, explicitement.
+    await page.goto("/prospects?vue=liste&perimetre=moi");
+    await expect(page.locator("main ul.card > li").first()).toBeVisible();
   });
 
   test("téléphone : la feuille « Filtres » et les puces retirables", async ({ page }, info) => {

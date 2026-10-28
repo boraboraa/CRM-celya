@@ -55,23 +55,31 @@ export function MaListe({
   admin,
   moi,
   membres,
+  etatInitial,
 }: {
   admin: boolean;
   moi: string;
   /** [id, nom] — l'admin seul en reçoit (« Pour… »). */
   membres: [string, string][];
+  /**
+   * Une liste déjà lue — pour le banc d'affichage seulement (page de
+   * démonstration locale, données fictives) ; la page réelle ne la passe pas.
+   */
+  etatInitial?: EtatListe;
 }) {
   const [texte, setTexte] = useState("");
   const [secteur, setSecteur] = useState("");
   const [ville, setVille] = useState("");
   const [pour, setPour] = useState(moi);
-  const [etat, setEtat] = useState<EtatListe>({ fiches: [], etats: [], recap: "", equipeIndisponible: false });
+  const [etat, setEtat] = useState<EtatListe>(
+    etatInitial ?? { fiches: [], etats: [], recap: "", equipeIndisponible: false }
+  );
   const [aVerifier, setAVerifier] = useState<string[][]>([]);
   const [messages, setMessages] = useState<Message[]>([
     {
       de: "janet",
       texte:
-        "Collez votre liste — « nom + numéro » par ligne, un tableau, un copier-coller Google Maps, avec vos remarques au milieu si vous voulez. Je fais les fiches ; rien n'est créé avant votre clic sur « Importer ».",
+        "Collez votre liste — « nom + numéro » par ligne, ou un tableau, avec vos remarques au milieu si vous voulez. Je fais les fiches ; rien n'est créé avant votre clic sur « Importer ».",
     },
   ]);
   const [importee, setImportee] = useState<{ n: number; ignorees: string[] } | null>(null);
@@ -306,7 +314,7 @@ export function MaListe({
                 >
                   <div className="flex items-start gap-2">
                     <span className="mt-2.5 w-6 shrink-0 text-right text-xs tabular-nums text-slate-500">{i + 1}</span>
-                    <div className="grid min-w-0 flex-1 grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1.2fr]">
+                    <div className="grid min-w-0 flex-1 grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
                       <input
                         aria-label={`Société, ligne ${i + 1}`}
                         value={f.company_name}
@@ -322,6 +330,13 @@ export function MaListe({
                         onBlur={reverifier}
                         placeholder="Téléphone"
                         className={`input min-h-[44px] py-1.5 ${f.phone ? "" : "ring-1 ring-amber-400/40"}`}
+                      />
+                      <input
+                        aria-label={`Adresse, ligne ${i + 1}`}
+                        value={f.address ?? ""}
+                        onChange={(ev) => modifier(i, "address", ev.target.value)}
+                        placeholder="Adresse"
+                        className="input min-h-[44px] py-1.5 sm:col-span-2 lg:col-span-2"
                       />
                       <input
                         aria-label={`Ville, ligne ${i + 1}`}
@@ -343,12 +358,15 @@ export function MaListe({
                           </option>
                         ))}
                       </select>
-                      <input
+                      {/* Un champ qui GRANDIT : la remarque se lit en entier,
+                          au lieu d'être coupée au bord d'un champ d'une ligne. */}
+                      <ChampExtensible
                         aria-label={`Ce qu'on sait, ligne ${i + 1}`}
                         value={f.notes ?? ""}
-                        onChange={(ev) => modifier(i, "notes", ev.target.value)}
+                        onChange={(v) => modifier(i, "notes", v)}
+                        max={200}
                         placeholder="Ce qu'on sait (vos remarques)"
-                        className="input min-h-[44px] py-1.5 text-xs sm:col-span-2 lg:col-span-4"
+                        className="input min-h-[44px] py-2.5 text-xs sm:col-span-2 lg:col-span-4"
                       />
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">

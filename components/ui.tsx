@@ -22,7 +22,7 @@ import {
   LAST_ACTION_LABEL,
   type LastActionKind,
 } from "@/lib/crm/lastAction";
-import { lireProchaineAction, PLUS_RIEN_COURT } from "@/lib/crm/prochaineAction";
+import { lireProchaineAction, PLUS_RIEN_COURT, quandCourt } from "@/lib/crm/prochaineAction";
 
 // ---------------------------------------------------------------------------
 // Pictogrammes — un seul jeu, dessiné ici
@@ -72,6 +72,7 @@ export type IconeNom =
   | "points"
   | "sortie"
   | "cadeau"
+  | "arobase"
   | "etoile"
   | "trophee"
   | "cible";
@@ -114,6 +115,13 @@ const TRACES: Record<IconeNom, React.ReactNode> = {
       <path d="M2.4 6.2h11.2v2.6H2.4zM3.4 8.8h9.2v5H3.4z" />
       <path d="M8 6.2v7.6" />
       <path d="M8 6.2C6.6 3.4 4.2 3.6 4.6 5.2c.3 1 3.4 1 3.4 1Zm0 0c1.4-2.8 3.8-2.6 3.4-1-.3 1-3.4 1-3.4 1Z" />
+    </>
+  ),
+  /** « Suivi par email » (032) : on attend un mail, pas un appel. */
+  arobase: (
+    <>
+      <circle cx="8" cy="8" r="2.6" />
+      <path d="M10.6 8v1.1a1.8 1.8 0 0 0 3.6 0V8A6.2 6.2 0 1 0 11.6 13" />
     </>
   ),
   /** L'étoile d'une fiche (031). Pleine quand `className` porte un fill. */
@@ -371,7 +379,7 @@ const TEXTE_MAX = 70;
  * La DERNIÈRE ACTION d'une fiche : résultat + ce qui s'est dit + date relative
  *
  *   (icône)  Pas intéressé — « bosse déjà avec un concurrent »  ·  il y a 2 j
- *   (icône)  Pas de réponse (3e fois)                          ·  hier
+ *   (icône)  Pas décroché (3e fois)                           ·  hier
  *   (icône)  Intéressé — « rappeler après les congés »         ·  il y a 5 j
  *
  * Même ligne sur la liste, les cartes du pipeline et le tableau de bord,
@@ -507,6 +515,7 @@ export function PageHeader({
           className={`font-display font-semibold tracking-tight text-slate-50 ${
             compactMobile ? "truncate text-xl lg:text-2xl" : "text-2xl"
           }`}
+          title={compactMobile ? title : undefined}
         >
           {title}
         </h1>
@@ -621,10 +630,13 @@ export function ProchaineActionTexte({
   className = "",
   couleurNeutre = "",
   plusRien = false,
+  avecHeure = false,
 }: {
   at: string | null | undefined;
   kind: string | null | undefined;
   statut?: string | null;
+  /** Une relance en jour ET heure (« Aujourd'hui 14h ») au lieu d'une relative. */
+  avecHeure?: boolean;
   sansDate?: string;
   /** Mise en page seulement — la couleur est celle de l'état. */
   className?: string;
@@ -665,7 +677,7 @@ export function ProchaineActionTexte({
       className={`inline-flex items-center gap-1 ${l.retard ? "text-amber-300" : couleurNeutre} ${className}`}
     >
       {l.retard && <Icone nom="alerte" className="h-3 w-3 shrink-0" />}
-      {relative(at)}
+      {avecHeure ? quandCourt(at) : relative(at)}
     </span>
   );
 }

@@ -37,6 +37,46 @@ export const TRIS = {
 } as const;
 export type Tri = keyof typeof TRIS;
 
+/**
+ * Les deux AFFICHAGES des mêmes fiches (27/10) : la liste, et le pipeline
+ * (les colonnes par étape). Le sélecteur est visible par TOUS, et le dernier
+ * choix est RETENU — écrit par le navigateur (cookie `celya_vue`), relu par la
+ * page et validé comme une URL : un cookie trafiqué ne vaut pas plus qu'un
+ * `?vue=` trafiqué. Dans l'URL, l'ancien nom `colonnes` reste celui du
+ * pipeline (les liens existants continuent de marcher).
+ */
+export const VUES = { liste: "Liste", colonnes: "Pipeline" } as const;
+export type Vue = keyof typeof VUES;
+export const VUE_COOKIE = "celya_vue";
+
+const estVue = (v?: string | null): v is Vue => v === "liste" || v === "colonnes";
+
+/** L'affichage : celui de l'URL, à défaut le dernier choisi, à défaut la liste. */
+export function lireVue(parametre: string | null | undefined, memorise: string | null | undefined): Vue {
+  if (estVue(parametre)) return parametre;
+  if (estVue(memorise)) return memorise;
+  return "liste";
+}
+
+/**
+ * Le menu « Étape » de la ligne de filtres porte aussi les deux raccourcis
+ * (« À débriefer », « Emails envoyés ») : une seule liste déroulante, plus de
+ * rangée de puces. Sa valeur : une étape, `f:<raccourci>`, ou `tous`.
+ */
+export function valeurEtape(params: ParamsProspects): string {
+  if (estFiltre(params.filtre)) return `f:${params.filtre}`;
+  return params.statut && params.statut !== "tous" ? params.statut : "tous";
+}
+
+/** Le menu « Étape » → les paramètres à poser (un seul des deux à la fois). */
+export function depuisValeurEtape(valeur: string): { statut: string | null; filtre: string | null } {
+  if (valeur.startsWith("f:")) {
+    const f = valeur.slice(2);
+    return { statut: null, filtre: estFiltre(f) ? f : null };
+  }
+  return { statut: valeur === "tous" ? null : valeur, filtre: null };
+}
+
 const estFiltre = (f?: string): f is FiltreRapide =>
   !!f && Object.prototype.hasOwnProperty.call(FILTRES_RAPIDES, f);
 
@@ -55,7 +95,9 @@ export function hrefProspects(
   if (v.q?.trim()) sp.set("q", v.q.trim());
   if (v.statut && v.statut !== "tous") sp.set("statut", v.statut);
   if (v.tri && v.tri !== "priorite" && Object.prototype.hasOwnProperty.call(TRIS, v.tri)) sp.set("tri", v.tri);
-  if (v.vue === "colonnes") sp.set("vue", "colonnes");
+  // Explicite dans les deux sens : « Liste » doit l'emporter sur un
+  // « Pipeline » retenu.
+  if (estVue(v.vue)) sp.set("vue", v.vue);
   if (estFiltre(v.filtre ?? undefined)) sp.set("filtre", v.filtre!);
   if (v.perimetre) sp.set("perimetre", v.perimetre);
   const qs = sp.toString();

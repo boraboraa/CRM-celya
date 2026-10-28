@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { createTaskAction } from "@/app/actions";
-import { DateField } from "@/components/DateField";
+import { ChoixRelance } from "@/components/ChoixRelance";
 import { Icone } from "@/components/ui";
 import type { TaskWithProspect } from "@/components/TaskRow";
 import {
@@ -161,10 +161,10 @@ export function RelancesSection({
               placeholder="Relancer pour le devis"
             />
           </div>
-          <div>
-            <span className="label">Quand</span>
-            <DateField name="due_local" required compact />
-          </div>
+          {/* Le jour en liste, l'heure en un tap — le même composant que la
+              carte et « À faire » ; ici, les taps CHOISISSENT et « Planifier »
+              envoie. */}
+          <ChoixRelance titre="Quand" name="due_local" required />
           <div>
             <label className="label" htmlFor="priority">
               Priorité

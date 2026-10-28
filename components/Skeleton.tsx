@@ -127,7 +127,7 @@ export function SqueletteFiche() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Titre />
           {Array.from({ length: 3 }).map((_, i) => (

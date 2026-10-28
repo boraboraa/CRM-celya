@@ -92,7 +92,7 @@ export function lireCeQuiSestPasse(
   if (relance) pastilles.push(`Relance ${jourCourt(relance)}`);
 
   const noAnswer = type === "note" && Boolean(r?.sansReponse);
-  if (noAnswer) pastilles.push("Appelé, pas de réponse");
+  if (noAnswer) pastilles.push("Appelé, pas décroché");
   const proposalSent = Boolean(r?.propositionEnvoyee);
   if (proposalSent) pastilles.push("Proposition envoyée");
 

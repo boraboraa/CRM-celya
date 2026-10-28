@@ -473,6 +473,12 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
     statut = null;
     statutReserve =
       "« À rappeler » vient du débrief d'un rendez-vous : utilisez « Intéressé — à rappeler » sur la carte du rendez-vous.";
+  } else if (statut === "suivi_email") {
+    // « Suivi par email » suit le RÉSULTAT d'appel du même nom (033), jamais
+    // un texte libre : le modèle ne la propose pas.
+    statut = null;
+    statutReserve =
+      "« Suivi par email » vient du résultat d'appel du même nom : touchez-le sur la carte de la fiche.";
   } else if (statut === "proposition") {
     statutReserve =
       "Cochez « j'ai envoyé une proposition » si le devis est bien parti : c'est ce geste qui fait foi.";

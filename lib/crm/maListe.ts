@@ -126,6 +126,23 @@ function siteValide(v: unknown): string | null {
 }
 
 /**
+ * La ville lisible dans une adresse : le morceau « code postal + commune »
+ * (4 chiffres en Belgique, 5 en France — Rémi est à Lyon). « Rue de Fer 12,
+ * 5000 Namur, Belgique » → « Namur ». Rien de lisible : null, jamais deviné.
+ */
+export function villeDeLAdresse(adresse: string | null | undefined): string | null {
+  if (!adresse) return null;
+  for (const morceau of adresse.split(",").map((m) => m.trim()).reverse()) {
+    const m = /(?:^|\s)(?:[A-Z]{1,2}-)?\d{4,5}\s+([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ' -]{1,60})$/.exec(morceau);
+    if (m) {
+      const ville = m[1].replace(/\s+/g, " ").trim();
+      return ville ? ville.slice(0, 80) : null;
+    }
+  }
+  return null;
+}
+
+/**
  * Une fiche rangée : le code applique ses règles à ce qui a été LU (par lui ou
  * par le modèle). Les défauts du collage (secteur, ville) ne remplacent jamais
  * ce que le texte dit de la ligne.
@@ -156,7 +173,12 @@ export function rangerFiche(
     email: emailValide(lue.email),
     website: siteValide(lue.website),
     address: nettoie(lue.address, 300),
-    city: nettoie(lue.city, 80) ?? nettoie(defauts.ville, 80),
+    // La ville : celle que la ligne dit, à défaut celle qu'on LIT dans
+    // l'adresse (« Rue de Fer 12, 5000 Namur »), à défaut le défaut du collage.
+    city:
+      nettoie(lue.city, 80) ??
+      villeDeLAdresse(nettoie(lue.address, 300)) ??
+      nettoie(defauts.ville, 80),
     sector: normaliserSecteur(nettoie(lue.sector, 80) ?? nettoie(defauts.secteur, 80)),
     notes: nettoie(lue.notes, 1000),
   };
@@ -170,7 +192,7 @@ export function rangerFiche(
 const ENTETES: [keyof FicheCollee | "phone", RegExp][] = [
   ["company_name", /^(nom|soci[eé]t[eé]|entreprise|commerce|cabinet|raison sociale|name|company|business|[eé]tablissement)/i],
   ["phone", /^(t[eé]l|phone|num[eé]ro|gsm|mobile|fixe)/i],
-  ["address", /^(adresse|address|rue|localisation)/i],
+  ["address", /^(adresse|address|rue|localisation|lieu|emplacement)/i],
   ["city", /^(ville|commune|localit[eé]|city)/i],
   ["website", /^(site|web|url|website)/i],
   ["contact_name", /^(contact|g[eé]rant|responsable|interlocuteur|d[eé]cideur|personne)/i],
@@ -620,4 +642,31 @@ export function recapitulatif(etats: EtatFiche[]): string {
   const sans = etats.filter((e) => e.statut === "a_creer" && e.sansNumero).length;
   if (sans) parts.push(pl(sans, "sans numéro", "sans numéro"));
   return parts.join(" · ");
+}
+
+// ---------------------------------------------------------------------------
+// L'import — la ligne que reçoit importProspectsCore
+// ---------------------------------------------------------------------------
+
+/**
+ * Ce qui part à l'import pour une fiche relue : toutes les colonnes lues, dont
+ * l'ADRESSE et la VILLE (le 27/10, une colonne « Adresse » semblait ne pas
+ * arriver — elle était lue, mais l'écran de relecture ne la montrait pas).
+ * Étape « À appeler », toujours : coller une liste n'est pas un échange.
+ * Pure : testée par `test:ma-liste`, de la lecture du collage à cette ligne.
+ */
+export function ligneImport(f: FicheCollee) {
+  return {
+    company_name: f.company_name,
+    contact_name: f.contact_name ?? undefined,
+    email: f.email ?? undefined,
+    phone: f.phone ?? f.phone_lu ?? undefined,
+    website: f.website ?? undefined,
+    sector: f.sector ?? undefined,
+    address: f.address ?? undefined,
+    city: f.city ?? undefined,
+    status: "a_appeler" as const,
+    source: "Ma liste",
+    notes: f.notes ?? undefined,
+  };
 }

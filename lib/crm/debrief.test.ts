@@ -24,6 +24,7 @@ import {
   rdvADebriefer,
   estIssueDebrief,
   issueImplicite,
+  rdvClosParEssai,
   ISSUES_TENUES,
   type RdvEnAttente,
 } from "./debrief.ts";
@@ -88,6 +89,23 @@ verifie("pas intéressé : honoré, « Perdu » décidé, raison exigée",
 verifie("pas intéressé : les relances ouvertes sont annulées", refus.annulerRelances, true);
 verifie("pas intéressé : la carte dira « Pas intéressé »", refus.outcome, "refus");
 
+const suivi = effetsDebrief("suivi_email");
+verifie("suivi par email : RDV honoré, issue suivi_email, l'étape SUIT les faits",
+  [suivi.statutRdv, suivi.debriefIssue, suivi.etapeDecidee], ["honore", "suivi_email", null]);
+verifie("suivi par email : la date de relance est exigée, la carte dira « Suivi par email »",
+  [suivi.exigeDate, suivi.outcome], [true, "suivi_email"]);
+verifie("suivi par email sans date : refusé, la phrase dit « relancer »",
+  manqueDebrief({ issue: "suivi_email" }), "Quand faut-il relancer ? Choisissez une date.");
+
+const decroche = effetsDebrief("pas_decroche");
+verifie("pas décroché : le RDV n'a PAS eu lieu — annulé, issue pas_decroche, étape inchangée",
+  [decroche.statutRdv, decroche.debriefIssue, decroche.etapeDecidee], ["annule", "pas_decroche", null]);
+verifie("pas décroché : le journal dit « pas de réponse »", decroche.outcome, "sans_reponse");
+verifie("pas décroché : la relance est PROPOSÉE, jamais exigée",
+  [decroche.suiteOfferte, decroche.exigeDate, manqueDebrief({ issue: "pas_decroche" })], [true, false, null]);
+verifie("le sujet d'un pas décroché",
+  sujetDebrief("pas_decroche", RDV_29_09), "Débrief du RDV du 29/09 à 10h : pas décroché, n'a pas eu lieu");
+
 const annule = effetsDebrief("annule");
 verifie("annulé : RDV annulé, aucune issue, étape inchangée",
   [annule.statutRdv, annule.debriefIssue, annule.etapeDecidee], ["annule", null, null]);
@@ -105,9 +123,9 @@ verifie("le sujet du journal dit le RDV et l'issue",
   sujetDebrief("a_rappeler", RDV_29_09), "Débrief du RDV du 29/09 à 10h : intéressé — à rappeler");
 verifie("le sujet d'une annulation",
   sujetDebrief("annule", RDV_29_09), "Débrief du RDV du 29/09 à 10h : n'a pas eu lieu (annulé)");
-verifie("estIssueDebrief : les cinq issues tenues + annulé, rien d'autre",
-  [...ISSUES_TENUES, "annule", "reporte", "constructor", ""].map(estIssueDebrief),
-  [true, true, true, true, true, true, false, false, false]);
+verifie("estIssueDebrief : les six issues tenues + pas décroché + annulé, rien d'autre",
+  [...ISSUES_TENUES, "pas_decroche", "annule", "reporte", "constructor", ""].map(estIssueDebrief),
+  [true, true, true, true, true, true, true, true, false, false, false]);
 
 // --- 1b. Le débrief IMPLICITE (miroir du trigger SQL de la 027) ------------
 console.log("\n— le débrief implicite —");
@@ -118,6 +136,10 @@ verifie("« Barrage » après le RDV : ne ferme RIEN, même attesté",
   issueImplicite({ type: "note", outcome: "barrage", isExchange: true }), null);
 verifie("« À rappeler » → a_rappeler", issueImplicite({ type: "note", outcome: "rappeler", isExchange: true }), "a_rappeler");
 verifie("« Intéressé » → a_rappeler", issueImplicite({ type: "note", outcome: "interesse", isExchange: true }), "a_rappeler");
+verifie("« Suivi par email » → suivi_email (033)",
+  issueImplicite({ type: "note", outcome: "suivi_email", isExchange: true }), "suivi_email");
+verifie("« Suivi par email » ferme même sans la case « échange » (le résultat suffit)",
+  issueImplicite({ type: "note", outcome: "suivi_email", isExchange: false }), "suivi_email");
 const refusImplicite = issueImplicite({ type: "note", outcome: "refus", isExchange: true });
 verifie("« Pas intéressé » → pas_interesse (et non suite_posee)", refusImplicite, "pas_interesse");
 const effetsRefus = effetsDebrief(refusImplicite as "pas_interesse");
@@ -159,14 +181,38 @@ const zone = rdvADebriefer(
 verifie("un seul RDV par fiche — le plus récent ; ni perso, ni fiche close, ni à venir, ni déjà débriefé ; une fiche en ESSAI n'est pas close",
   zone.map((m) => m.id), ["vivier-prev", "nice-06", "essai"]);
 
+// --- 2b. L'essai gratuit clôt le RDV en attente (miroir du trigger 033) -----
+console.log("\n— l'essai gratuit clôt le RDV en attente —");
+const moto = (id: string, starts_at: string, status = "prevu", extra: Partial<RdvEnAttente> = {}): RdvEnAttente =>
+  ({ id, prospect_id: "moto", kind: "prospect", status, starts_at, ...extra });
+const rdvMoto = [moto("rdv-29-09", RDV_29_09), moto("rdv-futur", FUTUR)];
+verifie("100% MOTO : passer en essai clôt le RDV du 29/09 (commencé, en attente)",
+  rdvClosParEssai(rdvMoto, "rendez_vous", "essai_gratuit", NOW)?.id, "rdv-29-09");
+verifie("un RDV À VENIR n'est jamais touché",
+  rdvClosParEssai([moto("rdv-futur", FUTUR)], "proposition", "essai_gratuit", NOW), null);
+verifie("le plus RÉCENT des RDV commencés (les autres : remplacés par la base)",
+  rdvClosParEssai([moto("vieux", "2026-09-10T08:00:00Z"), moto("recent", RDV_29_09, "reporte")], "contacte", "essai_gratuit", NOW)?.id,
+  "recent");
+verifie("déjà en essai : rien (pas de passage)", rdvClosParEssai(rdvMoto, "essai_gratuit", "essai_gratuit", NOW), null);
+verifie("une autre étape : rien", rdvClosParEssai(rdvMoto, "rendez_vous", "proposition", NOW), null);
+verifie("un RDV déjà débriefé, annulé ou perso : rien",
+  rdvClosParEssai([
+    moto("deb", RDV_29_09, "prevu", { debriefed_at: "2026-10-01T08:00:00Z" }),
+    moto("ann", RDV_29_09, "annule"),
+    { id: "perso", prospect_id: null, kind: "perso", status: "prevu", starts_at: RDV_29_09 },
+  ], "rendez_vous", "essai_gratuit", NOW), null);
+
 // --- 3. L'étape « À rappeler » ----------------------------------------------
 console.log("\n— l'étape « À rappeler » —");
 
-verifie("huit étapes, « À rappeler » entre Rendez-vous et Proposition, « Essai gratuit » avant Gagné",
-  STATUS_ORDER, ["a_appeler", "contacte", "rendez_vous", "a_rappeler", "proposition", "essai_gratuit", "gagne", "perdu"]);
-verifie("rang : rendez_vous < a_rappeler < proposition < gagné = perdu",
-  [STATUS_RANK.rendez_vous < STATUS_RANK.a_rappeler, STATUS_RANK.a_rappeler < STATUS_RANK.proposition,
-   STATUS_RANK.gagne === STATUS_RANK.perdu], [true, true, true]);
+verifie("neuf étapes, « À rappeler » puis « Suivi par email » entre Rendez-vous et Proposition, « Essai gratuit » avant Gagné",
+  STATUS_ORDER, ["a_appeler", "contacte", "rendez_vous", "a_rappeler", "suivi_email", "proposition", "essai_gratuit", "gagne", "perdu"]);
+verifie("rang : rendez_vous < a_rappeler < suivi_email < proposition < essai < gagné = perdu",
+  [STATUS_RANK.rendez_vous < STATUS_RANK.a_rappeler, STATUS_RANK.a_rappeler < STATUS_RANK.suivi_email,
+   STATUS_RANK.suivi_email < STATUS_RANK.proposition, STATUS_RANK.proposition < STATUS_RANK.essai_gratuit,
+   STATUS_RANK.essai_gratuit < STATUS_RANK.gagne, STATUS_RANK.gagne === STATUS_RANK.perdu],
+  [true, true, true, true, true, true]);
+verifie("normalizeStatus reconnaît « suivi_email »", normalizeStatus("suivi_email"), "suivi_email");
 verifie("normalizeStatus reconnaît la nouvelle valeur", normalizeStatus("a_rappeler"), "a_rappeler");
 
 const sansRien = { activities: [], emails: [], meetings: [], proposalSentAt: null };
@@ -195,6 +241,33 @@ const tenuSuitePosee = factsFromRows({
   meetings: [{ starts_at: RDV_29_09, status: "honore", debrief_issue: "suite_posee", debriefed_at: "2026-10-15T09:00:00Z" }],
 });
 verifie("un RDV tenu sans issue « à rappeler » ne mène PAS à « À rappeler »", statusFromFacts(tenuSuitePosee), "rendez_vous");
+// --- « Suivi par email » : on y entre par le FAIT ---------------------------
+const appelSuivi = factsFromRows({
+  ...sansRien,
+  activities: [{ type: "note", occurred_at: "2026-10-16T09:00:00Z", is_exchange: true, is_draft: false, outcome: "suivi_email" }],
+});
+verifie("un résultat « Suivi par email » → l'étape déduite est « Suivi par email »", statusFromFacts(appelSuivi), "suivi_email");
+verifie("…avec son motif en clair", appelSuivi.suiviEmail?.label,
+  "la personne a demandé un suivi par email le 16 oct. 2026");
+v = evaluateStatus("a_appeler", false, appelSuivi);
+verifie("AVANCE : À appeler → Suivi par email", [v.derived, v.apply], ["suivi_email", true]);
+v = evaluateStatus("a_rappeler", false, appelSuivi);
+verifie("AVANCE : À rappeler → Suivi par email", v.apply, true);
+v = evaluateStatus("proposition", false, appelSuivi);
+verifie("NE RECULE JAMAIS : Proposition reste Proposition", v.apply, false);
+v = evaluateStatus("essai_gratuit", false, appelSuivi);
+verifie("NE RECULE JAMAIS : Essai gratuit reste Essai gratuit", v.apply, false);
+v = evaluateStatus("contacte", true, appelSuivi);
+verifie("VERROU : seulement suggéré", [v.apply, v.suggest], [false, true]);
+verifie("un brouillon « Suivi par email » n'est pas un fait",
+  statusFromFacts(factsFromRows({ ...sansRien, activities: [{ type: "note", occurred_at: "2026-10-16T09:00:00Z", is_exchange: true, is_draft: true, outcome: "suivi_email" }] })),
+  "a_appeler");
+verifie("un RDV débriefé « Suivi par email » → « Suivi par email »",
+  statusFromFacts(factsFromRows({ ...sansRien, meetings: [{ starts_at: RDV_29_09, status: "honore", debrief_issue: "suivi_email", debriefed_at: "2026-10-14T09:00:00Z" }] })),
+  "suivi_email");
+verifie("une proposition passe devant le suivi par email",
+  statusFromFacts({ ...appelSuivi, proposal: { at: "2026-10-17T09:00:00Z", label: "x" } }), "proposition");
+
 verifie("un RDV remplacé (annulé) n'est pas un fait",
   statusFromFacts(factsFromRows({ ...sansRien, meetings: [{ starts_at: RDV_29_09, status: "annule", debrief_issue: "remplace" }] })),
   "a_appeler");

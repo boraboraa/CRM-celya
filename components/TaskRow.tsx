@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { fmtDate, fmtDateTime, relative, RACCOURCIS_RELANCE } from "@/lib/constants";
-import { isoToLocalInput, localInputToISO } from "@/lib/time";
+import { fmtDate, fmtDateTime, relative } from "@/lib/constants";
+import { localInputToISO } from "@/lib/time";
 import { composerHref } from "@/lib/crm/composer";
 import { infoRdvPrevu, jourHeureCourt } from "@/lib/crm/prochaineAction";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { DebriefRdv } from "@/components/DebriefRdv";
+import { ChoixRelance } from "@/components/ChoixRelance";
 import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
@@ -53,7 +54,7 @@ export type TaskWithProspect = {
   rdv_a_debriefer?: { id: string; starts_at: string } | null;
   /**
    * La dernière action de la fiche (vue prospect_action_state), quand
-   * l'appelant l'a chargée. C'est elle qui dit « Pas de réponse (3e fois) »
+   * l'appelant l'a chargée. C'est elle qui dit « Pas décroché (3e fois) »
    * AVANT de rappeler — l'information qui manquait le plus dans « À faire ».
    * Seul « À faire » la charge : la fiche ne passe jamais `derniere_action`.
    */
@@ -65,10 +66,6 @@ export type TaskWithProspect = {
     streak: number | null;
   } | null;
 };
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
 
 /**
  * Une ligne de relance — purement présentation.
@@ -124,24 +121,14 @@ export function TaskRow({
   const [reprogOuvert, setReprogOuvert] = useState(false);
   const tel = lienTel(task.prospects?.phone);
 
-  const dueLocal = isoToLocalInput(task.due_at); // YYYY-MM-DDTHH:mm Bruxelles
-  const dueDate = dueLocal.slice(0, 10);
-  const dueTime = dueLocal.slice(11, 16) || "09:00";
-
-  /** Reprogramme à une date précise en conservant l'heure existante. */
-  function reschedule(date: string) {
-    if (!date || !onReschedule) return;
+  /** Reprogramme au jour ET à l'heure choisis (ChoixRelance : « YYYY-MM-DDTHH:mm »). */
+  function reschedule(valeur: string) {
+    if (!valeur || !onReschedule) return;
     setPourQuand(false);
-    const local = `${date}T${dueTime}`;
+    const local = valeur.length >= 16 ? valeur.slice(0, 16) : `${valeur}T09:00`;
     // La date affichée tout de suite doit être la vraie : même conversion que
     // le serveur (heure de Bruxelles → UTC), par le même utilitaire.
     onReschedule(local, localInputToISO(local) ?? task.due_at);
-  }
-
-  function shiftedDate(days: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
   return (
@@ -152,7 +139,7 @@ export function TaskRow({
         lecture
           ? "block"
           : compact
-            ? "grid grid-cols-[auto_1fr] items-start"
+            ? "grid grid-cols-[auto_minmax(0,1fr)] items-start"
             : "flex flex-wrap items-start lg:flex-nowrap"
       }`}
     >
@@ -183,13 +170,15 @@ export function TaskRow({
       )}
 
       <div className="min-w-0 flex-1">
+        {/* Un bloc, pas une rangée flex : le texte d'un élément flex ne passe
+            pas à la ligne au milieu d'un mot trop long, il pousse la ligne. */}
         <p
-          className={`flex items-center gap-1.5 text-sm font-medium ${
+          className={`text-sm font-medium ${
             done ? "text-slate-500 line-through" : "text-slate-100"
           }`}
         >
           {task.priority === 1 && !done && (
-            <span className="inline-flex text-amber-400" title="Priorité haute">
+            <span className="mr-1.5 inline-flex align-[-1px] text-amber-400" title="Priorité haute">
               <Icone nom="alerte" className="h-3 w-3" />
             </span>
           )}
@@ -205,7 +194,7 @@ export function TaskRow({
                 // suivante » (lib/crm/ficheSuivante.ts).
                 href={lienDepuisAFaire(task.prospects.id)}
                 prefetch={false}
-                className="text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
+                className="min-w-0 text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
               >
                 {task.prospects.starred_at && (
                   <span className="mr-1 inline-flex align-[-2px] text-amber-300" title="Étoilée">
@@ -290,6 +279,8 @@ export function TaskRow({
                 </p>
                 <DebriefRdv
                   meetingId={rdvEnAttente.id}
+                  prospectId={task.prospects?.id ?? null}
+                  contactActuel={task.prospects?.contact_name ?? null}
                   apres={(r) => {
                     if (r.ok) {
                       setDebriefFait(true);
@@ -315,6 +306,7 @@ export function TaskRow({
             {resultatOuvert ? (
               <ResultatAppel
                 prospectId={task.prospects.id}
+                contactActuel={task.prospects.contact_name}
                 onRappeler={() => setPourQuand(true)}
                 className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]"
               />
@@ -369,7 +361,7 @@ export function TaskRow({
               }`}
             >
               <Icone nom="report" className="h-3.5 w-3.5" />
-              {fmtDate(task.due_at)}
+              {jourHeureCourt(task.due_at)}
               <Icone nom="chevron" className={`h-3 w-3 transition ${reprogOuvert ? "rotate-180" : ""}`} />
             </button>
           </div>
@@ -388,35 +380,16 @@ export function TaskRow({
               : `w-full pl-8 lg:flex lg:w-auto lg:shrink-0 lg:pl-0 ${reprogOuvert || pourQuand ? "flex" : "hidden"}`
           }`}
         >
-          {/* « À rappeler » vient d'être enregistré : il ne manque plus que le
-              jour, et c'est ce champ-ci qui le porte. */}
-          {pourQuand && (
-            <span className="text-[11px] text-amber-300">Pour quand&nbsp;?</span>
-          )}
-          {/* Champ de date réel : reprogrammer au jour près. Les raccourcis
-              remplissent la même date (et l'appliquent aussitôt) — mêmes mots
-              que la ligne « Relancer » de la carte, ils viennent du même
-              endroit (RACCOURCIS_RELANCE). */}
-          <input
-            type="date"
-            value={dueDate}
-            disabled={!onReschedule}
-            onChange={(e) => reschedule(e.target.value)}
-            aria-label="Reprogrammer la relance"
-            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60 lg:min-h-0"
+          {/* Le jour en liste, l'heure en un tap — le même composant que la
+              carte PROCHAINE ACTION (lib/crm/relance.ts). « À rappeler » vient
+              d'être enregistré : il ne manque plus que le jour, et c'est ici
+              qu'il se dit. */}
+          <ChoixRelance
+            titre="Reprogrammer"
+            onChoisir={reschedule}
+            pending={!onReschedule}
+            avertissement={pourQuand ? "Pour quand ?" : null}
           />
-          {RACCOURCIS_RELANCE.map(({ label, jours }) => (
-            <button
-              key={label}
-              type="button"
-              disabled={!onReschedule}
-              onClick={() => reschedule(shiftedDate(jours))}
-              title={`Reprogrammer à dans ${jours} jour${jours > 1 ? "s" : ""}`}
-              className="min-h-[44px] rounded-lg px-2.5 py-1 text-[11px] text-slate-500 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 lg:min-h-0 lg:px-2"
-            >
-              {label}
-            </button>
-          ))}
           {/* Supprimer est définitif : c'est le seul rose de la ligne. */}
           <button
             type="button"

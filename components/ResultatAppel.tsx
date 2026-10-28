@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { PastilleContact } from "@/components/PastilleContact";
 import {
   enregistrerResultatAction,
   preciserResultatAction,
@@ -55,10 +56,13 @@ function fmtJourCourt(jourISO: string): string {
  */
 export function ResultatAppel({
   prospectId,
+  contactActuel = null,
   onRappeler,
   className = "",
 }: {
   prospectId: string;
+  /** Le contact de la fiche : la pastille « Contact → … » ne l'écrase jamais en silence. */
+  contactActuel?: string | null;
   /** « À rappeler » vient d'être enregistré : il reste à dire pour quand. */
   onRappeler?: () => void;
   className?: string;
@@ -149,7 +153,7 @@ export function ResultatAppel({
         setTexteEnregistre(texte.trim());
         setNote("Corrigé.");
         // Corrigé EN « à rappeler » : la date manque toujours, la carte le dit.
-        if (o === "rappeler") onRappeler?.();
+        if (o === "rappeler" || o === "suivi_email") onRappeler?.();
       });
       return;
     }
@@ -184,7 +188,7 @@ export function ResultatAppel({
       );
       // « À rappeler » : la date se choisit dans la ligne « Relancer » de la
       // carte, pas ici — on lui passe la main.
-      if (o === "rappeler") onRappeler?.();
+      if (o === "rappeler" || o === "suivi_email") onRappeler?.();
     });
   }
 
@@ -226,7 +230,7 @@ export function ResultatAppel({
 
   return (
     <div className={`space-y-2.5 ${className}`} aria-label="Résultat de l'appel">
-      {/* Cinq cibles LARGES : c'est un pouce qui vise, pas une souris. */}
+      {/* Six cibles LARGES : c'est un pouce qui vise, pas une souris. */}
       <div className="flex flex-wrap gap-1.5">
         {OUTCOME_ORDER.map((o) => {
           const actif = choisi === o;
@@ -295,6 +299,16 @@ export function ResultatAppel({
           )
         )}
       </div>
+
+      {/* Le nom de la personne, au bon endroit : lu dans la phrase, proposé
+          d'un tap — ou demandé, quand on a eu quelqu'un et que la fiche n'a
+          pas de contact. */}
+      <PastilleContact
+        prospectId={prospectId}
+        texte={texte}
+        contactActuel={contactActuel}
+        demander={enregistre && choisi !== null && choisi !== "sans_reponse" && choisi !== "barrage"}
+      />
 
       {besoinRaison && (
         <p className="text-[11px] text-amber-300/90">

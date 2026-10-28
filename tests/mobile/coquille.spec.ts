@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { ciblesTactiles, contexte, pasDeDefilementHorizontal, PAGES } from "./outils";
+import { ciblesTactiles, contexte, pasDeDefilementHorizontal, PAGES, rienNeDepasse } from "./outils";
 
 /** Lot A — la coquille : largeur, barre du bas, en-tête, recherche. */
 
@@ -10,6 +10,22 @@ test("aucune page plus large que l'écran", async ({ page }, info) => {
     await page.waitForLoadState("networkidle");
     await page.locator("main h1").first().waitFor();
     await test.step(url, () => pasDeDefilementHorizontal(page));
+  }
+});
+
+test("rien ne dépasse de son cadre — ni carte, ni ligne, ni pastille", async ({ page }, info) => {
+  const { role } = contexte(info);
+  const fiche = async () => {
+    // La première fiche de la liste : la fiche est l'écran le plus chargé.
+    await page.goto(role === "admin" ? "/prospects?perimetre=moi" : "/prospects");
+    const href = await page.locator("main ul.card > li a[href^='/prospects/']").first().getAttribute("href");
+    return href ?? "/prospects";
+  };
+  for (const url of [...PAGES[role], await fiche()]) {
+    await page.goto(url);
+    await page.waitForLoadState("networkidle");
+    await page.locator("main h1").first().waitFor();
+    await test.step(url, () => rienNeDepasse(page));
   }
 });
 

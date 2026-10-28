@@ -98,7 +98,7 @@ export function FeuilleBas({
         className="animate-feuille absolute inset-x-0 flex max-h-[88dvh] flex-col rounded-t-[15px] bg-space-800 shadow-2xl outline-none ring-1 ring-white/10 sm:mx-auto sm:max-w-lg"
       >
         <div className="flex items-center gap-2 border-b border-white/[0.06] py-1 pl-5 pr-1">
-          <h2 id={id} className="min-w-0 flex-1 truncate font-display text-base font-semibold text-slate-50">
+          <h2 id={id} title={titre} className="min-w-0 flex-1 truncate font-display text-base font-semibold text-slate-50">
             {titre}
           </h2>
           <button

@@ -17,6 +17,7 @@ import { getSession } from "@/lib/auth";
 import { lireCollage, corrigerAvecAssistant, type LectureCollage } from "@/lib/crm/maListeIA";
 import {
   etatsDesFiches,
+  ligneImport,
   rangerFiche,
   recapitulatif,
   type Defauts,
@@ -145,19 +146,7 @@ export async function importerMaListeAction(input: {
   const result = await importProspectsCore(
     supabase,
     userId,
-    fiches.map((f) => ({
-      company_name: f.company_name,
-      contact_name: f.contact_name ?? undefined,
-      email: f.email ?? undefined,
-      phone: f.phone ?? f.phone_lu ?? undefined,
-      website: f.website ?? undefined,
-      sector: f.sector ?? undefined,
-      address: f.address ?? undefined,
-      city: f.city ?? undefined,
-      status: "a_appeler",
-      source: "Ma liste",
-      notes: f.notes ?? undefined,
-    })),
+    fiches.map(ligneImport),
     owner
   );
   if (result.inserted > 0) {

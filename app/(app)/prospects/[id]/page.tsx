@@ -501,10 +501,11 @@ export default async function ProspectDetailPage({
           rdvAVenir={prochainRdv?.starts_at ?? null}
           canEmail={Boolean(prospect.email)}
           lectureSeule={lectureSeule}
+          contactName={prospect.contact_name}
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* ---------- Colonne principale ---------- */}
         <div className="space-y-8 lg:col-span-2">
           {/* ---------- 2. AGIR (consigner / envoyer), puis 3. CHRONOLOGIE ----

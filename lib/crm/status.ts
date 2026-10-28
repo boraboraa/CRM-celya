@@ -14,6 +14,9 @@
  *                rappeler » (meetings.debrief_issue, migration 027) — par
  *                le débrief explicite, ou par un résultat « À rappeler » /
  *                « Intéressé » posé après lui (débrief implicite, en base)
+ *   suivi_email  UNIQUEMENT un résultat d'appel « Suivi par email »
+ *                (activities.outcome, 033) ou un rendez-vous débriefé
+ *                « Suivi par email » (meetings.debrief_issue, 033)
  *   proposition  UNIQUEMENT un signal explicite (proposal_sent_at)
  *   gagne/perdu  JAMAIS automatiques — décisions humaines irréversibles
  *
@@ -40,13 +43,16 @@ export const STATUS_RANK: Record<ProspectStatus, number> = {
   contacte: 1,
   rendez_vous: 2,
   a_rappeler: 3,
-  proposition: 4,
+  // « Suivi par email » (032) : on a eu quelqu'un, qui veut l'info par mail —
+  // plus loin qu'un « à rappeler », pas encore une proposition chiffrée.
+  suivi_email: 4,
+  proposition: 5,
   // L'essai gratuit (030) passe devant la proposition et derrière l'issue :
   // aucun fait ne la déduit (MANUAL_ONLY), mais une fiche en essai ne doit
   // pas reculer en « Proposition » quand un devis est (re)marqué envoyé.
-  essai_gratuit: 5,
-  gagne: 6,
-  perdu: 6,
+  essai_gratuit: 6,
+  gagne: 7,
+  perdu: 7,
 };
 
 /** Étapes qui ne s'obtiennent qu'à la main, jamais par déduction. */
@@ -70,6 +76,8 @@ export type ProspectFacts = {
   meeting: Fact | null;
   /** Rendez-vous débriefé « intéressé, à rappeler » (027). */
   rappel: Fact | null;
+  /** Un « Suivi par email » : résultat d'appel ou issue de débrief (033). */
+  suiviEmail: Fact | null;
   /** Proposition explicitement marquée envoyée. */
   proposal: Fact | null;
 };
@@ -78,6 +86,7 @@ export const NO_FACTS: ProspectFacts = {
   exchange: null,
   meeting: null,
   rappel: null,
+  suiviEmail: null,
   proposal: null,
 };
 
@@ -96,6 +105,9 @@ export type FactRows = {
     occurred_at: string;
     is_exchange: boolean | null;
     is_draft: boolean | null;
+    /** Le résultat d'appel (019, 033) — absent chez un appelant qui ne le lit
+     *  pas : il ne déduit alors pas « Suivi par email ». */
+    outcome?: string | null;
   }[];
   emails: { direction: string; received_at: string }[];
   /** Rendez-vous de la fiche (agenda) — le filtre « non annulé » est
@@ -119,10 +131,23 @@ export type FactRows = {
  * une deuxième fois (c'étaient quatre allers-retours de plus par ouverture).
  */
 export function factsFromRows(rows: FactRows): ProspectFacts {
-  const facts: ProspectFacts = { exchange: null, meeting: null, rappel: null, proposal: null };
+  const facts: ProspectFacts = {
+    exchange: null,
+    meeting: null,
+    rappel: null,
+    suiviEmail: null,
+    proposal: null,
+  };
 
   for (const a of rows.activities) {
     if (a.is_draft) continue;
+
+    if (a.outcome === "suivi_email") {
+      facts.suiviEmail = latest(facts.suiviEmail, {
+        at: a.occurred_at,
+        label: `la personne a demandé un suivi par email le ${fmtDate(a.occurred_at)}`,
+      });
+    }
 
     if (a.type === "rendez_vous") {
       facts.meeting = latest(facts.meeting, {
@@ -175,6 +200,13 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
         label: `le rendez-vous du ${fmtDate(m.starts_at)} a été débriefé : intéressé, à rappeler`,
       });
     }
+    if (m.status === "honore" && m.debrief_issue === "suivi_email") {
+      const at = m.debriefed_at ?? m.starts_at;
+      facts.suiviEmail = latest(facts.suiviEmail, {
+        at,
+        label: `le rendez-vous du ${fmtDate(m.starts_at)} a été débriefé : suivi par email`,
+      });
+    }
   }
 
   if (rows.proposalSentAt) {
@@ -218,7 +250,7 @@ export async function readProspectFacts(
   const [activitiesRes, emailsRes, meetingsRes, prospectRes] = await Promise.all([
     supabase
       .from("activities")
-      .select("type, occurred_at, is_exchange, is_draft")
+      .select("type, occurred_at, is_exchange, is_draft, outcome")
       .eq("prospect_id", prospectId)
       .eq("is_draft", false)
       .order("occurred_at", { ascending: false })
@@ -267,6 +299,7 @@ export async function readProspectFacts(
 /** L'étape que les faits justifient — jamais « Gagné » ni « Perdu ». */
 export function statusFromFacts(facts: ProspectFacts): ProspectStatus {
   if (facts.proposal) return "proposition";
+  if (facts.suiviEmail) return "suivi_email";
   if (facts.rappel) return "a_rappeler";
   if (facts.meeting) return "rendez_vous";
   if (facts.exchange) return "contacte";
@@ -279,6 +312,7 @@ export function factReason(
   facts: ProspectFacts
 ): string | null {
   if (derived === "proposition") return facts.proposal?.label ?? null;
+  if (derived === "suivi_email") return facts.suiviEmail?.label ?? null;
   if (derived === "a_rappeler") return facts.rappel?.label ?? null;
   if (derived === "rendez_vous") return facts.meeting?.label ?? null;
   if (derived === "contacte") return facts.exchange?.label ?? null;

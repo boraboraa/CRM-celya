@@ -29,6 +29,7 @@ const COLUMN_BANNER: Record<ProspectStatus, string> = {
   contacte: "bg-cyan-500/20 text-cyan-100 ring-cyan-400/30",
   rendez_vous: "bg-blue-500/20 text-blue-100 ring-blue-400/30",
   a_rappeler: "bg-indigo-500/20 text-indigo-100 ring-indigo-400/30",
+  suivi_email: "bg-sky-500/20 text-sky-100 ring-sky-400/30",
   proposition: "bg-amber-500/20 text-amber-100 ring-amber-400/30",
   essai_gratuit: "bg-teal-500/20 text-teal-100 ring-teal-400/30",
   gagne: "bg-emerald-500/20 text-emerald-100 ring-emerald-400/30",
@@ -40,6 +41,7 @@ const COLUMN_COUNT: Record<ProspectStatus, string> = {
   contacte: "bg-cyan-400/25 text-cyan-100",
   rendez_vous: "bg-blue-400/25 text-blue-100",
   a_rappeler: "bg-indigo-400/25 text-indigo-100",
+  suivi_email: "bg-sky-400/25 text-sky-100",
   proposition: "bg-amber-400/25 text-amber-100",
   essai_gratuit: "bg-teal-400/25 text-teal-100",
   gagne: "bg-emerald-400/25 text-emerald-100",
@@ -52,6 +54,7 @@ const COLUMN_TARGET: Record<ProspectStatus, string> = {
   contacte: "bg-cyan-500/[0.08] ring-cyan-400/40",
   rendez_vous: "bg-blue-500/[0.08] ring-blue-400/40",
   a_rappeler: "bg-indigo-500/[0.08] ring-indigo-400/40",
+  suivi_email: "bg-sky-500/[0.08] ring-sky-400/40",
   proposition: "bg-amber-500/[0.08] ring-amber-400/40",
   essai_gratuit: "bg-teal-500/[0.08] ring-teal-400/40",
   gagne: "bg-emerald-500/[0.08] ring-emerald-400/40",
@@ -63,6 +66,7 @@ const COLUMN_DROP: Record<ProspectStatus, string> = {
   contacte: "border-cyan-400/50 bg-cyan-500/[0.07] text-cyan-300",
   rendez_vous: "border-blue-400/50 bg-blue-500/[0.07] text-blue-300",
   a_rappeler: "border-indigo-400/50 bg-indigo-500/[0.07] text-indigo-300",
+  suivi_email: "border-sky-400/50 bg-sky-500/[0.07] text-sky-300",
   proposition: "border-amber-400/50 bg-amber-500/[0.07] text-amber-300",
   essai_gratuit: "border-teal-400/50 bg-teal-500/[0.07] text-teal-300",
   gagne: "border-emerald-400/50 bg-emerald-500/[0.07] text-emerald-300",
@@ -97,6 +101,9 @@ export type BoardProspect = {
   modifiable?: boolean;
 };
 
+/** Repliées à droite par défaut — les fins de parcours (27/10). */
+const REPLIEES: ProspectStatus[] = ["gagne", "perdu"];
+
 /**
  * Le pipeline : une colonne par étape, glisser-déposer pour corriger.
  *
@@ -123,6 +130,11 @@ export function PipelineBoard({
   const [overColumn, setOverColumn] = useState<ProspectStatus | null>(null);
   const [justMoved, setJustMoved] = useState<string | null>(null);
   const [enCours, setEnCours] = useState<string | null>(null);
+  /**
+   * Gagné et Perdu sont REPLIÉS à droite (27/10) : une colonne étroite qui dit
+   * combien, et qu'on déplie d'un clic. On peut toujours y déposer une fiche.
+   */
+  const [deplies, setDeplies] = useState<Set<ProspectStatus>>(new Set());
   const [error, setError] = useState<string>();
   const [, startTransition] = useTransition();
   /**
@@ -193,7 +205,8 @@ export function PipelineBoard({
 
       {/* Téléphone : le sélecteur d'étape. Il défile de côté dans son propre
           cadre — la page, elle, ne déborde jamais. */}
-      <div className="-mx-4 mb-3 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
+      {/* `data-defile` : ce défilement de côté est VOULU (banc, cadres.ts). */}
+      <div data-defile className="-mx-4 mb-3 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
         <div className="flex w-max gap-1.5" role="group" aria-label="Étape affichée">
           {STATUS_ORDER.map((status) => {
             const n = items.filter((c) => c.status === status).length;
@@ -221,7 +234,7 @@ export function PipelineBoard({
         choix est alors verrouillé.
       </p>
 
-      <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+      <div data-defile className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
         <div className="lg:flex lg:min-w-max lg:gap-4">
           {STATUS_ORDER.map((status, columnIndex) => {
             const list = items.filter((c) => c.status === status);
@@ -229,6 +242,7 @@ export function PipelineBoard({
             // Colonne d'origine de la carte en cours de déplacement : on la
             // laisse en retrait pour que la cible ressorte.
             const isSource = dragging !== null && dragging.status === status;
+            const repliee = REPLIEES.includes(status) && !deplies.has(status);
 
             return (
               <section
@@ -251,7 +265,9 @@ export function PipelineBoard({
                   if (id) move(id, status);
                 }}
                 style={{ animationDelay: `${columnIndex * 40}ms` }}
-                className={`w-full shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 lg:block lg:w-[272px] ${
+                className={`w-full shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 lg:block ${
+                  repliee ? "lg:w-[76px]" : "lg:w-[272px]"
+                } ${
                   status === etapeMobile ? "" : "hidden"
                 } ${
                   isTarget
@@ -261,6 +277,24 @@ export function PipelineBoard({
                       : "ring-transparent"
                 }`}
               >
+                {repliee && (
+                  <button
+                    type="button"
+                    onClick={() => setDeplies((d) => new Set(d).add(status))}
+                    title={`Déplier « ${STATUS_LABEL[status]} »`}
+                    className={`hidden w-full flex-col items-center gap-2 rounded-xl px-1 py-3 text-xs font-semibold ring-1 transition lg:flex ${COLUMN_BANNER[status]} ${
+                      isTarget ? "brightness-125" : ""
+                    }`}
+                  >
+                    <Icone nom={STATUS_ICON[status]} className="h-3.5 w-3.5 opacity-80" />
+                    <span className="[writing-mode:vertical-rl]">{STATUS_LABEL[status]}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${COLUMN_COUNT[status]}`}>
+                      {list.length}
+                    </span>
+                    {isTarget && <span className="text-[10px] font-normal">Déposer</span>}
+                  </button>
+                )}
+                <div className={repliee ? "lg:hidden" : ""}>
                 <header className="mb-3">
                   {/* Un vrai bandeau dans la couleur de l'étape, compteur
                       dans une pastille de la même teinte. */}
@@ -276,6 +310,22 @@ export function PipelineBoard({
                     >
                       {list.length}
                     </span>
+                    {REPLIEES.includes(status) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDeplies((d) => {
+                            const n = new Set(d);
+                            n.delete(status);
+                            return n;
+                          })
+                        }
+                        aria-label={`Replier « ${STATUS_LABEL[status]} »`}
+                        className="hidden h-7 w-7 items-center justify-center rounded-lg opacity-70 transition hover:bg-white/10 hover:opacity-100 lg:inline-flex"
+                      >
+                        <Icone nom="chevron" className="h-3 w-3 rotate-90" />
+                      </button>
+                    )}
                   </h2>
                 </header>
 
@@ -354,13 +404,13 @@ export function PipelineBoard({
                           className="block"
                         >
                           <p className="flex min-w-0 items-center gap-1.5">
-                            <span className="truncate text-sm font-semibold text-slate-50">
+                            <span className="truncate text-sm font-semibold text-slate-50" title={c.company_name}>
                               {c.company_name}
                             </span>
                             {parJanet.has(c.id) && <EtiquetteJanet compact />}
                           </p>
                           {c.contact_name && (
-                            <p className="truncate text-xs text-slate-400">
+                            <p className="truncate text-xs text-slate-400" title={c.contact_name}>
                               {c.contact_name}
                             </p>
                           )}
@@ -381,22 +431,29 @@ export function PipelineBoard({
 
                           {/* La confiance, d'un coup d'œil — et sa raison. */}
                           <p className="mt-2 flex items-center justify-between gap-2">
-                            <ConfidenceBadge
-                              level={c.confidence_level}
-                              reason={c.confidence_reason}
-                              locked={c.confidence_locked}
-                            />
+                            {/* « À évaluer » (null) n'apprend rien : rien ne
+                                s'affiche (27/10) — la carte s'allège d'autant. */}
+                            {c.confidence_level ? (
+                              <ConfidenceBadge
+                                level={c.confidence_level}
+                                reason={c.confidence_reason}
+                                locked={c.confidence_locked}
+                              />
+                            ) : (
+                              <span />
+                            )}
                             <ProchaineActionTexte
                               at={c.next_action_at}
                               kind={c.next_action_kind}
                               statut={c.status}
                               plusRien={c.plus_rien}
+                              avecHeure
                               className="shrink-0 text-[11px]"
                               couleurNeutre="text-slate-400"
                             />
                           </p>
-                          {c.confidence_reason && !c.confidence_locked && (
-                            <p className="mt-1 truncate text-[11px] text-slate-500">
+                          {c.confidence_level && c.confidence_reason && !c.confidence_locked && (
+                            <p className="mt-1 truncate text-[11px] text-slate-500" title={c.confidence_reason}>
                               {c.confidence_reason}
                             </p>
                           )}
@@ -422,6 +479,7 @@ export function PipelineBoard({
                       </article>
                     );
                   })}
+                </div>
                 </div>
               </section>
             );

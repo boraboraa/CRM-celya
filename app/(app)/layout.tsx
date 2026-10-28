@@ -2,12 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/Logo";
-import { Avatar } from "@/components/ui";
+import { Avatar, Icone } from "@/components/ui";
 import { NavLinks } from "@/components/Nav";
 import { BarreOnglets } from "@/components/BarreOnglets";
 import { AjoutRapide } from "@/components/AjoutRapide";
 import { BoutonRecherche, RechercheGlobale } from "@/components/RechercheGlobale";
-import { navOrdinateur, ongletsMobiles } from "@/lib/nav";
+import { MA_LISTE_ITEM, navOrdinateur, ongletsMobiles } from "@/lib/nav";
 import { Suspense } from "react";
 import { MemoirePerimetre } from "@/components/MemoirePerimetre";
 
@@ -47,6 +47,15 @@ export default async function AppLayout({
         </div>
 
         <NavLinks items={items} />
+
+        {/* Un raccourci, pas un écran : on colle sa liste avant d'appeler. */}
+        <Link
+          href={MA_LISTE_ITEM.href}
+          className="mt-3 flex min-h-[44px] items-center gap-2 rounded-xl px-3 text-xs text-slate-400 ring-1 ring-white/[0.08] transition hover:bg-white/[0.05] hover:text-slate-100"
+        >
+          <Icone nom={MA_LISTE_ITEM.icon} className="h-3.5 w-3.5" />
+          {MA_LISTE_ITEM.label}
+        </Link>
 
         <div className="mt-auto space-y-3 pt-6">
           <Link

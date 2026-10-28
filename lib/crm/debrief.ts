@@ -11,6 +11,8 @@
  *
  *   Intéressé — à rappeler   tenu ; relance à la date choisie (EXIGÉE) ;
  *                            l'étape suit le fait → « À rappeler » (026)
+ *   Suivi par email          tenu ; relance à la date choisie (EXIGÉE) ;
+ *                            l'étape suit le fait → « Suivi par email » (033)
  *   Proposition envoyée      tenu ; proposal_sent_at → « Proposition »
  *   Essai gratuit démarré    tenu ; « Essai gratuit », VERROUILLÉ (031) —
  *                            le « win » d'un étudiant ; une date « Et
@@ -18,11 +20,13 @@
  *   Signé                    tenu ; « Gagné », VERROUILLÉ (geste humain)
  *   Pas intéressé            tenu ; raison EXIGÉE (lost_reason) ; « Perdu »,
  *                            VERROUILLÉ ; relances ouvertes annulées
- *   N'a pas eu lieu          Reporter (nouvelle date, deplacerRendezVous) ou
- *                            Annulé (rien sur l'étape)
+ *   N'a pas eu lieu          Pas décroché (RDV ANNULÉ, journal « pas de
+ *                            réponse », relance proposée jamais exigée — 033),
+ *                            Reporter (nouvelle date connue,
+ *                            deplacerRendezVous) ou Annulé (rien sur l'étape)
  *
- * Un tap suffit pour l'issue ; seule « à rappeler » demande une date, seule
- * « pas intéressé » demande une raison. Le compte rendu reste facultatif.
+ * Un tap suffit pour l'issue ; seules « à rappeler » et « suivi par email »
+ * demandent une date, seule « pas intéressé » demande une raison. Le compte rendu reste facultatif.
  *
  * Les invariants de lib/crm/status.ts tiennent : « À rappeler » et
  * « Proposition » ne bougent que par les FAITS (jamais par-dessus un verrou) ;
@@ -39,12 +43,20 @@ import type { ProspectStatus } from "../types.ts";
 import { jourHeureCourt } from "./prochaineAction.ts";
 
 /** Ce qu'a donné un rendez-vous qui a eu lieu. */
-export type IssueTenue = "a_rappeler" | "proposition" | "essai" | "signe" | "pas_interesse";
+export type IssueTenue =
+  | "a_rappeler"
+  | "suivi_email"
+  | "proposition"
+  | "essai"
+  | "signe"
+  | "pas_interesse";
 /** …ou bien il n'a pas eu lieu. Le report passe par deplacerRendezVous. */
-export type IssueDebrief = IssueTenue | "annule";
+export type IssueNonTenue = "pas_decroche" | "annule";
+export type IssueDebrief = IssueTenue | IssueNonTenue;
 
 export const ISSUES_TENUES: IssueTenue[] = [
   "a_rappeler",
+  "suivi_email",
   "proposition",
   "essai",
   "signe",
@@ -53,30 +65,36 @@ export const ISSUES_TENUES: IssueTenue[] = [
 
 export const ISSUE_LABEL: Record<IssueDebrief, string> = {
   a_rappeler: "Intéressé — à rappeler",
+  suivi_email: "Suivi par email",
   proposition: "Proposition envoyée",
   essai: "Essai gratuit démarré",
   signe: "Signé",
   pas_interesse: "Pas intéressé",
+  pas_decroche: "Pas décroché",
   annule: "Annulé",
 };
 
 /** La couleur ne porte jamais seule : chaque issue a son pictogramme. */
 export const ISSUE_ICON: Record<IssueDebrief, IconeNom> = {
   a_rappeler: "pouce",
+  suivi_email: "arobase",
   proposition: "enveloppe",
   essai: "cadeau",
   signe: "coche",
   pas_interesse: "croix",
+  pas_decroche: "telephone-barre",
   annule: "croix",
 };
 
 /** Classes complètes (règle JIT) — les teintes des étapes d'arrivée. */
 export const ISSUE_CHIP: Record<IssueDebrief, string> = {
   a_rappeler: "bg-indigo-500/15 text-indigo-200 ring-indigo-400/30 hover:bg-indigo-500/25",
+  suivi_email: "bg-sky-500/15 text-sky-200 ring-sky-400/30 hover:bg-sky-500/25",
   proposition: "bg-amber-500/15 text-amber-200 ring-amber-400/30 hover:bg-amber-500/25",
   essai: "bg-teal-500/15 text-teal-200 ring-teal-400/30 hover:bg-teal-500/25",
   signe: "bg-emerald-500/15 text-emerald-200 ring-emerald-400/30 hover:bg-emerald-500/25",
   pas_interesse: "bg-rose-500/10 text-rose-200 ring-rose-400/25 hover:bg-rose-500/20",
+  pas_decroche: "bg-white/[0.04] text-slate-300 ring-white/10 hover:bg-white/[0.08]",
   annule: "bg-white/[0.04] text-slate-300 ring-white/10 hover:bg-white/[0.08]",
 };
 
@@ -89,8 +107,8 @@ export function estIssueDebrief(v: unknown): v is IssueDebrief {
 export type EffetsDebrief = {
   /** Le nouveau statut du rendez-vous. */
   statutRdv: "honore" | "annule";
-  /** La valeur de meetings.debrief_issue (027). */
-  debriefIssue: IssueTenue | null;
+  /** La valeur de meetings.debrief_issue (027, 033). */
+  debriefIssue: IssueTenue | "pas_decroche" | null;
   /** Étape DÉCIDÉE (verrouillée) — null : l'étape suit les faits. */
   etapeDecidee: ProspectStatus | null;
   /** Marquer la proposition envoyée (le fait qui mène à « Proposition »). */
@@ -102,7 +120,7 @@ export type EffetsDebrief = {
   /** Une date « Et ensuite ? » est offerte (jamais sur une fiche qu'on ferme). */
   suiteOfferte: boolean;
   /** Le résultat d'appel porté par la ligne de journal (la carte l'affiche). */
-  outcome: "interesse" | "refus" | null;
+  outcome: "interesse" | "suivi_email" | "refus" | "sans_reponse" | null;
   /** Les relances ouvertes sont annulées (perdu : plus rien à relancer). */
   annulerRelances: boolean;
 };
@@ -122,6 +140,10 @@ export function effetsDebrief(issue: IssueDebrief): EffetsDebrief {
   switch (issue) {
     case "a_rappeler":
       return { ...base, debriefIssue: "a_rappeler", exigeDate: true, outcome: "interesse" };
+    case "suivi_email":
+      // On a eu la personne, qui veut l'info par mail : une RÉPONSE, et une
+      // relance pour vérifier que le mail a bien été lu.
+      return { ...base, debriefIssue: "suivi_email", exigeDate: true, outcome: "suivi_email" };
     case "proposition":
       return { ...base, debriefIssue: "proposition", proposition: true };
     case "essai":
@@ -141,6 +163,12 @@ export function effetsDebrief(issue: IssueDebrief): EffetsDebrief {
         outcome: "refus",
         annulerRelances: true,
       };
+    case "pas_decroche":
+      // Un RDV téléphonique où personne n'a décroché : il n'a PAS eu lieu
+      // (décision de Bora, 27/10). La ligne de journal dit « pas de réponse »
+      // — c'est elle que la carte affiche ; une relance est proposée, jamais
+      // exigée.
+      return { ...base, statutRdv: "annule", debriefIssue: "pas_decroche", outcome: "sans_reponse" };
     case "annule":
       return { ...base, statutRdv: "annule" };
   }
@@ -157,7 +185,9 @@ export function manqueDebrief(input: {
 }): string | null {
   const e = effetsDebrief(input.issue);
   if (e.exigeDate && !input.suite?.trim()) {
-    return "Quand faut-il rappeler ? Choisissez une date.";
+    return input.issue === "suivi_email"
+      ? "Quand faut-il relancer ? Choisissez une date."
+      : "Quand faut-il rappeler ? Choisissez une date.";
   }
   if (e.exigeRaison && !input.raison?.trim()) {
     return "Pourquoi n'est-il pas intéressé ? Une raison courte suffit.";
@@ -168,7 +198,11 @@ export function manqueDebrief(input: {
 /** Le sujet de la ligne de journal du débrief : « Débrief du RDV du 29/09 à 10h : signé ». */
 export function sujetDebrief(issue: IssueDebrief, startsAt: string): string {
   const quoi =
-    issue === "annule" ? "n'a pas eu lieu (annulé)" : ISSUE_LABEL[issue].toLowerCase();
+    issue === "annule"
+      ? "n'a pas eu lieu (annulé)"
+      : issue === "pas_decroche"
+        ? "pas décroché, n'a pas eu lieu"
+        : ISSUE_LABEL[issue].toLowerCase();
   return `Débrief du RDV du ${jourHeureCourt(startsAt)} : ${quoi}`;
 }
 
@@ -187,10 +221,10 @@ export function sujetDebrief(issue: IssueDebrief, startsAt: string): string {
  * - « Pas de réponse » et « Barrage » ne prouvent pas que le RDV a eu lieu :
  *   rien (décision de Bora, 18/10) — même un barrage attesté.
  * - Ferment : un échange attesté, un résultat « À rappeler » / « Intéressé » /
- *   « Pas intéressé », un email envoyé. Une note de repérage, un brouillon,
+ *   « Suivi par email » / « Pas intéressé », un email envoyé. Une note de repérage, un brouillon,
  *   une activité rendez_vous ou une ligne déjà rattachée à un RDV : rien.
  * - L'issue : « À rappeler » / « Intéressé » → a_rappeler (l'étape suit le
- *   fait) ; « Pas intéressé » → pas_interesse, MÊMES effets que le débrief
+ *   fait) ; « Suivi par email » → suivi_email (033) ; « Pas intéressé » → pas_interesse, MÊMES effets que le débrief
  *   explicite (`effetsDebrief("pas_interesse")` : Perdu verrouillé, relances
  *   annulées) ; tout le reste → suite_posee.
  *
@@ -208,9 +242,13 @@ export function issueImplicite(ligne: {
   if (ligne.isDraft || ligne.meetingId || ligne.type === "rendez_vous") return null;
   if (ligne.outcome === "sans_reponse" || ligne.outcome === "barrage") return null;
   const resultatQuiFerme =
-    ligne.outcome === "rappeler" || ligne.outcome === "interesse" || ligne.outcome === "refus";
+    ligne.outcome === "rappeler" ||
+    ligne.outcome === "interesse" ||
+    ligne.outcome === "suivi_email" ||
+    ligne.outcome === "refus";
   if (!(ligne.isExchange || resultatQuiFerme || ligne.type === "email")) return null;
   if (ligne.outcome === "rappeler" || ligne.outcome === "interesse") return "a_rappeler";
+  if (ligne.outcome === "suivi_email") return "suivi_email";
   if (ligne.outcome === "refus") return "pas_interesse";
   return "suite_posee";
 }
@@ -257,4 +295,39 @@ export function rdvADebriefer<R extends RdvEnAttente>(
   return [...parFiche.values()].sort(
     (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()
   );
+}
+
+// ---------------------------------------------------------------------------
+// L'essai gratuit clôt le rendez-vous en attente — miroir du trigger SQL (033)
+// ---------------------------------------------------------------------------
+
+/**
+ * Le rendez-vous qu'un PASSAGE en « Essai gratuit » clôt (`honore` / `essai`,
+ * ligne au journal). La règle s'exécute EN SQL (`prospects_essai_clot_rdv`,
+ * migration 033 — tous les chemins y passent : clic sur l'étape,
+ * glisser-déposer, formulaire, `mettre_a_jour_statut`) ; cette fonction en est
+ * la recopie, jouée par `test:debrief`.
+ *
+ * 100% MOTO, en essai depuis le 12/10, réclamait encore le débrief de son RDV
+ * du 29/09 : entrer en essai DIT ce qu'a donné le rendez-vous. Seul le RDV de
+ * prospect en attente le plus récent, DÉJÀ COMMENCÉ, est clos — les plus
+ * anciens le sont « remplacés » par la base (027) ; un RDV À VENIR n'est
+ * jamais touché. Rester en essai (ou y être déjà) ne clôt rien.
+ */
+export function rdvClosParEssai<R extends RdvEnAttente>(
+  meetings: R[],
+  ancienStatut: string | null | undefined,
+  nouveauStatut: string,
+  now: number = Date.now()
+): R | null {
+  if (nouveauStatut !== "essai_gratuit" || ancienStatut === "essai_gratuit") return null;
+  let choisi: R | null = null;
+  for (const m of meetings) {
+    if (m.kind !== "prospect" || !m.prospect_id) continue;
+    if (!["prevu", "confirme", "reporte"].includes(m.status)) continue;
+    if (m.debriefed_at) continue;
+    if (new Date(m.starts_at).getTime() > now) continue;
+    if (!choisi || new Date(m.starts_at).getTime() > new Date(choisi.starts_at).getTime()) choisi = m;
+  }
+  return choisi;
 }

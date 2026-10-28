@@ -11,7 +11,7 @@
  *   appels      une activité non brouillon, avec un résultat d'appel, SANS
  *               rendez-vous rattaché (un débrief porte « intéressé » ou
  *               « refus » : ce n'est pas un appel) — à l'auteur ;
- *   réponses    rappeler · intéressé · refus — on a eu le décideur ; un
+ *   réponses    rappeler · intéressé · suivi par email (033) · refus — on a eu le décideur ; un
  *               barrage reste un appel, pas une réponse (Bora, 27/10) ;
  *   intéressés  intéressé · rappeler ;
  *   rdv         RDV de prospect créés dans la période, non annulés — à qui
@@ -39,7 +39,7 @@ export type Compteurs = {
 
 export const ZERO: Compteurs = { appels: 0, reponses: 0, interesses: 0, rdv: 0, essais: 0, numeros: 0 };
 
-const REPONSES = new Set(["rappeler", "interesse", "refus"]);
+const REPONSES = new Set(["rappeler", "interesse", "suivi_email", "refus"]);
 const INTERESSES = new Set(["interesse", "rappeler"]);
 
 // ---------------------------------------------------------------------------

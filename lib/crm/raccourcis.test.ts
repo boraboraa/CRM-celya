@@ -10,6 +10,7 @@
  */
 
 import { lireRaccourcis, type Raccourci } from "./raccourcis.ts";
+import { propositionContact, phraseContact } from "./contactPropose.ts";
 
 type Attendu = Partial<Omit<Raccourci, "segments">>;
 
@@ -135,7 +136,8 @@ const CAS: Cas[] = [
   {
     note: "le gérant c'est Marc",
     maintenant: "2026-08-31T08:00",
-    attendu: { contact: "Marc" },
+    // La fonction suit le nom, dans le même champ (27/10).
+    attendu: { contact: "Marc (gérant)" },
   },
   {
     note: "pas intéressé, bosse déjà avec un concurrent",
@@ -173,6 +175,80 @@ const CAS: Cas[] = [
     note: "rdv à caler",
     maintenant: "2026-08-31T08:00",
     attendu: { rdv: { debut: "", manque: "jour" } },
+  },
+  // --- Le nom de la personne, et sa fonction (27/10) — c'est elle qui part
+  // dans `contact_name`, PROPOSÉE d'une pastille, jamais écrite seule.
+  {
+    note: "parlé à Mme Lambert, la gérante, rappeler jeudi",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Mme Lambert (gérante)", relance: { date: "2026-10-29" } },
+  },
+  {
+    note: "intéressée, avec M. Dupont",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "M. Dupont" },
+  },
+  {
+    note: "la gérante c'est Mme Lambert",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Mme Lambert (gérante)" },
+  },
+  {
+    note: "contact : Julie Martin",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Julie Martin" },
+  },
+  {
+    note: "Marc Dupont, le patron, veut un devis",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Marc Dupont (patron)" },
+  },
+  {
+    note: "j'ai eu Sophie au téléphone, à rappeler",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Sophie" },
+  },
+  {
+    // Dicté en minuscules : la civilité et le nom sont remis en majuscule.
+    note: "madame lambert rappelle demain",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Madame Lambert" },
+  },
+  {
+    note: "Mme Lambert, la secrétaire, prend le message",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Mme Lambert (secrétaire)" },
+  },
+  // --- Faux positifs : jamais un contact.
+  {
+    note: "appeler Mme demain",
+    maintenant: "2026-10-27T10:00",
+    attendu: {},
+    absents: ["contact"],
+  },
+  {
+    note: "rdv avec Garage Dupont mardi 10h",
+    maintenant: "2026-10-27T10:00",
+    attendu: { rdv: { debut: "2026-11-03T10:00" } },
+    absents: ["contact"],
+  },
+  {
+    note: "parlé à Carrosserie Max, pas intéressé",
+    maintenant: "2026-10-27T10:00",
+    attendu: {},
+    absents: ["contact"],
+  },
+  {
+    note: "j'ai eu un souci avec le devis",
+    maintenant: "2026-10-27T10:00",
+    attendu: {},
+    absents: ["contact"],
+  },
+  {
+    note: "rappeler demain, la gérante est absente",
+    maintenant: "2026-10-27T10:00",
+    attendu: { relance: { date: "2026-10-28" } },
+    absents: ["contact"],
   },
 ];
 
@@ -237,6 +313,25 @@ for (const cas of CAS) {
   }
 
   console.log(`${echecs === avant ? "✓" : "✗"} « ${cas.note} »`);
+}
+
+// --- Le contact proposé : jamais écrasé en silence (27/10) -------------------
+{
+  const avant = echecs;
+  const p1 = propositionContact("Mme Lambert (gérante)", null);
+  verifie("fiche sans contact : on propose", p1, { valeur: "Mme Lambert (gérante)", remplace: null });
+  verifie("…et la pastille le dit", p1 && phraseContact(p1), "Contact → Mme Lambert (gérante)");
+  const p2 = propositionContact("Mme Lambert", "M. Dupont");
+  verifie("un AUTRE contact présent : la proposition dit qu'elle le remplace", p2?.remplace, "M. Dupont");
+  verifie("…en toutes lettres", p2 && phraseContact(p2), "Remplacer « M. Dupont » par « Mme Lambert » ?");
+  verifie("la même personne, écrite autrement : rien à proposer",
+    propositionContact("Mme Lambert", "lambert"), null);
+  verifie("la même personne + une fonction nouvelle : proposé (remplace)",
+    propositionContact("Mme Lambert (gérante)", "Mme Lambert")?.remplace, "Mme Lambert");
+  verifie("rien de lu : rien", propositionContact(null, "M. Dupont"), null);
+  verifie("une civilité seule n'est pas un nom", propositionContact("Mme", null), null);
+  verifie("tronqué à 120 caractères", propositionContact("X".repeat(200), null)?.valeur.length, 120);
+  console.log(`${echecs === avant ? "✓" : "✗"} le contact proposé`);
 }
 
 if (echecs > 0) {

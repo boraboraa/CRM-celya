@@ -15,6 +15,7 @@
     "test:frontiere": "node --experimental-strip-types lib/rsc-frontiere.test.ts",
     "test:prochaine-action": "node --experimental-strip-types lib/crm/prochaineAction.test.ts",
     "test:debrief": "node --experimental-strip-types lib/crm/debrief.test.ts",
+    "test:relance": "node --experimental-strip-types lib/crm/relance.test.ts",
     "test:recherche": "node --experimental-strip-types lib/crm/recherche.test.ts",
     "test:fiche-suivante": "node --experimental-strip-types lib/crm/ficheSuivante.test.ts",
     "test:nav": "node --experimental-strip-types lib/nav.test.ts",

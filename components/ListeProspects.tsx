@@ -407,8 +407,12 @@ export function ListeProspects({
   );
 }
 
-/** Les colonnes de la ligne, à partir de `xl` (classes complètes : règle JIT). */
+/**
+ * Les colonnes de la ligne, à partir de `xl` (classes complètes : règle JIT).
+ * « Relance » fait 11 rem (28/10) : à 9 rem, « RDV mer. 30/09 · 18h30 »
+ * (169 px) passait sous « Appeler ».
+ */
 const GRILLE =
-  "xl:grid-cols-[2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";
+  "xl:grid-cols-[2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_11rem_8rem]";
 const GRILLE_ADMIN =
-  "xl:grid-cols-[2.25rem_2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";
+  "xl:grid-cols-[2.25rem_2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_11rem_8rem]";

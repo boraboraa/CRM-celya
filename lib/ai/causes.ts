@@ -20,6 +20,11 @@ export const CAUSE_TIMEOUT = "timeout";
 export const CAUSE_JSON_INVALIDE = "json_invalide";
 export const CAUSE_RESEAU = "reseau";
 export const CAUSE_REFUS_MODELE = "refus_modele";
+/**
+ * Le modèle « raisonne » (`<think>…`) et sa limite de jetons a coupé la
+ * réponse avant le JSON. Constaté le 28/10 avec MiniMax-M3.
+ */
+export const CAUSE_REPONSE_COUPEE = "reponse_coupee";
 
 /** Les codes MiniMax rencontrés — l'erreur arrive dans un HTTP 200. */
 const BASE_RESP: Record<string, string> = {
@@ -69,6 +74,9 @@ export function messagePourCause(cause: string, detail?: string | null): string 
   }
   if (cause === CAUSE_REFUS_MODELE) {
     return "Le modèle a décliné la demande.";
+  }
+  if (cause === CAUSE_REPONSE_COUPEE) {
+    return "Le modèle a raisonné trop longtemps : sa réponse a été coupée avant la fin.";
   }
 
   const baseResp = cause.startsWith("base_resp_") ? cause.slice(10) : null;

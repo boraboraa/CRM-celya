@@ -23,7 +23,27 @@ import type { AddressInfo } from "node:net";
 // Un faux MiniMax : il répond HTTP 200 même quand il refuse — c'est tout le
 // piège que le correctif doit attraper.
 let mode = "base_resp_1004";
-const serveur = http.createServer((req, res) => {
+let dernierCorps: { max_tokens?: number } = {};
+// La réflexion de MiniMax-M3 telle que relevée dans les logs du 28/10 —
+// accolades comprises : c'est ce qui trompait l'extraction du JSON.
+const REFLEXION =
+  "<think>We need respond operations only. List seems columns company | phone. " +
+  "Output like {ops: [...]} maybe {\"op\":\"secteur\"}.</think>\n";
+const serveur = http.createServer(async (req, res) => {
+  let corps = "";
+  for await (const morceau of req) corps += morceau;
+  try {
+    dernierCorps = JSON.parse(corps);
+  } catch {
+    dernierCorps = {};
+  }
+  const repondre = (content: string) =>
+    res.end(
+      JSON.stringify({
+        base_resp: { status_code: 0, status_msg: "success" },
+        choices: [{ message: { content } }],
+      })
+    );
   if (mode === "http_404") {
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("404 page not found");
@@ -39,12 +59,13 @@ const serveur = http.createServer((req, res) => {
       JSON.stringify({ base_resp: { status_code: 1008, status_msg: "insufficient balance" } })
     );
   } else if (mode === "ok") {
-    res.end(
-      JSON.stringify({
-        base_resp: { status_code: 0, status_msg: "success" },
-        choices: [{ message: { content: '{"ok":true}' } }],
-      })
-    );
+    repondre('{"ok":true}');
+  } else if (mode === "think") {
+    repondre(REFLEXION + '{"ok":true}');
+  } else if (mode === "think_coupe") {
+    repondre("<think>We need respond operations only. Maybe {\"op\": ... and then");
+  } else if (mode === "think_sans_json") {
+    repondre(REFLEXION + "Voici la réponse : d'accord.");
   } else {
     res.end(JSON.stringify({ choices: [{ message: { content: "pas du json" } }] }));
   }
@@ -59,9 +80,8 @@ process.env.MINIMAX_API_KEY = "cle-bidon-pour-le-test";
 process.env.MINIMAX_BASE_URL = base;
 process.env.MINIMAX_MODEL = "MiniMax-Text-01";
 
-const { chatJSON, aiAvailable, etatFournisseur, testerFournisseur } = await import(
-  "./provider.ts"
-);
+const { chatJSON, aiAvailable, etatFournisseur, testerFournisseur, retirerRaisonnement } =
+  await import("./provider.ts");
 const { messagePourCause } = await import("./causes.ts");
 
 const lignes: string[] = [];
@@ -135,6 +155,57 @@ res = await chatJSON({ system: "s", user: "u" });
 attendu("réponse valide → objet JSON", res?.ok === true, JSON.stringify(res));
 diag = await testerFournisseur();
 attendu("diagnostic → ok", diag.cause === "ok", diag.cause);
+
+// ---- 5bis. Un modèle qui raisonne (MiniMax-M3, 28/10) : la réflexion
+// précède le JSON et contient des accolades.
+mode = "think";
+lignes.length = 0;
+res = await chatJSON({ system: "s", user: "u", maxTokens: 1200 });
+attendu("réflexion puis JSON → l'objet JSON", res?.ok === true, JSON.stringify(res));
+attendu("aucune ligne [IA] quand la réflexion est retirée", lignes.length === 0, lignes.join(" | "));
+attendu(
+  "le budget de jetons porte la marge de réflexion",
+  (dernierCorps.max_tokens ?? 0) > 1200,
+  dernierCorps.max_tokens
+);
+diag = await testerFournisseur();
+attendu("diagnostic → ok malgré la réflexion", diag.cause === "ok", diag.cause);
+
+mode = "think_coupe";
+lignes.length = 0;
+res = await chatJSON({ system: "s", user: "u" });
+attendu(
+  "réflexion coupée → null + [IA] reponse_coupee",
+  res === null && lignes.some((l) => l.startsWith("[IA] reponse_coupee")),
+  lignes.join(" | ")
+);
+diag = await testerFournisseur();
+attendu(
+  "diagnostic → message « raisonné trop longtemps »",
+  diag.cause === "reponse_coupee" &&
+    messagePourCause(diag.cause, diag.detail).includes("raisonné trop longtemps"),
+  `${diag.cause} / ${messagePourCause(diag.cause, diag.detail)}`
+);
+
+// ---- 5ter. Le diagnostic n'accepte plus « une réponse quelconque » : le
+// 28/10 il disait « ok » pendant que tous les vrais appels échouaient.
+mode = "think_sans_json";
+diag = await testerFournisseur();
+attendu("réponse sans JSON → diagnostic json_invalide", diag.cause === "json_invalide", diag.cause);
+mode = "json_invalide";
+diag = await testerFournisseur();
+attendu("« pas du json » → diagnostic json_invalide", diag.cause === "json_invalide", diag.cause);
+
+// ---- 5quater. retirerRaisonnement, à l'unité.
+const r1 = retirerRaisonnement("<think>a {b}</think>\n{\"x\":1}");
+attendu("bloc fermé retiré", r1.texte === '{"x":1}' && !r1.coupe, JSON.stringify(r1));
+const r2 = retirerRaisonnement("<THINK>a</THINK><think>b</think>{}");
+attendu("plusieurs blocs, casse indifférente", r2.texte === "{}" && !r2.coupe, JSON.stringify(r2));
+const r3 = retirerRaisonnement("<think>jamais fini");
+attendu("bloc ouvert → vide et coupe", r3.texte === "" && r3.coupe, JSON.stringify(r3));
+const r4 = retirerRaisonnement('{"pas":"de réflexion"}');
+attendu("sans réflexion → tel quel", r4.texte === '{"pas":"de réflexion"}' && !r4.coupe, JSON.stringify(r4));
+mode = "ok";
 
 // ---- 6. Variable manquante (la recette : retirer MINIMAX_MODEL).
 delete process.env.MINIMAX_MODEL;

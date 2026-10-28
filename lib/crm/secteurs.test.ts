@@ -3,7 +3,7 @@
 // 031 contre `public.normaliser_secteur` : une seule vérité pour deux copies.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { SECTEURS, REGLES_SECTEUR, estSecteurFixe, normaliserSecteur } from "./secteurs.ts";
+import { SECTEURS, REGLES_SECTEUR, estSecteurFixe, normaliserSecteur, secteurDuNom } from "./secteurs.ts";
 
 let ok = 0;
 function cas(nom: string, f: () => void) {
@@ -37,6 +37,18 @@ cas("chaque règle vise un secteur de la liste, et chaque secteur sauf « Autre 
   const vises = new Set(REGLES_SECTEUR.map(([s]) => s));
   for (const s of vises) assert.ok(estSecteurFixe(s));
   for (const s of SECTEURS) if (s !== "Autre") assert.ok(vises.has(s), s);
+});
+
+cas("secteurDuNom : le métier que dit le nom, sinon RIEN (jamais « Autre »)", () => {
+  assert.equal(secteurDuNom("Garage du Midi Anderlecht"), "Garage / carrosserie");
+  assert.equal(secteurDuNom("Carrosserie Van Damme"), "Garage / carrosserie");
+  assert.equal(secteurDuNom("Pneus Express Wiels"), "Garage / carrosserie");
+  assert.equal(secteurDuNom("Auto-école Midi"), "Auto-école");
+  assert.equal(secteurDuNom("Cabinet dentaire Louise"), "Cabinet dentaire");
+  assert.equal(secteurDuNom("Delta Motors"), null);
+  assert.equal(secteurDuNom("Auto Clinic Anderlecht"), null);
+  assert.equal(secteurDuNom(""), null);
+  assert.equal(secteurDuNom(null), null);
 });
 
 cas("undefined vaut null", () => {

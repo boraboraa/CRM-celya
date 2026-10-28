@@ -5,6 +5,39 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 28 octobre 2026, après-midi — MiniMax-M3 raisonne
+
+La PR #21 est fusionnée (`main` = `2915fa9`), les **`032` et `033` sont
+appliquées** (033 : 100% MOTO clos `honore` / `essai`, une ligne au journal,
+vérifié en base), `MINIMAX_BASE_URL` est corrigée.
+
+Test en production de « Ma liste » (20 garages collés en format libre) : 20/20
+lues par le code. Mais **toute réponse du modèle échouait en `json_invalide`**
+(log Vercel : `[IA] json_invalide — <think>We need respond…`) : MiniMax-M3
+écrit sa RÉFLEXION dans `<think>…</think>` avant le JSON, accolades comprises,
+et `parseLooseJSON` prenait la première `{` de la réflexion. Toutes les
+fonctions IA étaient touchées (correction de « Ma liste », analyse des notes,
+confiance, tri des réponses, brief de Janet) — et **le diagnostic `/compte`
+disait « ok »**, parce qu'il ne vérifiait qu'une réponse non vide.
+
+Corrigé (branche `claude/minimax-think`, aucune migration) :
+`retirerRaisonnement` (`lib/ai/provider.ts`) retire la réflexion avant toute
+lecture, une réflexion coupée par la limite de jetons donne la cause
+**`reponse_coupee`** ; `MARGE_RAISONNEMENT` (1 500 jetons) s'ajoute au budget
+de chaque appel au format OpenAI (les jetons de réflexion comptent dans
+`max_tokens`) ; `testerFournisseur` exige désormais un **JSON lisible**
+(`{"ok":true}`), comme `chatJSON`. Testé contre le faux MiniMax
+(`test:ia` : réflexion + JSON, réflexion coupée, réflexion sans JSON).
+
+Et « Ma liste », sur le même collage : le secteur se lit dans le **nom**
+quand la ligne ne le dit pas (`secteurDuNom`, mêmes mots-clés que
+`normaliserSecteur`, mais jamais « Autre » : un nom muet ne donne rien) — ordre
+ligne › nom › secteur de la liste ; et le **contact** se lit dans la remarque
+quand elle nomme quelqu'un (`contactDesRemarques` → `lireRaccourcis`, qui
+apprend « le patron s'appelle Karim ») — la remarque reste entière dans « Ce
+qu'on sait », un contact déjà donné n'est jamais remplacé. L'écran de relecture
+gagne le champ **Contact** (il était importé mais invisible).
+
 ## État au 28 octobre 2026 — rien ne dépasse de son cadre
 
 Même branche, même PR, **un commit à part** : exigence de Bora avant la fusion,

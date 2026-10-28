@@ -51,6 +51,8 @@ export type Prospect = {
    */
   address: string | null;
   city: string | null;
+  /** La région (034) : la commune à Bruxelles, la province ailleurs — lib/crm/regions.ts. */
+  region: string | null;
   /**
    * NE JAMAIS s'en servir pour localiser une fiche : la colonne porte sa
    * valeur par défaut (« Belgique ») sur des fiches lyonnaises. C'est la ville

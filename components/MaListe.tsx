@@ -72,7 +72,7 @@ export function MaListe({
   const [ville, setVille] = useState("");
   const [pour, setPour] = useState(moi);
   const [etat, setEtat] = useState<EtatListe>(
-    etatInitial ?? { fiches: [], etats: [], recap: "", equipeIndisponible: false }
+    etatInitial ?? { fiches: [], etats: [], recap: "", equipeIndisponible: false, regions: [] }
   );
   const [aVerifier, setAVerifier] = useState<string[][]>([]);
   const [messages, setMessages] = useState<Message[]>([
@@ -179,7 +179,7 @@ export function MaListe({
         }. Vous pouvez coller une autre liste.`,
         ton: "ok",
       });
-      setEtat({ fiches: [], etats: [], recap: "", equipeIndisponible: false });
+      setEtat({ fiches: [], etats: [], recap: "", equipeIndisponible: false, regions: [] });
       setAVerifier([]);
     });
   }
@@ -203,7 +203,7 @@ export function MaListe({
         </div>
         <div className="min-w-0 flex-1 basis-32">
           <label className="label" htmlFor="ml-ville">
-            Ville
+            Commune
           </label>
           <input
             id="ml-ville"
@@ -335,14 +335,16 @@ export function MaListe({
                         aria-label={`Adresse, ligne ${i + 1}`}
                         value={f.address ?? ""}
                         onChange={(ev) => modifier(i, "address", ev.target.value)}
+                        onBlur={reverifier}
                         placeholder="Adresse"
                         className="input min-h-[44px] py-1.5 sm:col-span-2 lg:col-span-2"
                       />
                       <input
-                        aria-label={`Ville, ligne ${i + 1}`}
+                        aria-label={`Commune, ligne ${i + 1}`}
                         value={f.city ?? ""}
                         onChange={(ev) => modifier(i, "city", ev.target.value)}
-                        placeholder="Ville"
+                        onBlur={reverifier}
+                        placeholder="Commune"
                         className="input min-h-[44px] py-1.5"
                       />
                       <select
@@ -376,6 +378,17 @@ export function MaListe({
                         placeholder="Ce qu'on sait (vos remarques)"
                         className="input min-h-[44px] py-2.5 text-xs sm:col-span-2 lg:col-span-4"
                       />
+                      {/* La région que la base posera (034) — la commune à
+                          Bruxelles, la province ailleurs. Rien de lisible : on
+                          le dit, sans bloquer l'import. */}
+                      <p className="text-[11px] text-slate-400 sm:col-span-2 lg:col-span-4">
+                        Région :{" "}
+                        {etat.regions[i] ? (
+                          <span className="text-slate-200">{etat.regions[i]}</span>
+                        ) : (
+                          <span className="text-amber-200/90">à compléter (ajoutez la commune)</span>
+                        )}
+                      </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       {e && <span className={`chip ${BADGE[e.statut]}`}>{LIBELLE[e.statut]}</span>}

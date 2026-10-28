@@ -180,4 +180,34 @@ cas("« À faire » : les étoilées en tête de la zone, l'ordre de la zone con
   assert.deepEqual(etoileesDabord(zone, (r) => r.e).map((r) => r.id), [2, 4, 1, 3]);
 });
 
+// --- La région (034) ---------------------------------------------------------
+cas("région : une commune, un groupe ou « aucune » s'écrivent dans l'URL", () => {
+  assert.equal(hrefProspects({ region: "Ixelles" }), "/prospects?region=Ixelles");
+  assert.equal(hrefProspects({ region: "g:bruxelles" }), "/prospects?region=g%3Abruxelles");
+  assert.equal(hrefProspects({ region: "aucune" }), "/prospects?region=aucune");
+  assert.equal(hrefProspects({ region: "Namur", statut: "a_appeler" }), "/prospects?statut=a_appeler&region=Namur");
+});
+
+cas("région inconnue ou trafiquée : jamais recopiée dans une URL ni montrée", () => {
+  for (const r of ["Lyon", "g:paris", "g:", "constructor", "<script>", "ixelles"]) {
+    assert.equal(hrefProspects({ region: r }), "/prospects", r);
+    assert.deepEqual(filtresActifs({ region: r }, ETAPES), [], r);
+  }
+});
+
+cas("région : une puce retirable, qui garde les autres filtres", () => {
+  const a = filtresActifs({ region: "g:wallonie", statut: "contacte" }, ETAPES);
+  const r = a.find((f) => f.cle === "region")!;
+  assert.equal(r.label, "Toute la Wallonie");
+  assert.equal(r.retirer, "/prospects?statut=contacte");
+  assert.equal(filtresActifs({ region: "aucune" }, ETAPES)[0].label, "Région inconnue");
+  assert.equal(filtresActifs({ region: "Uccle" }, ETAPES)[0].label, "Uccle");
+});
+
+cas("tri « Commune » : dans l'URL, et en puce (en liste seulement)", () => {
+  assert.equal(hrefProspects({ tri: "commune" }), "/prospects?tri=commune");
+  assert.equal(filtresActifs({ tri: "commune" }, ETAPES)[0].label, "Tri : Commune");
+  assert.deepEqual(filtresActifs({ tri: "commune", vue: "colonnes" }, ETAPES), []);
+});
+
 console.log(`\n${ok} OK`);

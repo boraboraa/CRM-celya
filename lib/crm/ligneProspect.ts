@@ -12,6 +12,7 @@
 import { normalizeStatus } from "../constants.ts";
 import { ADRESSE_MAX } from "./maps.ts";
 import { normaliserSecteur } from "./secteurs.ts";
+import { estRegion } from "./regions.ts";
 
 export type NewProspectInput = {
   company_name?: string | null;
@@ -23,6 +24,11 @@ export type NewProspectInput = {
   /** Adresse libre OU lien Google Maps collé — stockée telle quelle. */
   address?: string | null;
   city?: string | null;
+  /**
+   * La région (034), choisie à la main — sinon null, et le trigger
+   * `prospects_lieu` la déduit de la commune et de l'adresse.
+   */
+  region?: string | null;
   status?: string | null;
   source?: string | null;
   value_estimate?: number | null;
@@ -43,6 +49,7 @@ export const CHAMPS_FORMULAIRE = [
   "sector",
   "address",
   "city",
+  "region",
   "status",
   "source",
   "value_estimate",
@@ -78,6 +85,7 @@ export function entreeFormulaire(lire: (cle: string) => unknown): NewProspectInp
     sector: str("sector"),
     address: str("address"),
     city: str("city"),
+    region: str("region"),
     status: str("status"),
     source: str("source"),
     value_estimate: num("value_estimate"),
@@ -115,6 +123,8 @@ export function ligneProspect(input: NewProspectInput, userId: string) {
     sector: normaliserSecteur(trimOrNull(input.sector, 80)),
     address: trimOrNull(input.address, ADRESSE_MAX),
     city: trimOrNull(input.city, 80),
+    // Une région hors liste (ou « automatique ») vaut null : la base déduit.
+    region: estRegion(input.region) ? input.region : null,
     status: normalizeStatus(trimOrNull(input.status)),
     source: trimOrNull(input.source),
     value_estimate:

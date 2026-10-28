@@ -7,6 +7,8 @@
  * reste la requête de la page (`filtreRecherche`, `.eq("status")`…) : ici, on
  * ne fait que lire et réécrire l'URL.
  */
+// Chemin RELATIF avec extension : le test s'exécute tel quel sous node.
+import { lireFiltreRegion, valeurFiltreRegion } from "./regions.ts";
 
 export type ParamsProspects = {
   q?: string;
@@ -15,6 +17,8 @@ export type ParamsProspects = {
   vue?: string;
   filtre?: string;
   perimetre?: string;
+  /** La région (034) : une région, `g:<groupe>`, ou `aucune` — lib/crm/regions.ts. */
+  region?: string;
 };
 
 /** Les raccourcis de filtre (boutons « Emails envoyés », « À débriefer »). */
@@ -34,6 +38,8 @@ export const TRIS = {
   relance: "Prochaine action",
   recent: "Activité récente",
   nom: "Nom",
+  // 28/10 : par commune (la ville), pour démarcher un quartier d'un coup.
+  commune: "Commune",
 } as const;
 export type Tri = keyof typeof TRIS;
 
@@ -100,12 +106,14 @@ export function hrefProspects(
   if (estVue(v.vue)) sp.set("vue", v.vue);
   if (estFiltre(v.filtre ?? undefined)) sp.set("filtre", v.filtre!);
   if (v.perimetre) sp.set("perimetre", v.perimetre);
+  const region = valeurFiltreRegion(v.region);
+  if (region) sp.set("region", region);
   const qs = sp.toString();
   return `/prospects${qs ? `?${qs}` : ""}`;
 }
 
 export type FiltreActif = {
-  cle: "q" | "statut" | "tri" | "filtre";
+  cle: "q" | "statut" | "region" | "tri" | "filtre";
   label: string;
   /** L'URL sans ce filtre — la croix de la puce. */
   retirer: string;
@@ -131,6 +139,10 @@ export function filtresActifs(
       retirer: hrefProspects(params, { statut: null }),
     });
   }
+  const region = lireFiltreRegion(params.region);
+  if (region) {
+    out.push({ cle: "region", label: region.label, retirer: hrefProspects(params, { region: null }) });
+  }
   if (estFiltre(params.filtre)) {
     out.push({
       cle: "filtre",
@@ -138,7 +150,7 @@ export function filtresActifs(
       retirer: hrefProspects(params, { filtre: null }),
     });
   }
-  if (params.vue !== "colonnes" && (params.tri === "relance" || params.tri === "nom" || params.tri === "recent")) {
+  if (params.vue !== "colonnes" && (params.tri === "relance" || params.tri === "nom" || params.tri === "recent" || params.tri === "commune")) {
     out.push({
       cle: "tri",
       label: `Tri : ${TRIS[params.tri]}`,

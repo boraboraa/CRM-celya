@@ -59,6 +59,7 @@
  * Migration absente (`PGRST205`) : chaque outil le dit, aucun ne plante.
  */
 
+import { lireFiltreRegion, REGIONS } from "@/lib/crm/regions";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -540,9 +541,15 @@ function register(server: McpServer) {
   // --- lister_prospects -----------------------------------------------------
   server.tool(
     "lister_prospects",
-    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Filtres : par étape, par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
+    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Filtres : par étape, par région (la commune à Bruxelles, la province ailleurs), par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
     {
       statut: z.enum(STATUS_ENUM).optional().describe("Filtrer sur une étape précise."),
+      region: z
+        .string()
+        .optional()
+        .describe(
+          "Filtrer sur une région : une des 19 communes de Bruxelles (« Ixelles », « Anderlecht »…), « Bruxelles (commune à préciser) », une province (« Namur », « Hainaut », « Brabant wallon »…), « Hors Belgique » ; ou un groupe « g:bruxelles », « g:wallonie », « g:flandre » ; ou « aucune » pour les fiches dont la région est inconnue."
+        ),
       a_relancer: z
         .boolean()
         .optional()
@@ -572,7 +579,7 @@ function register(server: McpServer) {
           admin
             .from("prospects")
             .select(
-              "id, company_name, contact_name, phone, email, status, next_action_at, next_action_kind, owner_id"
+              "id, company_name, contact_name, phone, email, city, region, status, next_action_at, next_action_kind, owner_id"
             ),
           viewer
         ),
@@ -583,6 +590,11 @@ function register(server: McpServer) {
         .limit(args.limite ?? 50);
 
       if (args.statut) q = q.eq("status", args.statut);
+      if (args.region) {
+        const fr = lireFiltreRegion(args.region);
+        if (!fr) return fail(`Région inconnue : « ${args.region} ». Valeurs possibles : ${REGIONS.join(", ")}, g:bruxelles, g:wallonie, g:flandre, aucune.`);
+        q = fr.type === "aucune" ? q.is("region", null) : q.in("region", fr.regions);
+      }
       if (args.a_relancer) {
         const { end } = todayBounds();
         q = q.not("next_action_at", "is", null).lte("next_action_at", end);
@@ -608,6 +620,8 @@ function register(server: McpServer) {
           societe: r.company_name,
           contact: r.contact_name,
           telephone: r.phone,
+          commune: r.city,
+          region: r.region,
           etape: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] ?? r.status,
           ...prochaineActionPourClaude(r.next_action_at, r.next_action_kind, r.status),
         }))
@@ -668,6 +682,7 @@ function register(server: McpServer) {
         secteur: p.sector,
         adresse: p.address,
         ville: p.city,
+        region: p.region,
         etape: STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status,
         source: p.source,
         valeur_estimee: p.value_estimate,
@@ -855,7 +870,10 @@ function register(server: McpServer) {
         .describe(
           "Adresse postale OU lien Google Maps collé — un seul champ, stocké tel quel. N'y mettez JAMAIS le pays : la ville suffit."
         ),
-      ville: z.string().optional(),
+      ville: z
+        .string()
+        .optional()
+        .describe("La commune (« Ixelles », « Éghezée », « 5000 Namur ») : la région — la commune à Bruxelles, la province ailleurs — s'en déduit en base."),
       statut: z.enum(STATUS_ENUM).optional().describe("Étape (défaut « a_appeler »)."),
       source: z.string().optional(),
       valeur_estimee: z.number().optional().describe("Valeur estimée en euros."),

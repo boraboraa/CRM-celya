@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { lieuAffiche } from "@/lib/crm/regions";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
@@ -380,7 +381,9 @@ export default async function ProspectDetailPage({
                   {prospect.email}
                 </a>
               )}
-              {prospect.city && <span>{prospect.city}</span>}
+              {lieuAffiche(prospect.city, prospect.region) && (
+                <span>{lieuAffiche(prospect.city, prospect.region)}</span>
+              )}
             </p>
 
             {/* « Ce qu'on sait » — la recherche faite AVANT le premier appel

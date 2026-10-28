@@ -7,8 +7,8 @@ import { TRIS, depuisValeurEtape } from "@/lib/crm/filtresProspects";
 /**
  * La ligne de filtres de /prospects (27/10, au soir) : la recherche, puis UNE
  * ligne de listes déroulantes — QUI (le périmètre, pour qui peut élargir) ·
- * ÉTAPE (avec les raccourcis « À débriefer » et « Emails envoyés ») · TRI
- * (en liste). Plus de rangée de puces d'étape.
+ * ÉTAPE (avec les raccourcis « À débriefer » et « Emails envoyés ») · RÉGION
+ * (28/10 — la commune à Bruxelles, la province ailleurs) · TRI (en liste). Plus de rangée de puces d'étape.
  *
  * Recherche, étape et tri — À LA FRAPPE (18/10). Il fallait
  * taper puis cliquer « Filtrer » : la liste ne réagissait à rien.
@@ -25,6 +25,8 @@ export function FiltresProspects({
   tri,
   etapes,
   raccourcis = [],
+  region = "",
+  regions = [],
   qui = null,
   avecTri,
   seulementRecherche = false,
@@ -37,6 +39,10 @@ export function FiltresProspects({
   etapes: [string, string][];
   /** [raccourci, libellé] — « À débriefer », « Emails envoyés ». */
   raccourcis?: [string, string][];
+  /** La valeur du menu « Région » (`?region=`), vide : toutes. */
+  region?: string;
+  /** [groupe, [valeur, libellé][]][] — optionsFiltreRegion() ; vide : pas de menu. */
+  regions?: [string, [string, string][]][];
   /** Le périmètre : des liens tout faits (optionsPerimetre) — null : pas de menu. */
   qui?: { href: string; label: string; actif: boolean }[] | null;
   avecTri: boolean;
@@ -154,6 +160,26 @@ export function FiltresProspects({
           </optgroup>
         )}
       </select>
+
+      {regions.length > 0 && (
+        <select
+          value={region}
+          onChange={(e) => aller({ region: e.target.value || null })}
+          aria-label="Région"
+          className={`${menu} max-w-[14rem]`}
+        >
+          <option value="">Toutes les régions</option>
+          {regions.map(([groupe, options]) => (
+            <optgroup key={groupe} label={groupe}>
+              {options.map(([v, label]) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      )}
 
       {avecTri && (
         <select

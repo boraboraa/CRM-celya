@@ -5,6 +5,16 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 28 octobre 2026, au soir — la commune et la région
+
+La **`034` est APPLIQUÉE** (28/10, demande de Bora : « savoir que ce garage
+appartient à cette région, pour trier ») — recette `--apres` : **17 OK,
+0 faute**. 73 fiches sur 126 ont reçu une région ; seule Lyon n'en a pas (rien
+de lisible). Le code (filtres, formulaire, ajout rapide, « Ma liste », MCP) est
+sur la branche `claude/commune-region`, une PR — voir « La commune et la
+région ». La PR #23 (badge « À débriefer » qui chevauchait la colonne
+Relance) attend toujours la fusion.
+
 ## État au 28 octobre 2026, après-midi — MiniMax-M3 raisonne
 
 La PR #21 est fusionnée (`main` = `2915fa9`), les **`032` et `033` sont
@@ -1469,6 +1479,50 @@ nom écrasé à zéro ; **« Ce qu'on sait » jamais tronqué dans la liste** �
 `display: -webkit-box` du second ; le résumé de la carte d'objectifs coincé à
 côté du titre sur téléphone (sous le titre, ou caché quand les barres disent
 la même chose).
+
+### La commune et la région (migration `034`, 28 octobre — appliquée)
+
+Décision de Bora : **« Bruxelles détaillé »** — à Bruxelles, la région EST la
+commune (les 19, plus « Bruxelles (commune à préciser) » pour un « Bruxelles »
+sans code postal) ; ailleurs, la **province** ; « Hors Belgique » pour un code
+à cinq chiffres. 31 valeurs, liste fermée (`prospects_region_connue`).
+
+- **La règle vit en SQL, UNE fois** : `public.lieu_de(ville, adresse, nom)` —
+  code postal (dans la ville, sinon dans l'adresse suivi d'une localité) →
+  alias (`lieux_alias` : les 19 communes FR/NL et leurs sections, Cureghem,
+  exonymes Anvers/Luik/Bergen…) → localités (`localites_be`, 2 757 lignes du
+  jeu public bpost « zipcode-belgium », province lue sur le code postal ;
+  `scripts/generer-localites.py` les injecte, avec les accents des majuscules
+  corrigés) → commune bruxelloise dans le NOM de la société s'il n'y a ni
+  ville ni adresse. Le trigger `prospects_lieu` (BEFORE INSERT / UPDATE OF
+  city, address, region) range la commune (« woluwe saint pierre » →
+  « Woluwe-Saint-Pierre ») et déduit la région — **sauf si la même écriture la
+  fixe à la main**. Tous les écrivains (écran, MCP, Janet, SQL) y passent.
+- **TypeScript ne porte que la LISTE** (`lib/crm/regions.ts`, = `regions_valides()`,
+  vérifié par la recette), le filtre (`lireFiltreRegion` : une région,
+  `g:bruxelles|wallonie|flandre`, ou `aucune`) et l'affichage (`lieuAffiche` :
+  « Éghezée (Namur) », « Laeken (Bruxelles-Ville) »).
+- **Écrans** : menu « Région » dans la ligne de filtres et dans la feuille
+  « Filtres » du téléphone (puce retirable), liste ET pipeline ; tri
+  « Commune » ; la commune + région sur la ligne et en tête de fiche ;
+  formulaire : « Commune » + « Région » (« Automatique » → `lieu_de` en rpc
+  dans `updateProspectAction`) ; ajout rapide : champ « Commune » ; « Ma
+  liste » : « Commune » et, sous chaque fiche, la région que la base posera
+  (rpc `lieux_de`, même règle). MCP : `lister_prospects(region)`, `commune` et
+  `region` dans ses lignes, `region` dans `obtenir_prospect`.
+- **La reprise** : 73 fiches rangées, `updated_at` préservé (GUC
+  `celya.reprise_lieu`). La copie d'avant est dans **`reprise_034`** (RLS
+  fermée) — à **supprimer** une fois validée par Bora. Défaire :
+  `update prospects p set city = r.city, region = null from reprise_034 r where r.id = p.id;`
+- ⚠ **La version en ligne diffère du fichier** : appliquée sans commentaires,
+  et le bloc des localités chargé à part par pg_net (le littéral de 41 Ko
+  passait mal par l'outil) — **md5 du bloc vérifié** avant la suite
+  (`90ba9930…`, 2 757 lignes). Logique identique.
+- Tests : `test:regions` (nouveau), `test:filtres` étendu ; recette
+  `supabase/recettes/034_assembler.sh` (`--apres` contre la base appliquée),
+  42 cas `lib/crm/lieux.cas.json`. Contrôle des cadres sur page de
+  démonstration locale, 1440 → 360 px : 0 faute (le tri passait en segments
+  et débordait de 27 px à 360 : il est en puces).
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
@@ -3070,7 +3124,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
 `npm run test:relance`,
-`npm run test:secteurs`, `npm run test:doublons`, `npm run test:ma-liste`,
+`npm run test:secteurs`, `npm run test:regions`, `npm run test:doublons`, `npm run test:ma-liste`,
 `npm run test:objectifs`, `npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, et

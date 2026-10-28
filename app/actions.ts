@@ -26,6 +26,7 @@ import { estDoublonEquipe, phraseDoublon } from "@/lib/crm/doublons";
 import { ADRESSE_MAX } from "@/lib/crm/maps";
 import { CONTACT_MAX } from "@/lib/crm/contactPropose";
 import { normaliserSecteur } from "@/lib/crm/secteurs";
+import { estRegion } from "@/lib/crm/regions";
 import { DEBUT_SALES_TROPHY, lundiDe } from "@/lib/crm/compteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
@@ -132,7 +133,7 @@ export async function createProspectAction(fd: FormData) {
  * on renvoie quand même vers la fiche, où le geste se refait.
  */
 export async function ajoutRapideAction(input: {
-  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address" | "sector", string>>;
+  champs: Partial<Record<"company_name" | "contact_name" | "phone" | "address" | "city" | "sector", string>>;
   echange: Omit<SaveExchangeInput, "prospectId"> | null;
   /** Admin seulement : créer malgré une fiche déjà suivie dans l'équipe. */
   forcer?: boolean;
@@ -279,6 +280,26 @@ export async function updateProspectAction(fd: FormData) {
     Object.assign(patch, manualStatusPatch(status));
   } else {
     patch.status = status;
+  }
+
+  // La région (034) : choisie à la main, ou « Automatique » — alors la base
+  // la déduit de la commune et de l'adresse (public.lieu_de, la règle écrite
+  // une fois). Sans le champ (ancien formulaire), on n'y touche pas.
+  if (fd.has("region")) {
+    const choisie = str(fd, "region");
+    if (estRegion(choisie)) {
+      patch.region = choisie;
+    } else {
+      const sansLieu = !patch.city && !patch.address;
+      const { data: lieu } = await supabase
+        .rpc("lieu_de", {
+          p_ville: patch.city as string | null,
+          p_adresse: patch.address as string | null,
+          p_nom: sansLieu ? (patch.company_name as string) : null,
+        })
+        .maybeSingle();
+      patch.region = (lieu as { region: string | null } | null)?.region ?? null;
+    }
   }
 
   const { error } = await supabase.from("prospects").update(patch).eq("id", id);

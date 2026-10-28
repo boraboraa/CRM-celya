@@ -1,5 +1,6 @@
 "use client";
 
+import { lieuAffiche } from "@/lib/crm/regions";
 import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { attribuerProspectsAction, moveProspectAction } from "@/app/actions";
@@ -26,6 +27,8 @@ export type LigneListe = {
   email: string | null;
   phone: string | null;
   city: string | null;
+  /** La région (034) — la commune à Bruxelles, la province ailleurs. */
+  region: string | null;
   status: ProspectStatus;
   confidence_level: ConfidenceLevel | null;
   confidence_reason: string | null;
@@ -181,7 +184,7 @@ export function ListeProspects({
         {vue.map((p) => {
           const tel = lienTel(p.phone);
           const noteOuverte = ouvertes.has(p.id);
-          const qui = [p.contact_name, p.city].filter(Boolean).join(" · ") || p.email || "";
+          const qui = [p.contact_name, lieuAffiche(p.city, p.region)].filter(Boolean).join(" · ") || p.email || "";
           return (
             <li
               key={p.id}

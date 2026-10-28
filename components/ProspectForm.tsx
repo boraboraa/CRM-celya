@@ -1,5 +1,6 @@
 import { AdresseField } from "@/components/AdresseField";
 import { SECTEURS, estSecteurFixe } from "@/lib/crm/secteurs";
+import { GROUPES_REGION, libelleRegionCourt } from "@/lib/crm/regions";
 import {
   STATUS_ORDER,
   STATUS_LABEL,
@@ -161,15 +162,41 @@ export function ProspectForm({
 
         <div>
           <label className="label" htmlFor="city">
-            Ville
+            Commune
           </label>
           <input
             id="city"
             name="city"
             defaultValue={prospect?.city ?? ""}
             className={cls("city")}
-            placeholder="Bruxelles"
+            placeholder="Ixelles, 1050, Namur…"
           />
+        </div>
+
+        {/* La région (034) : la commune à Bruxelles, la province ailleurs —
+            déduite de la commune et de l'adresse. On ne la choisit à la main
+            que si la déduction se trompe. */}
+        <div>
+          <label className="label" htmlFor="region">
+            Région
+          </label>
+          <select
+            id="region"
+            name="region"
+            defaultValue={prospect?.region ?? ""}
+            className={cls("region")}
+          >
+            <option value="">Automatique (selon la commune)</option>
+            {GROUPES_REGION.map((g) => (
+              <optgroup key={g.cle} label={g.label}>
+                {g.regions.map((r) => (
+                  <option key={r} value={r}>
+                    {libelleRegionCourt(r)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
         </div>
 
         <div>

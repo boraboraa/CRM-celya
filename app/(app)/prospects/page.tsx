@@ -9,6 +9,7 @@ import { filtreRecherche } from "@/lib/crm/recherche";
 import { type BoardProspect } from "@/components/PipelineBoard";
 import { STATUS_ORDER, normalizeStatus } from "@/lib/constants";
 import { ordonnerProspects } from "@/lib/crm/ordreProspects";
+import { lireFiltreRegion } from "@/lib/crm/regions";
 import { todayBounds } from "@/lib/time";
 import { avecRepliColonne } from "@/lib/crm/tolerance";
 import {
@@ -36,6 +37,7 @@ type Search = {
   vue?: string;
   filtre?: string;
   perimetre?: string;
+  region?: string;
 };
 
 /**
@@ -82,12 +84,15 @@ export default async function ProspectsPage({
   // « Priorité » (défaut) : la base trie par prochaine action, la page range
   // ensuite les étoilées et le dû en tête (en mémoire — PostgREST ne trie pas
   // sur une expression). Les deux bornes du jour viennent de lib/time.
-  const sort = tri && ["relance", "recent", "nom"].includes(tri) ? tri : "priorite";
+  const sort = tri && ["relance", "recent", "nom", "commune"].includes(tri) ? tri : "priorite";
+  // La région (034) : une région, un groupe (« Tout Bruxelles »), ou
+  // « Région inconnue » — poussée en SQL, comme l'étape.
+  const filtreRegion = lireFiltreRegion(params.region);
 
   // `starred_at` (031) : nommée seulement si la base la connaît — voir
   // lib/crm/tolerance.ts. La requête est donc FABRIQUÉE, pas construite une fois.
   const fabriquer = (avecEtoile: boolean) => {
-  const colonnes: string = `id, company_name, contact_name, email, phone, city, status, notes, ${avecEtoile ? "starred_at, " : ""}confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name, email)`;
+  const colonnes: string = `id, company_name, contact_name, email, phone, city, region, status, notes, ${avecEtoile ? "starred_at, " : ""}confidence_level, confidence_reason, confidence_locked, next_action_at, next_action_kind, last_contact_at, owner_id, crm_users!prospects_owner_id_fkey(full_name, email)`;
   let query = filtrerProspects(supabase.from("prospects").select(colonnes), perimetre, viewer);
 
   // La recherche — la même règle que la recherche globale de l'en-tête
@@ -107,11 +112,19 @@ export default async function ProspectsPage({
   if (statutFilter) {
     query = query.eq("status", statutFilter);
   }
+  if (filtreRegion?.type === "aucune") query = query.is("region", null);
+  else if (filtreRegion) query = query.in("region", filtreRegion.regions);
 
   if (sort === "relance" || sort === "priorite") {
     query = query.order("next_action_at", { ascending: true, nullsFirst: false });
   } else if (sort === "nom") {
     query = query.order("company_name", { ascending: true });
+  } else if (sort === "commune") {
+    // Par commune, puis par nom : un quartier se démarche d'un coup. Les
+    // fiches sans commune à la fin.
+    query = query
+      .order("city", { ascending: true, nullsFirst: false })
+      .order("company_name", { ascending: true });
   } else {
     query = query.order("updated_at", { ascending: false });
   }
@@ -197,6 +210,7 @@ export default async function ProspectsPage({
     email: string | null;
     phone: string | null;
     city: string | null;
+    region: string | null;
     status: string;
     confidence_level: ConfidenceLevel | null;
     confidence_reason: string | null;
@@ -269,6 +283,7 @@ export default async function ProspectsPage({
       email: p.email,
       phone: p.phone,
       city: p.city,
+      region: p.region,
       status: p.status,
       confidence_level: p.confidence_level,
       confidence_reason: p.confidence_reason,

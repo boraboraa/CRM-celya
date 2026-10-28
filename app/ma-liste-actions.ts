@@ -56,19 +56,48 @@ export type EtatListe = {
   recap: string;
   /** La vérification d'équipe n'a pas pu se faire (031 absente, panne). */
   equipeIndisponible: boolean;
+  /**
+   * La région que la base déduira à l'import, par fiche (034, `lieux_de` —
+   * la même règle que le trigger) : la commune à Bruxelles, la province
+   * ailleurs. null : rien de lisible (à compléter après).
+   */
+  regions: (string | null)[];
 };
+
+/** La région de chaque fiche, telle que le trigger la posera. Panne : rien, sans erreur. */
+async function regionsDe(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  fiches: FicheCollee[]
+): Promise<(string | null)[]> {
+  const vides = fiches.map(() => null);
+  if (fiches.length === 0) return vides;
+  const { data, error } = await supabase.rpc("lieux_de", {
+    p_villes: fiches.map((f) => f.city ?? null),
+    p_adresses: fiches.map((f) => f.address ?? null),
+    p_noms: fiches.map((f) => f.company_name ?? null),
+  });
+  if (error || !Array.isArray(data)) return vides;
+  const out: (string | null)[] = [...vides];
+  for (const r of data as { i: number; region: string | null }[]) {
+    if (r.i >= 1 && r.i <= out.length) out[r.i - 1] = r.region ?? null;
+  }
+  return out;
+}
 
 async function verifier(
   supabase: Awaited<ReturnType<typeof createClient>>,
   fiches: FicheCollee[]
 ): Promise<EtatListe> {
-  const { doublons, indisponible } = await doublonsEquipe(
-    supabase,
-    fiches.map((f) => ({ telephone: f.phone ?? f.phone_lu, societe: f.company_name }))
-  );
+  const [{ doublons, indisponible }, regions] = await Promise.all([
+    doublonsEquipe(
+      supabase,
+      fiches.map((f) => ({ telephone: f.phone ?? f.phone_lu, societe: f.company_name }))
+    ),
+    regionsDe(supabase, fiches),
+  ]);
   const noms = await nomsDesProprietaires(supabase, doublons.map((d) => d.proprietaire));
   const etats = etatsDesFiches(fiches, doublons, (id) => noms.get(id) ?? null);
-  return { fiches, etats, recap: recapitulatif(etats), equipeIndisponible: indisponible };
+  return { fiches, etats, recap: recapitulatif(etats), equipeIndisponible: indisponible, regions };
 }
 
 /**

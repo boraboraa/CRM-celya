@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Icone } from "@/components/ui";
 import { FeuilleBas } from "@/components/FeuilleBas";
 import { ListeOptionsPerimetre } from "@/components/PucePerimetre";
@@ -9,6 +10,8 @@ import { ListeOptionsPerimetre } from "@/components/PucePerimetre";
 /** Un choix de la feuille : un lien déjà construit par la page (des chaînes). */
 export type LienFiltre = { href: string; label: string; actif: boolean };
 type OptionPerimetre = LienFiltre & { personne: boolean };
+/** Le menu « Région » : des liens rangés par groupe (31 choix : un menu, pas des puces). */
+export type MenuRegion = { tous: LienFiltre; groupes: [string, LienFiltre[]][] };
 
 /**
  * /prospects sur téléphone (19/10) : la recherche reste à l'écran, TOUT le
@@ -27,6 +30,7 @@ export function FeuilleFiltres({
   etapes,
   tris,
   raccourcis,
+  regions = null,
 }: {
   nbActifs: number;
   vues: LienFiltre[];
@@ -35,7 +39,9 @@ export function FeuilleFiltres({
   /** null en colonnes (on n'y trie pas). */
   tris: LienFiltre[] | null;
   raccourcis: LienFiltre[];
+  regions?: MenuRegion | null;
 }) {
+  const router = useRouter();
   const [ouvert, setOuvert] = useState(false);
   const fermer = () => setOuvert(false);
   return (
@@ -77,9 +83,38 @@ export function FeuilleFiltres({
           <Groupe titre="Étape">
             <Puces liens={etapes} onChoisir={fermer} />
           </Groupe>
+          {regions && (
+            <Groupe titre="Région">
+              <select
+                aria-label="Région"
+                className="input min-h-[44px]"
+                value={
+                  [regions.tous, ...regions.groupes.flatMap(([, l]) => l)].find((l) => l.actif)?.href ??
+                  regions.tous.href
+                }
+                onChange={(e) => {
+                  fermer();
+                  router.push(e.target.value, { scroll: false });
+                }}
+              >
+                <option value={regions.tous.href}>{regions.tous.label}</option>
+                {regions.groupes.map(([groupe, liens]) => (
+                  <optgroup key={groupe} label={groupe}>
+                    {liens.map((l) => (
+                      <option key={l.href} value={l.href}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </Groupe>
+          )}
           {tris && (
             <Groupe titre="Trier par">
-              <Segments liens={tris} onChoisir={fermer} />
+              {/* Cinq tris depuis « Commune » (28/10) : des puces qui passent
+                  à la ligne — une rangée de segments débordait à 360 px. */}
+              <Puces liens={tris} onChoisir={fermer} />
             </Groupe>
           )}
         </div>

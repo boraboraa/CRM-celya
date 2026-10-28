@@ -40,6 +40,7 @@ export function AjoutRapide() {
   const [contact, setContact] = useState("");
   const [telephone, setTelephone] = useState("");
   const [secteur, setSecteur] = useState("");
+  const [commune, setCommune] = useState("");
   /** « Déjà suivie dans l'équipe » (031) — la phrase, sans aucun nom pour un commercial. */
   const [equipe, setEquipe] = useState<{ phrase: string | null; peutForcer: boolean }>({
     phrase: null,
@@ -125,6 +126,7 @@ export function AjoutRapide() {
     setContact("");
     setTelephone("");
     setSecteur("");
+    setCommune("");
     setEquipe({ phrase: null, peutForcer: false });
     setPosition(null);
     setTexte("");
@@ -159,6 +161,8 @@ export function AjoutRapide() {
           contact_name: contact,
           phone: telephone,
           address: position ?? "",
+          // La commune (034) : la région s'en déduit en base.
+          city: commune,
           sector: secteur,
         },
         echange: lecture.echange,
@@ -294,23 +298,40 @@ export function AjoutRapide() {
           </div>
         </div>
 
-        <div>
-          <label className="label" htmlFor="ar-secteur">
-            Secteur <span className="normal-case tracking-normal text-slate-500">(facultatif)</span>
-          </label>
-          <select
-            id="ar-secteur"
-            value={secteur}
-            onChange={(e) => setSecteur(e.target.value)}
-            className="input min-h-[48px]"
-          >
-            <option value="">—</option>
-            {SECTEURS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="label" htmlFor="ar-commune">
+              Commune
+            </label>
+            <input
+              id="ar-commune"
+              value={commune}
+              onChange={(e) => setCommune(e.target.value)}
+              autoCapitalize="words"
+              autoComplete="address-level2"
+              enterKeyHint="next"
+              className="input min-h-[48px]"
+              placeholder="Ixelles"
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="ar-secteur">
+              Secteur
+            </label>
+            <select
+              id="ar-secteur"
+              value={secteur}
+              onChange={(e) => setSecteur(e.target.value)}
+              className="input min-h-[48px]"
+            >
+              <option value="">—</option>
+              {SECTEURS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* La position — un point, pas une adresse : on le dit. */}

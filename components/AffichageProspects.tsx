@@ -16,6 +16,7 @@ import {
   type ParamsProspects,
   type Vue,
 } from "@/lib/crm/filtresProspects";
+import { optionsFiltreRegion, valeurFiltreRegion } from "@/lib/crm/regions";
 
 /**
  * L'écran /prospects, sans ses lectures (27/10, au soir) : la page charge, ce
@@ -72,6 +73,15 @@ export function AffichageProspects({
   ];
   const etapes: [string, string][] = STATUS_ORDER.map((st) => [st, STATUS_LABEL[st]]);
   const raccourcis = Object.entries(FILTRES_RAPIDES) as [string, string][];
+  // La région (034) : le même jeu d'options, en menu sur les deux écrans.
+  const regions = optionsFiltreRegion();
+  const regionActive = valeurFiltreRegion(params.region) ?? "";
+  const menuRegion = {
+    tous: lien({ region: null }, "Toutes les régions", !regionActive),
+    groupes: regions.map(
+      ([g, opts]) => [g, opts.map(([v, l]) => lien({ region: v }, l, regionActive === v))] as [string, ReturnType<typeof lien>[]]
+    ),
+  };
   const nbFiches = `${total} fiche${total > 1 ? "s" : ""}`;
 
   return (
@@ -122,6 +132,7 @@ export function AffichageProspects({
               lien({ filtre: params.filtre === f ? null : f }, FILTRES_RAPIDES[f], params.filtre === f)
             )}
             etapes={etapesLiens}
+            regions={menuRegion}
             tris={
               vue === "liste"
                 ? (Object.keys(TRIS) as (keyof typeof TRIS)[]).map((t) =>
@@ -161,6 +172,8 @@ export function AffichageProspects({
           tri={params.tri ?? ""}
           etapes={etapes}
           raccourcis={raccourcis}
+          region={regionActive}
+          regions={regions}
           qui={qui}
           avecTri={vue === "liste"}
         />

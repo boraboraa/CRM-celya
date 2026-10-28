@@ -230,7 +230,15 @@ verifie("les remarques vont dans Ce qu'on sait, jamais dans les champs", r.fiche
   ["Garage Dupont", "+32 470 12 34 56", "rappeler après 14h"],
   ["Kiné Centre Louise", "+32 2 538 11 22", "ont déjà un logiciel, à creuser\nNB : le gérant s'appelle Marc"],
 ]);
-verifie("aucun contact deviné à partir d'une remarque", r.fiches.map((f) => f.contact_name), [null, null, null]);
+// 28/10 (Bora) : le nom de la personne, quand la remarque le DONNE (« le
+// gérant s'appelle Marc »), remplit aussi le champ contact — la remarque, elle,
+// reste entière dans « Ce qu'on sait » (vérifié juste au-dessus). Rien n'est
+// deviné d'une remarque qui ne nomme personne.
+verifie("le contact n'est lu que d'une remarque qui nomme quelqu'un", r.fiches.map((f) => f.contact_name), [
+  null,
+  null,
+  "Marc (gérant)",
+]);
 
 // --- 6. Les formats de numéros ----------------------------------------------
 console.log("\n— 6. formats de numéros —");
@@ -361,7 +369,9 @@ const v = validerCorrectionsModele(
 );
 verifie("modèle : les opérations valides seulement, rangées comme le reste", v.fiches.map((f) => [f.company_name, f.sector, f.phone]), [
   ["A Garage", "Cabinet dentaire", "+32 470 11 22 33"],
-  ["C Garage", null, "+32 470 55 66 77"],
+  // « Garage » dans le nom range la fiche (28/10) ; la 1, corrigée par le
+  // modèle, garde ce qu'on lui a demandé.
+  ["C Garage", "Garage / carrosserie", "+32 470 55 66 77"],
 ]);
 verifie("modèle : un champ hors liste blanche n'est jamais écrit", v.fiches.some((f) => "owner_id" in f), false);
 
@@ -411,6 +421,65 @@ console.log("\n— l'adresse du tableau, jusqu'à l'import —");
   verifie("villeDeLAdresse : France (5 chiffres), rien de lisible → null",
     [villeDeLAdresse("12 cours Gambetta, 69007 Lyon"), villeDeLAdresse("Chaussée de Louvain 5"), villeDeLAdresse(null)],
     ["Lyon", null, null]);
+}
+
+// --- Le collage de garages du 28/10 (production) ----------------------------
+// Ce que ce test retient du premier vrai collage : le secteur restait vide
+// alors que chaque nom disait « Garage » / « Carrosserie », et le nom de la
+// personne restait enfoui dans la remarque.
+console.log("— garages du 28/10 : secteur par le nom, contact par la remarque —");
+{
+  const g = lireDeterministe(
+    `Voilà ma liste pour demain, quartier Anderlecht / Forest :
+
+1. Garage du Midi Anderlecht — 02 520 11 22 — le patron s'appelle Karim, passer avant 10h
+2. Carrosserie Van Damme : 0475 12 34 56
+Auto Clinic Anderlecht 0478 65 43 21
+Garage Veeweyde, 02 524 10 10, demander Mme Peeters
+Pneus & Jantes Industrie 0471 23 45 67
+Garage Wayez 02 522 66 77 - dit qu'ils ont trop d'appels manqués (avis Google)
+Cabinet dentaire Louise 02 640 11 11
+la gérante c'est Sophie Martin`,
+    SANS
+  );
+  verifie(
+    "secteur lu dans le nom ; rien quand le nom ne le dit pas",
+    g.fiches.map((f) => f.sector),
+    [
+      "Garage / carrosserie",
+      "Garage / carrosserie",
+      null,
+      "Garage / carrosserie",
+      "Garage / carrosserie",
+      "Garage / carrosserie",
+      "Cabinet dentaire",
+    ]
+  );
+  verifie(
+    "contact lu dans la remarque (même ligne ou ligne suivante), sinon vide",
+    g.fiches.map((f) => f.contact_name),
+    ["Karim (patron)", null, null, "Mme Peeters", null, null, "Sophie Martin (gérante)"]
+  );
+  verifie(
+    "la remarque reste entière dans « Ce qu'on sait »",
+    g.fiches[0].notes,
+    "le patron s'appelle Karim, passer avant 10h"
+  );
+  const avecDefaut = lireDeterministe("Auto Clinic Anderlecht 0478 65 43 21\nCarrosserie Bempt 02 376 54 32", {
+    secteur: "Kiné",
+    ville: null,
+  });
+  verifie(
+    "le nom l'emporte sur le secteur de la liste ; le secteur de la liste comble le reste",
+    avecDefaut.fiches.map((f) => f.sector),
+    ["Kiné / paramédical", "Garage / carrosserie"]
+  );
+  const dit = lireDeterministe("| Nom | Tel | Secteur | Contact |\n|---|---|---|---|\n| Garage X | 0470 11 22 33 | Vétérinaire | Jean |", SANS);
+  verifie(
+    "ce que la ligne DIT n'est jamais remplacé (secteur, contact)",
+    [dit.fiches[0].sector, dit.fiches[0].contact_name],
+    ["Vétérinaire", "Jean"]
+  );
 }
 
 serveur.close();

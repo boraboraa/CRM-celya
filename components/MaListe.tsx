@@ -358,6 +358,14 @@ export function MaListe({
                           </option>
                         ))}
                       </select>
+                      <input
+                        aria-label={`Contact, ligne ${i + 1}`}
+                        value={f.contact_name ?? ""}
+                        onChange={(ev) => modifier(i, "contact_name", ev.target.value)}
+                        placeholder="Contact (la personne à demander)"
+                        title={f.contact_name ?? undefined}
+                        className="input min-h-[44px] py-1.5 sm:col-span-2 lg:col-span-2"
+                      />
                       {/* Un champ qui GRANDIT : la remarque se lit en entier,
                           au lieu d'être coupée au bord d'un champ d'une ligne. */}
                       <ChampExtensible

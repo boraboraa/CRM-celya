@@ -403,12 +403,16 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
 
   // a. « le gérant c'est Marc »
   {
-    const re = new RegExp(`\\b(?:le\\s+|la\\s+|l'\\s*)?(${FONCTIONS})\\s+(c\\s*'?\\s*est|est)\\b`, "g");
+    const re = new RegExp(
+      `\\b(?:le\\s+|la\\s+|l'\\s*)?(${FONCTIONS})\\s+(c\\s*'?\\s*est|s\\s*'?\\s*appelle|est)\\b`,
+      "g"
+    );
     const m = re.exec(norm);
     if (m) {
-      // « c'est Marc » se dicte en minuscules ; « est » seul ne précède un
-      // nom qu'en MAJUSCULE (« la gérante est absente » n'est pas un nom).
-      const cEst = m[2].startsWith("c");
+      // « c'est Marc » et « s'appelle Karim » (28/10, « Ma liste ») se dictent
+      // en minuscules ; « est » seul ne précède un nom qu'en MAJUSCULE (« la
+      // gérante est absente » n'est pas un nom).
+      const cEst = m[2].startsWith("c") || m[2].startsWith("s");
       const c = litCivilite(m.index + m[0].length) ?? litNomApres(m.index + m[0].length, !cEst);
       if (c && !estSociete(c.valeur)) {
         contact = c;

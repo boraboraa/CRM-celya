@@ -30,12 +30,40 @@ import {
   CAUSE_CONFIG_ABSENTE,
   CAUSE_JSON_INVALIDE,
   CAUSE_REFUS_MODELE,
+  CAUSE_REPONSE_COUPEE,
   CAUSE_REPONSE_VIDE,
   CAUSE_RESEAU,
   CAUSE_TIMEOUT,
 } from "./causes.ts";
 
 const TIMEOUT_MS = 30000;
+
+/**
+ * Les modèles qui « raisonnent » (MiniMax-M3, 28/10) écrivent leur réflexion
+ * AVANT la réponse, dans `<think>…</think>`, et ces jetons comptent dans
+ * `max_tokens`. Sans marge, le budget prévu pour le JSON part dans la
+ * réflexion et la réponse arrive coupée. La marge s'ajoute au budget de
+ * chaque appel au format OpenAI ; elle ne change rien pour un modèle qui ne
+ * raisonne pas (on ne paie que les jetons produits).
+ */
+const MARGE_RAISONNEMENT = 1500;
+
+/**
+ * Retire la réflexion d'un modèle qui raisonne : chaque bloc
+ * `<think>…</think>` fermé, puis un `<think>` resté ouvert (réponse coupée
+ * pendant la réflexion — `coupe` vaut alors vrai). Sans `<think>`, le texte
+ * revient tel quel. Exportée pour le test.
+ */
+export function retirerRaisonnement(texte: string): { texte: string; coupe: boolean } {
+  let reste = texte.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  let coupe = false;
+  const ouvert = reste.search(/<think>/i);
+  if (ouvert !== -1) {
+    reste = reste.slice(0, ouvert);
+    coupe = true;
+  }
+  return { texte: reste.trim(), coupe };
+}
 
 type TextPart = { type: "text"; text: string };
 type ImagePart = { type: "image_url"; image_url: { url: string } };
@@ -226,6 +254,15 @@ export async function testerFournisseur(): Promise<TestFournisseur> {
     echecIA(res.cause, res.detail);
     return { cause: res.cause, detail: res.detail ?? null, ms: Date.now() - debut };
   }
+  // Une réponse non vide ne suffit pas : le 28/10, le diagnostic disait « ok »
+  // pendant que TOUS les appels réels échouaient en json_invalide. On exige
+  // donc ce que chatJSON exige — un objet JSON lisible.
+  const lu = parseLooseJSON(res.text);
+  if (!lu || lu.ok !== true) {
+    const detail = tronque(res.text);
+    echecIA(CAUSE_JSON_INVALIDE, detail);
+    return { cause: CAUSE_JSON_INVALIDE, detail, ms: Date.now() - debut };
+  }
   return { cause: "ok", detail: null, ms: Date.now() - debut };
 }
 
@@ -380,7 +417,7 @@ async function openAICompatChat(
       body: JSON.stringify({
         model: config.model,
         temperature: 0,
-        max_tokens: opts.maxTokens ?? 800,
+        max_tokens: (opts.maxTokens ?? 800) + MARGE_RAISONNEMENT,
         messages: [
           { role: "system", content: opts.system },
           { role: "user", content: opts.user },
@@ -424,8 +461,16 @@ async function openAICompatChat(
     }
 
     const content = data.choices?.[0]?.message?.content;
-    return typeof content === "string" && content.trim()
-      ? { ok: true, text: content }
+    if (typeof content !== "string" || !content.trim()) {
+      return { ok: false, cause: CAUSE_REPONSE_VIDE, detail: tronque(brut) };
+    }
+    // La réflexion d'un modèle qui raisonne n'est pas la réponse : sans ce
+    // retrait, une accolade écrite dans `<think>` était prise pour le début du
+    // JSON, et toute réponse de MiniMax-M3 finissait en json_invalide.
+    const { texte, coupe } = retirerRaisonnement(content);
+    if (texte) return { ok: true, text: texte };
+    return coupe
+      ? { ok: false, cause: CAUSE_REPONSE_COUPEE, detail: tronque(content) }
       : { ok: false, cause: CAUSE_REPONSE_VIDE, detail: tronque(brut) };
   } catch (err) {
     return erreurTransport(err);

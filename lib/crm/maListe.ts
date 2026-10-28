@@ -27,7 +27,8 @@
  */
 
 import { normalizeBelgianPhone } from "./telephone.ts";
-import { normaliserSecteur, SECTEURS, type SecteurFixe } from "./secteurs.ts";
+import { normaliserSecteur, secteurDuNom, SECTEURS, type SecteurFixe } from "./secteurs.ts";
+import { lireRaccourcis } from "./raccourcis.ts";
 import {
   cleSociete,
   doublonsDansLeLot,
@@ -179,9 +180,37 @@ export function rangerFiche(
       nettoie(lue.city, 80) ??
       villeDeLAdresse(nettoie(lue.address, 300)) ??
       nettoie(defauts.ville, 80),
-    sector: normaliserSecteur(nettoie(lue.sector, 80) ?? nettoie(defauts.secteur, 80)),
+    // Le secteur : celui que la ligne dit, à défaut celui que dit le NOM
+    // (« Garage du Midi »), à défaut le défaut du collage.
+    sector:
+      normaliserSecteur(nettoie(lue.sector, 80)) ??
+      secteurDuNom(nom) ??
+      normaliserSecteur(nettoie(defauts.secteur, 80)),
     notes: nettoie(lue.notes, 1000),
   };
+}
+
+/** Une date quelconque : de `lireRaccourcis`, on ne lit que le contact. */
+const SANS_DATE = new Date("2026-01-05T12:00:00Z");
+
+/**
+ * Le nom de la personne que la REMARQUE donne — « le patron s'appelle
+ * Karim », « demander Mme Peeters », « contact : Marc » — lu par le même
+ * parseur que les notes d'appel (`lireRaccourcis`), donc les mêmes règles :
+ * jamais une civilité seule, jamais un nom de société. La remarque reste dans
+ * « Ce qu'on sait » ; on ne remplit que le champ contact, et seulement s'il est
+ * vide (28/10).
+ */
+export function contactDesRemarques(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  return nettoie(lireRaccourcis(notes, SANS_DATE).contact, 120);
+}
+
+/** Complète le contact d'une fiche depuis ses remarques, sans rien remplacer. */
+export function completerContact<T extends FicheCollee>(f: T): T {
+  if (f.contact_name) return f;
+  const c = contactDesRemarques(f.notes);
+  return c ? { ...f, contact_name: c } : f;
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +349,9 @@ export function lireDeterministe(texte: string, defauts: Defauts): LectureDeterm
     nonLues.push(ligne);
     derniere = null;
   }
-  return { fiches, nonLues };
+  // Le contact se lit à la FIN : une remarque sur sa propre ligne ne rejoint
+  // la fiche qu'après sa création.
+  return { fiches: fiches.map(completerContact), nonLues };
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +444,7 @@ export function validerSortieModele(
     const f = rangerFiche(lue, defauts);
     if (!f) continue;
     if (!nomPresent(f.company_name, collage)) aVerifier.push("nom à vérifier");
-    res.push({ ...f, aVerifier });
+    res.push(completerContact({ ...f, aVerifier }));
   }
   return res;
 }

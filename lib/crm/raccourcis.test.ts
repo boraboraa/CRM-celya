@@ -204,6 +204,17 @@ const CAS: Cas[] = [
     attendu: { contact: "Marc Dupont (patron)" },
   },
   {
+    // « Ma liste », 28/10 : la remarque d'un étudiant collée sous le numéro.
+    note: "le patron s'appelle Karim, passer avant 10h",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Karim (patron)" },
+  },
+  {
+    note: "la gérante s'appelle mme dubois",
+    maintenant: "2026-10-27T10:00",
+    attendu: { contact: "Mme Dubois (gérante)" },
+  },
+  {
     note: "j'ai eu Sophie au téléphone, à rappeler",
     maintenant: "2026-10-27T10:00",
     attendu: { contact: "Sophie" },

@@ -97,6 +97,22 @@ export function normaliserSecteur(brut: string | null | undefined): SecteurFixe 
   return "Autre";
 }
 
+/**
+ * Le secteur que DIT le nom d'une société (« Garage du Midi », « Carrosserie
+ * Van Damme », « Pneus Express ») — les mêmes mots-clés que la normalisation,
+ * mais un nom qui n'en contient aucun ne donne RIEN (jamais « Autre » : « Delta
+ * Motors » n'est pas un secteur inconnu, c'est un secteur non dit). Sert à
+ * « Ma liste » quand le collage ne dit pas le secteur (28/10).
+ */
+export function secteurDuNom(nom: string | null | undefined): SecteurFixe | null {
+  if (!nom) return null;
+  const t = texteSecteur(nom);
+  for (const [secteur, motifs] of REGLES_SECTEUR) {
+    if (motifs.some((m) => t.includes(m))) return secteur;
+  }
+  return null;
+}
+
 export function estSecteurFixe(v: unknown): v is SecteurFixe {
   return typeof v === "string" && (SECTEURS as readonly string[]).includes(v);
 }

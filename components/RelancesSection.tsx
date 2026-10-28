@@ -161,7 +161,7 @@ export function RelancesSection({
               placeholder="Relancer pour le devis"
             />
           </div>
-          {/* Le jour en liste, l'heure en un tap — le même composant que la
+          {/* Le jour en « − / + », l'heure en pastilles — le même composant que la
               carte et « À faire » ; ici, les taps CHOISISSENT et « Planifier »
               envoie. */}
           <ChoixRelance titre="Quand" name="due_local" required />

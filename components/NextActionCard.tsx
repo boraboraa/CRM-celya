@@ -360,7 +360,7 @@ export function NextActionCard({
           </button>
         )}
 
-        {/* Le jour en liste, l'heure en un tap (lib/crm/relance.ts) : « Demain
+        {/* Le jour en « − / + », l'heure en pastilles, puis « Valider » (lib/crm/relance.ts) : « Demain
             à 9h » est UN tap. Poser une relance reste libre, même avant le
             rendez-vous : on informe, on ne bloque pas (024). Elle remontera
             dans « À appeler » le jour venu ; la fiche, elle, dira toujours le

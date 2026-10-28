@@ -9,21 +9,22 @@
  */
 
 import {
-  JOURS_RELANCE,
-  HEURES_RELANCE,
+  HEURES_TACTILES,
   HEURE_DEFAUT,
   maintenantLocal,
   ajouterJours,
-  joursProposes,
-  dateDuChoix,
-  heuresProposees,
-  heureParDefaut,
   heurePlusTard,
+  heureDisponible,
+  jourMinimum,
+  decalerJour,
+  jourSaisi,
+  libelleJour,
+  heurePourJour,
+  choixParDefaut,
   valeurRelance,
   libelleRelance,
   instantRelance,
   relanceAvantRdv,
-  estJourRelance,
 } from "./relance.ts";
 
 let fautes = 0;
@@ -49,35 +50,42 @@ verifie("23h30 UTC le lundi 26/10 = mardi 0h30 à Bruxelles",
   maintenantLocal(new Date("2026-10-26T23:30:00Z")), { ymd: "2026-10-27", hm: "00:30" });
 verifie("ajouterJours traverse le mois", ajouterJours("2026-10-30", 3), "2026-11-02");
 
-console.log("\n— les jours proposés —");
-verifie("six jours, dans cet ordre",
-  JOURS_RELANCE.map((j) => j.label),
-  ["Plus tard aujourd'hui", "Demain", "Dans 2 jours", "Dans 3 jours", "Dans 1 semaine", "Autre date…"]);
-verifie("à 10h20 : « Plus tard aujourd'hui » est proposé", joursProposes(MARDI_10H20)[0].id, "aujourdhui");
-verifie("après 17h : il disparaît, c'est « Demain » qu'on propose",
-  joursProposes(MARDI_17H30).map((j) => j.id), ["demain", "2j", "3j", "1sem", "autre"]);
-verifie("demain, dans 2 jours, dans 1 semaine",
-  [dateDuChoix("demain", MARDI_10H20), dateDuChoix("2j", MARDI_10H20), dateDuChoix("1sem", MARDI_10H20)],
-  ["2026-10-28", "2026-10-29", "2026-11-03"]);
-verifie("« demain » juste après minuit à Bruxelles (encore lundi en UTC) : mercredi",
-  dateDuChoix("demain", new Date("2026-10-26T23:30:00Z")), "2026-10-28");
-verifie("autre date : la date saisie", dateDuChoix("autre", MARDI_10H20, "2026-11-14"), "2026-11-14");
-verifie("autre date dans le passé : refusée", dateDuChoix("autre", MARDI_10H20, "2026-10-20"), null);
-verifie("autre date illisible : refusée", dateDuChoix("autre", MARDI_10H20, "14/11"), null);
-verifie("estJourRelance : les six, rien d'autre",
-  ["aujourdhui", "demain", "2j", "3j", "1sem", "autre", "constructor", ""].map(estJourRelance),
-  [true, true, true, true, true, true, false, false]);
+console.log("\n— le jour, au « − / + » (28/10 : plus tactile) —");
+verifie("d'office : demain à 9h", choixParDefaut(MARDI_10H20), { ymd: "2026-10-28", hm: "09:00" });
+verifie("d'office juste après minuit à Bruxelles (encore lundi en UTC) : mercredi 9h",
+  choixParDefaut(new Date("2026-10-26T23:30:00Z")), { ymd: "2026-10-28", hm: "09:00" });
+verifie("à 10h20, on peut encore relancer aujourd'hui", jourMinimum(MARDI_10H20), "2026-10-27");
+verifie("à 17h30, la journée est finie : le premier jour est demain", jourMinimum(MARDI_17H30), "2026-10-28");
+verifie("« − » depuis demain à 10h20 : aujourd'hui", decalerJour("2026-10-28", -1, MARDI_10H20), "2026-10-27");
+verifie("« − » depuis demain à 17h30 : on reste à demain", decalerJour("2026-10-28", -1, MARDI_17H30), "2026-10-28");
+verifie("« − » ne recule jamais avant aujourd'hui", decalerJour("2026-10-27", -5, MARDI_10H20), "2026-10-27");
+verifie("« + » traverse le mois", decalerJour("2026-10-31", 2, MARDI_10H20), "2026-11-02");
+verifie("« + » passe le dimanche comme un autre jour", decalerJour("2026-10-31", 1, MARDI_10H20), "2026-11-01");
+verifie("un jour illisible repart du premier jour", decalerJour("n'importe quoi", 1, MARDI_10H20), "2026-10-28");
+verifie("le calendrier : une date à venir passe", jourSaisi("2026-11-14", MARDI_10H20), "2026-11-14");
+verifie("le calendrier : une date passée est refusée", jourSaisi("2026-10-20", MARDI_10H20), null);
+verifie("le calendrier : aujourd'hui après 17h est refusé", jourSaisi("2026-10-27", MARDI_17H30), null);
+verifie("le calendrier : illisible, refusé", jourSaisi("14/11", MARDI_10H20), null);
 
-console.log("\n— les heures —");
-verifie("un jour à venir : 9h · 11h · 14h · 16h", heuresProposees("2026-10-28", MARDI_10H20), [...HEURES_RELANCE]);
-verifie("aujourd'hui à 10h20 : seulement les heures à venir (11h est à 40 min)",
-  heuresProposees("2026-10-27", MARDI_10H20), ["11:00", "14:00", "16:00"]);
-verifie("aujourd'hui à 15h10 : 16h (à 50 min)", heuresProposees("2026-10-27", MARDI_15H10), ["16:00"]);
-verifie("aujourd'hui à 15h40 : plus rien dans la liste → l'heure « plus tard » (17h)",
-  heuresProposees("2026-10-27", new Date("2026-10-27T14:40:00Z")), ["17:00"]);
+console.log("\n— ce que dit le jour —");
+verifie("aujourd'hui", libelleJour("2026-10-27", MARDI_10H20), { principal: "Aujourd'hui", detail: "mardi 27 oct." });
+verifie("demain", libelleJour("2026-10-28", MARDI_10H20), { principal: "Demain", detail: "mercredi 28 oct." });
+verifie("après-demain", libelleJour("2026-10-29", MARDI_10H20), { principal: "Après-demain", detail: "jeudi 29 oct." });
+verifie("plus loin : le nom du jour et la date", libelleJour("2026-11-02", MARDI_10H20), { principal: "Lundi 2 nov.", detail: null });
+
+console.log("\n— les heures en pastilles —");
+verifie("sept pastilles", HEURES_TACTILES.map((h) => h), ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"]);
+verifie("un jour à venir : toutes possibles",
+  HEURES_TACTILES.map((h) => heureDisponible("2026-10-28", h, MARDI_10H20)), [true, true, true, true, true, true, true]);
+verifie("aujourd'hui à 10h20 : 9h et 10h grisées, 11h (à 40 min) possible",
+  HEURES_TACTILES.map((h) => heureDisponible("2026-10-27", h, MARDI_10H20)), [false, false, true, true, true, true, true]);
+verifie("un jour passé : rien", heureDisponible("2026-10-26", "14:00", MARDI_10H20), false);
+verifie("une heure illisible : refusée", heureDisponible("2026-10-28", "25:00", MARDI_10H20), false);
+verifie("en passant à aujourd'hui, 9h devient la première heure possible (11h)",
+  heurePourJour("2026-10-27", "09:00", MARDI_10H20), "11:00");
+verifie("une heure encore possible est gardée", heurePourJour("2026-10-27", "15:00", MARDI_10H20), "15:00");
+verifie("à 15h40 il ne reste que 17h", heurePourJour("2026-10-27", "09:00", new Date("2026-10-27T14:40:00Z")), "17:00");
 verifie("« plus tard » : l'heure pleine après maintenant + 1 h", heurePlusTard(MARDI_15H10), "17:00");
-verifie("sans heure choisie, un autre jour : 9h", heureParDefaut("2026-10-28", MARDI_10H20), "09:00");
-verifie("sans heure choisie, aujourd'hui : la première heure à venir", heureParDefaut("2026-10-27", MARDI_10H20), "11:00");
 verifie("la valeur sans heure : 9h", valeurRelance("2026-10-28"), "2026-10-28T09:00");
 verifie("la valeur avec une heure invalide : 9h", valeurRelance("2026-10-28", "25:00"), `2026-10-28T${HEURE_DEFAUT}`);
 verifie("la valeur avec l'heure", valeurRelance("2026-10-28", "14:00"), "2026-10-28T14:00");

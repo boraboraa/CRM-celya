@@ -59,10 +59,11 @@ test.describe("À faire", () => {
     // Le titre a la largeur de la ligne : rien à côté de lui.
     const titre = (await ligne.getByText("Relancer Anne Sonde").boundingBox())!;
     expect(titre.width).toBeGreaterThan(page.viewportSize()!.width * 0.6);
-    // Les raccourcis de date ne s'ouvrent qu'au tap sur la date.
-    await expect(ligne.getByRole("textbox", { name: "Reprogrammer la relance" })).toBeHidden();
+    // Le choix du jour et de l'heure ne s'ouvre qu'au tap sur la date.
+    await expect(ligne.getByRole("group", { name: "Reprogrammer" })).toBeHidden();
     await date.click();
-    await expect(ligne.getByLabel("Reprogrammer la relance")).toBeVisible();
+    await expect(ligne.getByRole("group", { name: "Reprogrammer" })).toBeVisible();
+    await expect(ligne.getByRole("button", { name: "Jour suivant" })).toBeVisible();
   });
 
   test("débriefer un RDV depuis la feuille du bas", async ({ page }, info) => {

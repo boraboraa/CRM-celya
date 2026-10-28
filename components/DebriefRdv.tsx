@@ -168,7 +168,7 @@ export function DebriefRdv({
       </div>
 
       {(ouverte === "a_rappeler" || ouverte === "suivi_email" || ouverte === "pas_decroche") && (
-        // Le jour en liste, l'heure en un tap : c'est l'heure qui envoie
+        // Le jour en « − / + », l'heure en pastilles, « Valider » envoie
         // (lib/crm/relance.ts — le même composant que la carte et « À faire »).
         <ChoixRelance
           titre={QUAND[ouverte]}

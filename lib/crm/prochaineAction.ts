@@ -109,6 +109,16 @@ function heureCourte(hour: string, minute: string): string {
 }
 
 /**
+ * « À débriefer · 26/09 » — la colonne « Relance » de la liste (28/10) : elle
+ * fait 9 rem, et « À débriefer — RDV du 26/09 à 12h » y débordait sur le
+ * bouton « Appeler ». Le libellé entier reste en infobulle.
+ */
+export function libelleDebriefCourt(iso: string): string {
+  const jour = new Intl.DateTimeFormat("fr-BE", { timeZone: TZ, day: "2-digit", month: "2-digit" }).format(new Date(iso));
+  return `À débriefer · ${jour}`;
+}
+
+/**
  * « RDV lun. 28/09 · 12h » — la liste et les colonnes (024) : le jour de la
  * semaine d'abord, parce que c'est ce qu'on cherche d'un coup d'œil.
  */

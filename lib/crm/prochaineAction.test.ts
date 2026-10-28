@@ -35,6 +35,7 @@ import {
   jourLong,
   libelleRdv,
   libelleRdvListe,
+  libelleDebriefCourt,
   lienAgenda,
   lireProchaineAction,
   refusRelanceAvantRdv,
@@ -387,6 +388,8 @@ console.log("\n— 10. rdv_visible_et_refus —");
   verifie("liste : « RDV lun. 28/09 · 12h »", libelleRdvListe(RDV_ALAIN.starts_at), "RDV lun. 28/09 · 12h");
   verifie("liste : les minutes", libelleRdvListe("2026-09-28T12:30:00Z"), "RDV lun. 28/09 · 14h30");
   verifie("liste : en hiver, UTC+1", libelleRdvListe("2026-12-01T10:00:00Z"), "RDV mar. 01/12 · 11h");
+  verifie("liste : un débrief tient dans la colonne (28/10)", libelleDebriefCourt("2026-09-26T10:17:00Z"), "À débriefer · 26/09");
+  verifie("liste : débrief, le jour de Bruxelles", libelleDebriefCourt("2026-10-04T22:30:00Z"), "À débriefer · 05/10");
   verifie("fiche : « Lundi 28 septembre à 12h »", jourLong(RDV_ALAIN.starts_at), "Lundi 28 septembre à 12h");
   verifie("fiche : minuit de Bruxelles tombe le bon jour", jourLong("2026-10-04T22:00:00Z"), "Lundi 5 octobre à 0h");
   verifie("agenda : le jour de Bruxelles", jourAgenda("2026-10-04T22:30:00Z"), "2026-10-05");

@@ -22,7 +22,7 @@ import {
   LAST_ACTION_LABEL,
   type LastActionKind,
 } from "@/lib/crm/lastAction";
-import { lireProchaineAction, PLUS_RIEN_COURT, quandCourt } from "@/lib/crm/prochaineAction";
+import { libelleDebriefCourt, lireProchaineAction, PLUS_RIEN_COURT, quandCourt } from "@/lib/crm/prochaineAction";
 
 // ---------------------------------------------------------------------------
 // Pictogrammes — un seul jeu, dessiné ici
@@ -660,15 +660,19 @@ export function ProchaineActionTexte({
   if (l.estRdv) {
     // Un BADGE, pas un texte : un rendez-vous se distingue d'une relance d'un
     // coup d'œil (024). Bleu = état normal ; passé, neutre — jamais ambre.
+    // Dans la liste (`avecHeure`), la colonne est étroite : le débrief s'y dit
+    // court. Partout, le badge ne dépasse jamais sa cellule — au pire « … »,
+    // et le libellé entier au survol.
+    const texte = avecHeure && l.aDebriefer ? libelleDebriefCourt(at) : l.texte;
     return (
       <span
-        className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 ${
+        className={`inline-flex min-w-0 max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 ${
           PROCHAINE_ACTION_RDV[l.aDebriefer ? "debrief" : "aVenir"]
         } ${className}`}
-        title={l.aDebriefer ? "Rendez-vous passé : il attend son débrief" : "Rendez-vous à venir"}
+        title={`${l.texte} — ${l.aDebriefer ? "rendez-vous passé : il attend son débrief" : "rendez-vous à venir"}`}
       >
         <Icone nom="calendrier" className="h-3.5 w-3.5 shrink-0" />
-        {l.texte}
+        <span className="truncate">{texte}</span>
       </span>
     );
   }

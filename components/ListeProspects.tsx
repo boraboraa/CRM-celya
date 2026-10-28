@@ -3,7 +3,8 @@
 import { lieuAffiche } from "@/lib/crm/regions";
 import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
-import { attribuerProspectsAction, moveProspectAction } from "@/app/actions";
+import { attribuerProspectsAction, moveProspectAction, supprimerProspectsAction } from "@/app/actions";
+import { questionSuppression } from "@/lib/crm/suppression";
 import {
   Avatar,
   EtiquetteJanet,
@@ -89,6 +90,8 @@ export function ListeProspects({
   const [ouvertes, setOuvertes] = useState<Set<string>>(new Set());
   const [cible, setCible] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; texte: string } | null>(null);
+  /** « Supprimer » a été cliqué : la barre pose la question avant d'agir. */
+  const [confirmer, setConfirmer] = useState(false);
   const [pending, startTransition] = useTransition();
   /** L'étape change AU CHOIX ; le serveur suit (et un refus la ramène seule). */
   const [vue, appliquer] = useOptimistic(
@@ -113,6 +116,23 @@ export function ListeProspects({
       } catch {
         setMessage({ ok: false, texte: "L'étape n'a pas pu être enregistrée. Réessayez." });
       }
+    });
+  }
+
+  /** Supprimer les fiches cochées (admin seul, 28/10) — après confirmation. */
+  function supprimer() {
+    if (choisies.size === 0) return;
+    const ids = [...choisies];
+    setMessage(null);
+    startTransition(async () => {
+      const res = await supprimerProspectsAction(ids);
+      setConfirmer(false);
+      if (res.error) {
+        setMessage({ ok: false, texte: res.error });
+        return;
+      }
+      setChoisies(new Set());
+      setMessage({ ok: Boolean(res.ok), texte: res.texte ?? "" });
     });
   }
 
@@ -371,6 +391,35 @@ export function ListeProspects({
       {/* La barre d'attribution — au-dessus de la barre d'onglets du téléphone. */}
       {admin && choisies.size > 0 && (
         <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 px-4 lg:bottom-6 lg:left-64">
+          {confirmer ? (
+            <div
+              role="alertdialog"
+              aria-label="Supprimer les fiches"
+              className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-2xl bg-[#1d1320] px-3 py-2 shadow-2xl ring-1 ring-rose-400/30"
+            >
+              <p className="min-w-0 flex-1 basis-60 text-sm text-rose-100">
+                {questionSuppression(
+                  vue.filter((l) => choisies.has(l.id)).map((l) => l.company_name)
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={supprimer}
+                disabled={pending}
+                className="btn-danger min-h-[44px] px-4 text-sm"
+              >
+                {pending ? "Suppression…" : "Oui, supprimer"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmer(false)}
+                disabled={pending}
+                className="btn-link min-h-[44px] text-xs"
+              >
+                Annuler
+              </button>
+            </div>
+          ) : (
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-2xl bg-[#121829] px-3 py-2 shadow-2xl ring-1 ring-white/15">
             <span className="text-sm text-slate-200">
               {choisies.size} sélectionnée{choisies.size > 1 ? "s" : ""}
@@ -398,12 +447,21 @@ export function ListeProspects({
             </button>
             <button
               type="button"
+              onClick={() => setConfirmer(true)}
+              disabled={pending}
+              className="min-h-[44px] rounded-lg px-3 text-xs text-rose-300 ring-1 ring-rose-400/30 transition hover:bg-rose-500/10"
+            >
+              Supprimer
+            </button>
+            <button
+              type="button"
               onClick={() => setChoisies(new Set())}
               className="btn-link min-h-[44px] text-xs"
             >
               Annuler
             </button>
           </div>
+          )}
         </div>
       )}
     </>

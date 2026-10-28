@@ -27,6 +27,7 @@ import { ADRESSE_MAX } from "@/lib/crm/maps";
 import { CONTACT_MAX } from "@/lib/crm/contactPropose";
 import { normaliserSecteur } from "@/lib/crm/secteurs";
 import { estRegion } from "@/lib/crm/regions";
+import { LOT_MAX, idsPropres, peutSupprimerEnLot, resultatSuppression } from "@/lib/crm/suppression";
 import { DEBUT_SALES_TROPHY, lundiDe } from "@/lib/crm/compteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
 import {
@@ -523,16 +524,39 @@ export async function poserContactAction(input: {
   return { success: `Contact enregistré : ${nom}.` };
 }
 
-export async function deleteProspectAction(fd: FormData) {
-  const { supabase } = await currentUserId();
-  const id = str(fd, "id");
-  if (!id) return;
-
-  const { error } = await supabase.from("prospects").delete().eq("id", id);
-  if (error) throw new Error(error.message);
-
-  revalidatePath("/prospects");
-  redirect("/prospects");
+/**
+ * Supprimer une ou plusieurs fiches (28/10). Une fiche : son responsable ou
+ * l'admin ; plusieurs d'un coup : l'admin seul (lib/crm/suppression.ts). La
+ * base revérifie (`prospects_delete`), et ce qui suit la fiche part avec elle
+ * (journal, relances, rendez-vous — migration 035 —, file et brief de Janet) ;
+ * les mails restent, détachés. Ne lève jamais : l'écran dit ce qui s'est passé.
+ */
+export async function supprimerProspectsAction(
+  ids: string[]
+): Promise<{ error?: string; ok?: boolean; texte?: string; n?: number }> {
+  const { supabase, userId } = await currentUserId();
+  const session = await getSession();
+  const qui = { userId, isAdmin: session?.me?.role === "admin" };
+  const propres = idsPropres(ids);
+  if (propres.length === 0) return { error: "Aucune fiche sélectionnée." };
+  if (!peutSupprimerEnLot(qui, propres.length)) {
+    return {
+      error:
+        propres.length > LOT_MAX
+          ? `${LOT_MAX} fiches au plus d'un coup.`
+          : "Supprimer plusieurs fiches d'un coup est réservé à l'administrateur.",
+    };
+  }
+  const { data, error } = await supabase.from("prospects").delete().in("id", propres).select("id");
+  if (error) return { error: error.message };
+  const n = data?.length ?? 0;
+  if (n > 0) {
+    revalidatePath("/prospects");
+    revalidatePath("/dashboard");
+    revalidatePath("/agenda");
+  }
+  const r = resultatSuppression(propres.length, n);
+  return { ok: r.ok, texte: r.texte, n };
 }
 
 // =====================================================================

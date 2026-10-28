@@ -5,6 +5,17 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 28 octobre 2026, tard — supprimer une fiche
+
+Les PR #23, #24 et #25 sont fusionnées (badge « À débriefer », commune et
+région, relance tactile). **La `035` est APPLIQUÉE** (28/10 au soir) :
+`meetings.prospect_id` passe en `ON DELETE CASCADE` — supprimer une fiche
+supprime ses rendez-vous (décision de Bora : plus de RDV fantôme dans
+l'agenda). Recette `supabase/recettes/035.sql` : **8 OK, 0 faute** en
+transaction annulée avant l'application. Le code (« Supprimer la fiche » en
+deux temps, suppression en lot pour l'admin) est sur `claude/supprimer-fiche`
+— voir « Supprimer une fiche ».
+
 ## État au 28 octobre 2026, au soir — la commune et la région
 
 La **`034` est APPLIQUÉE** (28/10, demande de Bora : « savoir que ce garage
@@ -1537,6 +1548,31 @@ sans code postal) ; ailleurs, la **province** ; « Hors Belgique » pour un code
   42 cas `lib/crm/lieux.cas.json`. Contrôle des cadres sur page de
   démonstration locale, 1440 → 360 px : 0 faute (le tri passait en segments
   et débordait de 27 px à 360 : il est en puces).
+
+### Supprimer une fiche (28 octobre — migration `035` appliquée)
+
+La suppression existait, **cachée sous « Modifier la fiche » et sans
+confirmation** (un clic suffisait). Désormais :
+
+- **Sur la fiche** : « Supprimer la fiche », visible sous « Modifier la
+  fiche », en **deux temps** (`SupprimerFiche` : la question nomme la fiche et
+  dit ce qui part, puis « Oui, supprimer »). Responsable ou admin seulement
+  (masqué pour un encadrant ou un collègue).
+- **Dans la liste** : les fiches cochées, « Supprimer » à côté de « Attribuer
+  à… », même question (« Supprimer définitivement 4 fiches ? »). **L'admin
+  seul** (décision de Bora : un étudiant supprime une fiche à la fois).
+- Un seul chemin serveur, `supprimerProspectsAction(ids)` — ne lève jamais,
+  compte les lignes réellement supprimées et le dit (« 3 fiches supprimées.
+  1 n'a pas pu l'être (pas à vous) »). La règle : `lib/crm/suppression.ts`
+  (`peutSupprimer`, `peutSupprimerEnLot`, `questionSuppression`,
+  `resultatSuppression`), `npm run test:suppression`. La base revérifie
+  (`prospects_delete` : admin ou responsable).
+- **Ce qui part avec la fiche** (clés étrangères) : journal, relances,
+  **rendez-vous** (035 — ils restaient avant, sans fiche), file et brief de
+  Janet. **Restent, détachés** : les mails (« Non rattachés »), les appels de
+  Janet et l'opposition (elle porte le numéro composé). Un RDV perso n'a pas de
+  fiche : jamais touché.
+- Pas d'outil MCP de suppression (volontairement).
 
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
@@ -3138,7 +3174,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
 `npm run test:relance`,
-`npm run test:secteurs`, `npm run test:regions`, `npm run test:doublons`, `npm run test:ma-liste`,
+`npm run test:secteurs`, `npm run test:regions`, `npm run test:suppression`, `npm run test:doublons`, `npm run test:ma-liste`,
 `npm run test:objectifs`, `npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, et

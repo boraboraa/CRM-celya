@@ -115,8 +115,8 @@ export function TaskRow({
   /** « À rappeler » vient d'être tapé : la ligne réclame une date. */
   const [pourQuand, setPourQuand] = useState(false);
   /**
-   * Téléphone : la date et ses raccourcis se déplient d'un tap sur la date
-   * (sur ordinateur, ils sont toujours là, à droite du titre).
+   * La date et son choix (jour − / +, heures) se déplient d'un tap sur la
+   * date, sous la ligne — téléphone comme ordinateur depuis le 28/10.
    */
   const [reprogOuvert, setReprogOuvert] = useState(false);
   const tel = lienTel(task.prospects?.phone);
@@ -140,7 +140,7 @@ export function TaskRow({
           ? "block"
           : compact
             ? "grid grid-cols-[auto_minmax(0,1fr)] items-start"
-            : "flex flex-wrap items-start lg:flex-nowrap"
+            : "flex flex-wrap items-start"
       }`}
     >
       {!lecture && (
@@ -368,36 +368,70 @@ export function TaskRow({
         )}
       </div>
 
-      {!lecture && !done && (
-        // Sur un écran étroit, la date et les raccourcis passent SOUS le
-        // titre (18/10, 390 px) : à côté, ils l'écrasaient en une colonne de
-        // trois mots et faisaient défiler la ligne de côté. Alignés sur le
-        // titre (pl-8, la largeur de la case à cocher).
-        <div
-          className={`flex-wrap items-center gap-1 ${
-            compact
-              ? "col-start-2 mt-2 flex"
-              : `w-full pl-8 lg:flex lg:w-auto lg:shrink-0 lg:pl-0 ${reprogOuvert || pourQuand ? "flex" : "hidden"}`
-          }`}
-        >
-          {/* Le jour en liste, l'heure en un tap — le même composant que la
-              carte PROCHAINE ACTION (lib/crm/relance.ts). « À rappeler » vient
-              d'être enregistré : il ne manque plus que le jour, et c'est ici
-              qu'il se dit. */}
-          <ChoixRelance
-            titre="Reprogrammer"
-            onChoisir={reschedule}
-            pending={!onReschedule}
-            avertissement={pourQuand ? "Pour quand ?" : null}
-          />
-          {/* Supprimer est définitif : c'est le seul rose de la ligne. */}
+      {!lecture && !done && !compact && (
+        // Ordinateur : à droite du titre, la date — un clic déplie le choix
+        // SOUS la ligne (28/10 : le choix tactile est trop grand pour rester
+        // ouvert sur chaque relance), et la croix.
+        <div className="hidden shrink-0 items-center gap-1 lg:flex">
+          <button
+            type="button"
+            onClick={() => setReprogOuvert((o) => !o)}
+            aria-expanded={reprogOuvert || pourQuand}
+            aria-label={`Reprogrammer — ${fmtDateTime(task.due_at)}`}
+            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-3 text-xs ring-1 ring-white/10 transition hover:bg-white/[0.05] ${
+              overdue ? "text-amber-300" : "text-slate-300"
+            }`}
+          >
+            <Icone nom="report" className="h-3.5 w-3.5" />
+            {jourHeureCourt(task.due_at)}
+            <Icone nom="chevron" className={`h-3 w-3 transition ${reprogOuvert || pourQuand ? "rotate-180" : ""}`} />
+          </button>
           <button
             type="button"
             onClick={onDelete}
             disabled={!onDelete}
             title="Supprimer la relance"
             aria-label="Supprimer la relance"
-            className="min-h-[44px] min-w-[44px] rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400 lg:min-h-0 lg:min-w-0"
+            className="rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400"
+          >
+            <Icone nom="croix" className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      {!lecture && !done && (
+        // Le choix du jour et de l'heure (lib/crm/relance.ts — le même
+        // composant que la carte PROCHAINE ACTION) : déplié SOUS la ligne,
+        // aligné sur le titre (pl-8, la largeur de la case à cocher), d'un tap
+        // sur la date. « À rappeler » vient d'être enregistré : il ne manque
+        // plus que le jour, et il s'ouvre seul.
+        <div
+          className={
+            compact
+              ? "col-start-2 mt-2 flex flex-wrap items-center gap-1"
+              : `basis-full pl-8 ${reprogOuvert || pourQuand ? "block" : "hidden"}`
+          }
+        >
+          <ChoixRelance
+            titre="Reprogrammer"
+            onChoisir={(v) => {
+              setReprogOuvert(false);
+              reschedule(v);
+            }}
+            pending={!onReschedule}
+            avertissement={pourQuand ? "Pour quand ?" : null}
+          />
+          {/* Supprimer est définitif : c'est le seul rose de la ligne. Sur
+              ordinateur, la croix est à droite du titre. */}
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={!onDelete}
+            title="Supprimer la relance"
+            aria-label="Supprimer la relance"
+            className={`min-h-[44px] min-w-[44px] rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400 ${
+              compact ? "" : "mt-1 lg:hidden"
+            }`}
           >
             <Icone nom="croix" className="h-3 w-3" />
           </button>

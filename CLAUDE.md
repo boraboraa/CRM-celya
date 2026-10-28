@@ -766,6 +766,20 @@ prospect passé en Perdu n'a plus de relance ouverte. `normalizeStatus`
 (`lib/constants.ts`) tolère en lecture les anciennes valeurs de statut —
 garde-fou permanent, à ne pas retirer.
 
+**Le choix est TACTILE depuis le 28/10** (retour de Bora : « pas assez
+tactile » — le jour était une liste déroulante, les heures du petit texte) :
+le jour se règle par **« − / + »** (un tap sur la date ouvre le calendrier du
+téléphone ; jamais avant aujourd'hui, ni avant demain quand la journée est
+finie — `jourMinimum`), l'heure en **grosses pastilles** encadrées (9h · 10h ·
+11h · 14h · 15h · 16h · 17h · Autre ; aujourd'hui, les heures passées sont
+grisées), puis UN bouton qui dit ce qui part : **« Valider · demain à 9h »**
+(d'office, donc un tap). Sur « À faire », le choix se déplie SOUS la ligne
+d'un tap sur la date, ordinateur compris (il ne reste plus ouvert sur chaque
+relance). Règles : `HEURES_TACTILES`, `decalerJour`, `libelleJour`,
+`heurePourJour`, `choixParDefaut` (`lib/crm/relance.ts`, `test:relance`) ;
+l'ancienne liste (`JOURS_RELANCE`…) est retirée. Ce qui suit est l'état du
+27/10, gardé pour mémoire.
+
 **Une relance se date AVEC l'heure, en un geste** (27/10 au soir — les
 raccourcis « Demain / +3 j / +1 sem » posaient toujours 9h, et `DateField`
 comme `RACCOURCIS_RELANCE` sont RETIRÉS) : le jour dans une liste (Plus tard

@@ -3,16 +3,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Icone } from "@/components/ui";
 import {
-  JOURS_RELANCE,
-  JOUR_DEFAUT,
-  dateDuChoix,
-  estJourRelance,
-  heureParDefaut,
-  heuresProposees,
-  joursProposes,
+  HEURES_TACTILES,
+  choixParDefaut,
+  decalerJour,
+  heureDisponible,
+  heurePourJour,
+  jourMinimum,
+  jourSaisi,
+  libelleJour,
   libelleRelance,
   valeurRelance,
-  type JourRelance,
 } from "@/lib/crm/relance";
 
 function heureDite(hm: string): string {
@@ -23,17 +23,26 @@ function heureDite(hm: string): string {
 /**
  * Dater une relance — LE composant, partout (carte PROCHAINE ACTION, ligne de
  * « À faire », après un résultat d'appel, débrief, « Planifier une relance »).
- * La table des choix et le calcul vivent dans lib/crm/relance.ts.
+ * Les règles vivent dans lib/crm/relance.ts.
+ *
+ * Tactile (28/10, retour de Bora : « pas assez tactile ») :
+ *   · le JOUR se règle par « − / + » — un tap sur la date ouvre le calendrier
+ *     du téléphone pour aller loin ; jamais avant aujourd'hui (ni avant demain
+ *     quand la journée est finie) ;
+ *   · l'HEURE en grosses pastilles (9h · 10h · 11h · 14h · 15h · 16h · 17h),
+ *     « Autre » ouvre l'horloge du téléphone ; aujourd'hui, les heures passées
+ *     sont grisées ;
+ *   · puis UN bouton qui dit ce qui partira : « Valider · demain à 9h » —
+ *     « Demain à 9h » reste à UN tap, n'importe quel autre choix se voit
+ *     avant d'être enregistré.
  *
  * Deux usages :
- *   · `onChoisir` — en un geste : le jour est déjà sur « Demain », un tap sur
- *     une heure ENVOIE (« Demain à 9h » = un tap) ;
- *   · `name` — dans un formulaire : les taps choisissent, un champ caché porte
- *     la valeur « YYYY-MM-DDTHH:mm », le bouton du formulaire envoie.
+ *   · `onChoisir` — le bouton « Valider » envoie ;
+ *   · `name` — dans un formulaire : un champ caché porte la valeur
+ *     « YYYY-MM-DDTHH:mm », le bouton du formulaire envoie.
  *
  * L'instant de référence est lu APRÈS le montage : le rendu serveur et le
- * premier rendu client montrent la même liste (aucun écart d'hydratation),
- * puis « Plus tard aujourd'hui » et les heures passées se retirent.
+ * premier rendu client sont identiques (aucun écart d'hydratation).
  */
 export function ChoixRelance({
   titre = "Relancer",
@@ -56,152 +65,168 @@ export function ChoixRelance({
   info?: string | null;
   /** Une phrase ambre au-dessus (ex. « Pour quand ? » après « À rappeler »). */
   avertissement?: string | null;
-  /** Un geste de plus en fin de ligne (« Sans relance »). */
+  /** Un geste de plus à côté de « Valider » (« Sans relance »). */
   extra?: ReactNode;
   className?: string;
 }) {
   const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => setNow(new Date()), []);
+  const [ymd, setYmd] = useState<string | null>(null);
+  const [hm, setHm] = useState<string>("09:00");
 
-  const [jour, setJour] = useState<JourRelance>(JOUR_DEFAUT);
-  const [autreDate, setAutreDate] = useState("");
-  const [autreHeure, setAutreHeure] = useState(false);
-  const [heureLibre, setHeureLibre] = useState("");
-  /** Mode formulaire : l'heure retenue (null = l'heure par défaut). */
-  const [heureChoisie, setHeureChoisie] = useState<string | null>(null);
+  useEffect(() => {
+    const t = new Date();
+    const d = choixParDefaut(t);
+    setNow(t);
+    setYmd(d.ymd);
+    setHm(d.hm);
+  }, []);
 
-  const ref = now ?? new Date(0);
-  const jours = now ? joursProposes(now) : JOURS_RELANCE;
-  const date = now ? dateDuChoix(jour, now, autreDate) : null;
-  const heures = now && date ? heuresProposees(date, now) : ["09:00", "11:00", "14:00", "16:00"];
-  const heure = heureChoisie ?? (now && date ? heureParDefaut(date, now) : "09:00");
-  const valeur = date ? valeurRelance(date, heure) : "";
+  const pret = Boolean(now && ymd);
+  const valeur = pret ? valeurRelance(ymd!, hm) : "";
+  const libelle = pret ? libelleRelance(valeur, now!) : "demain à 9h";
+  const jour = pret ? libelleJour(ymd!, now!) : { principal: "Demain", detail: null };
+  const auMinimum = pret && ymd === jourMinimum(now!);
+  const heureLibre = !(HEURES_TACTILES as readonly string[]).includes(hm);
 
-  function choisirHeure(hm: string) {
-    if (!date) return;
-    if (onChoisir) {
-      onChoisir(valeurRelance(date, hm));
-      return;
-    }
-    setHeureChoisie(hm);
+  function changerJour(nouveau: string) {
+    if (!now) return;
+    setYmd(nouveau);
+    setHm((h) => heurePourJour(nouveau, h, now));
   }
 
-  function valider() {
-    if (!date || !/^\d{2}:\d{2}$/.test(heureLibre)) return;
-    choisirHeure(heureLibre);
-    setAutreHeure(false);
-  }
-
-  const bouton =
-    "min-h-[44px] rounded-lg px-2.5 text-[11px] transition disabled:opacity-50";
+  const carre =
+    "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.04] text-lg text-slate-100 ring-1 ring-white/10 transition active:scale-95 hover:bg-white/[0.08] disabled:opacity-35";
+  const pastille = (actif: boolean) =>
+    `relative inline-flex min-h-[44px] min-w-[52px] items-center justify-center rounded-xl px-3 text-sm ring-1 transition active:scale-95 disabled:opacity-35 ${
+      actif
+        ? "bg-celya-blue/25 font-medium text-blue-50 ring-celya-blue/60"
+        : "bg-white/[0.04] text-slate-200 ring-white/10 hover:bg-celya-blue/15"
+    }`;
 
   return (
-    <div className={`space-y-1 ${className}`}>
-      {avertissement && <p className="px-1 text-[11px] text-amber-300">{avertissement}</p>}
-      <div
-        className="flex flex-wrap items-center gap-1 rounded-xl bg-white/[0.03] px-1.5 py-1 ring-1 ring-white/[0.08]"
-        role="group"
-        aria-label={titre}
-      >
-        <span className="pl-1 pr-0.5 text-[11px] text-slate-500">{titre}</span>
-        <select
-          value={jour}
-          disabled={pending}
-          onChange={(e) => {
-            if (estJourRelance(e.target.value)) setJour(e.target.value);
-            setHeureChoisie(null);
-          }}
-          aria-label={`${titre} — quel jour`}
-          className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-200 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
+    <div
+      className={`w-full max-w-xl space-y-2 rounded-xl bg-white/[0.03] p-2 ring-1 ring-white/[0.08] ${className}`}
+      role="group"
+      aria-label={titre}
+    >
+      {avertissement && <p className="px-1 text-xs text-amber-300">{avertissement}</p>}
+      <p className="px-1 text-[11px] uppercase tracking-wide text-slate-400">{titre}</p>
+
+      {/* Le jour : − / + ; un tap sur la date ouvre le calendrier. */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className={carre}
+          disabled={pending || !pret || auMinimum}
+          onClick={() => changerJour(decalerJour(ymd!, -1, now!))}
+          aria-label="Jour précédent"
         >
-          {jours.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.label}
-            </option>
-          ))}
-        </select>
-        {jour === "autre" && (
+          −
+        </button>
+        <div className="relative flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center rounded-xl bg-white/[0.04] px-2 text-center ring-1 ring-white/10">
+          <span className="max-w-full truncate text-sm font-medium text-slate-50" title={jour.principal}>
+            {jour.principal}
+          </span>
+          {jour.detail && (
+            <span className="max-w-full truncate text-[11px] text-slate-400" title={jour.detail}>
+              {jour.detail}
+            </span>
+          )}
           <input
             type="date"
-            value={autreDate}
-            min={now ? dateDuChoix("demain", now) ?? undefined : undefined}
-            disabled={pending}
-            onChange={(e) => setAutreDate(e.target.value)}
-            aria-label={`${titre} — la date`}
-            className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
+            value={ymd ?? ""}
+            min={now ? jourMinimum(now) : undefined}
+            disabled={pending || !pret}
+            onClick={(e) => {
+              try {
+                e.currentTarget.showPicker?.();
+              } catch {
+                /* navigateur sans showPicker : le champ s'ouvre seul au tap */
+              }
+            }}
+            onChange={(e) => {
+              const v = now ? jourSaisi(e.target.value, now) : null;
+              if (v) changerJour(v);
+            }}
+            aria-label={`${titre} — choisir la date`}
+            title="Choisir une date"
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
-        )}
-        {heures.map((hm) => {
-          const actif = !onChoisir && hm === heure && Boolean(date);
-          return (
-            <button
-              key={hm}
-              type="button"
-              disabled={pending || !date}
-              onClick={() => choisirHeure(hm)}
-              aria-pressed={onChoisir ? undefined : actif}
-              title={date && now ? libelleRelance(valeurRelance(date, hm), ref) : undefined}
-              className={`${bouton} ${
-                actif
-                  ? "bg-celya-blue/20 text-blue-100 ring-1 ring-celya-blue/40"
-                  : "text-slate-300 hover:bg-celya-blue/15 hover:text-blue-200"
-              }`}
-            >
-              {heureDite(hm)}
-            </button>
-          );
-        })}
-        {autreHeure ? (
-          <span className="inline-flex items-center gap-1">
-            <input
-              type="time"
-              autoFocus
-              value={heureLibre}
-              disabled={pending}
-              onChange={(e) => setHeureLibre(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  valider();
-                }
-              }}
-              aria-label={`${titre} — autre heure`}
-              className="min-h-[44px] rounded-lg bg-white/[0.04] px-2 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none focus:ring-celya-blue/60"
-            />
-            <button
-              type="button"
-              disabled={pending || !date || !heureLibre}
-              onClick={valider}
-              className={`${bouton} text-blue-200 hover:bg-celya-blue/15`}
-            >
-              OK
-            </button>
-          </span>
-        ) : (
+        </div>
+        <button
+          type="button"
+          className={carre}
+          disabled={pending || !pret}
+          onClick={() => changerJour(decalerJour(ymd!, 1, now!))}
+          aria-label="Jour suivant"
+        >
+          +
+        </button>
+      </div>
+
+      {/* L'heure : de grosses pastilles ; « Autre » ouvre l'horloge. */}
+      <div className="flex flex-wrap gap-1.5">
+        {HEURES_TACTILES.map((h) => (
+          <button
+            key={h}
+            type="button"
+            disabled={pending || !pret || !heureDisponible(ymd!, h, now!)}
+            onClick={() => setHm(h)}
+            aria-pressed={pret && h === hm}
+            className={pastille(pret && h === hm)}
+          >
+            {heureDite(h)}
+          </button>
+        ))}
+        <label className={pastille(pret && heureLibre)}>
+          {pret && heureLibre ? heureDite(hm) : "Autre"}
+          <input
+            type="time"
+            step={300}
+            value={hm}
+            disabled={pending || !pret}
+            onClick={(e) => {
+              try {
+                e.currentTarget.showPicker?.();
+              } catch {
+                /* idem */
+              }
+            }}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (now && ymd && /^\d{2}:\d{2}$/.test(v) && heureDisponible(ymd, v, now)) setHm(v);
+            }}
+            aria-label={`${titre} — autre heure`}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          />
+        </label>
+      </div>
+
+      {onChoisir ? (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={pending || !date}
-            onClick={() => setAutreHeure(true)}
-            className={`${bouton} text-slate-500 hover:bg-white/[0.06] hover:text-slate-200`}
+            disabled={pending || !pret}
+            onClick={() => onChoisir(valeur)}
+            className="btn-primary min-h-[44px] min-w-0 max-w-full flex-1 justify-center px-4 text-sm sm:flex-none"
           >
-            Autre heure
+            <Icone nom="coche" className="h-4 w-4 shrink-0" />
+            <span className="truncate">Valider · {libelle}</span>
           </button>
-        )}
-        {extra}
-        {info && (
-          <span className="flex basis-full items-center gap-1 px-1 pb-0.5 text-[11px] text-slate-400">
-            <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
-            {info}
-          </span>
-        )}
-      </div>
-      {name && (
+          {extra}
+        </div>
+      ) : (
         <>
-          <input type="hidden" name={name} value={valeur} required={required} />
-          <p className="px-1 text-[11px] text-slate-400">
-            {date && now ? `→ ${libelleRelance(valeur, ref)}` : jour === "autre" ? "Choisissez la date." : ""}
-          </p>
+          {name && <input type="hidden" name={name} value={valeur} required={required} />}
+          <p className="px-1 text-xs text-slate-300">→ {libelle}</p>
         </>
+      )}
+
+      {info && (
+        <p className="flex items-center gap-1 px-1 text-[11px] text-slate-400">
+          <Icone nom="calendrier" className="h-3 w-3 shrink-0" />
+          {info}
+        </p>
       )}
     </div>
   );

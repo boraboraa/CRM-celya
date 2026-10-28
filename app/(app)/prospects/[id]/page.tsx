@@ -26,7 +26,8 @@ import { RelancesSection } from "@/components/RelancesSection";
 import { AppelerAvecJanet } from "@/components/appelsIa/AppelerAvecJanet";
 import { BriefAppel } from "@/components/appelsIa/BriefAppel";
 import { lireBrief, lireSuiviFiche } from "@/lib/appelsIa/lectures";
-import { updateProspectAction, deleteProspectAction } from "@/app/actions";
+import { updateProspectAction } from "@/app/actions";
+import { SupprimerFiche } from "@/components/SupprimerFiche";
 import { factsFromRows, evaluateStatus, raisonAffichee } from "@/lib/crm/status";
 import { deriveNextAction, type OpenTask, type LastEvent } from "@/lib/crm/nextAction";
 import {
@@ -552,14 +553,12 @@ export default async function ProspectDetailPage({
                 />
               </div>
 
-              <form action={deleteProspectAction} className="mt-8 border-t border-white/[0.06] pt-5">
-                <input type="hidden" name="id" value={prospect.id} />
-                <button className="btn-danger">Supprimer ce prospect</button>
-                <p className="mt-2 text-[11px] text-slate-500">
-                  Supprime aussi son historique et ses relances. Action définitive.
-                </p>
-              </form>
             </details>
+            {/* Supprimer : visible sans ouvrir « Modifier la fiche », et en
+                deux temps (28/10). Responsable ou admin seulement. */}
+            <div className="mt-3">
+              <SupprimerFiche prospectId={prospect.id} nom={prospect.company_name} />
+            </div>
           </section>
           )}
         </div>

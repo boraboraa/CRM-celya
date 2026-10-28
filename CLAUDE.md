@@ -5,6 +5,14 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 28 octobre 2026 — rien ne dépasse de son cadre
+
+Même branche, même PR, **un commit à part** : exigence de Bora avant la fusion,
+« aucune information ne dépasse de son cadre, ni sur ordinateur ni sur
+téléphone ». Aucune migration, aucune donnée touchée — voir « Rien ne dépasse
+de son cadre ». Le reste de l'état du 27 au soir (migrations `032` / `033`
+écrites, PAS appliquées) est inchangé.
+
 ## État au 27 octobre 2026, au soir — simplifier après la mise en ligne
 
 La PR #20 est fusionnée (`main` = `8e43e67`) et **les migrations `025` à `031`
@@ -1366,6 +1374,69 @@ LOCALE alimentée de fiches fictives (« aucune donnée de production touchée �
 les étudiants n'ont pas de fiche, et créer un compte de banc aurait écrit en
 base) — jamais commitée.
 
+### Rien ne dépasse de son cadre (28 octobre — même PR, commit à part)
+
+Exigence ferme de Bora : **aucun texte, bouton ou pastille ne sort de sa carte
+ou de sa ligne**, à 1280, 390 et 360 px. Texte long → « … », entier au survol
+(`title`) ou au tap (le lien, le champ, le dépli) ; rangée trop large → elle
+passe à la ligne.
+
+- **« Rendez-vous à débriefer » compact AUSSI sur ordinateur** (`DebriefList`) :
+  une ligne par RDV (société · date · « il y a X j »), trois puis « Voir les
+  N », sur les deux écrans. Le clic DÉPLIE le même `DebriefRdv` sous la ligne
+  (ordinateur, « Replier ») ou l'ouvre dans la feuille du bas (téléphone) —
+  `matchMedia` au clic, un seul état optimiste. Quatre RDV faisaient quatre
+  cartes de sept boutons avant la première relance.
+- **`overflow-wrap: break-word` sur `body`** (`globals.css`) : un mot plus long
+  que sa ligne (nom de société collé, adresse email, URL) passe à la ligne au
+  lieu de pousser la carte puis la page. Un mot dans le corps d'un email de la
+  chronologie élargissait toute la fiche de 150 px sur téléphone.
+- **`.input` termine par « … »** (`text-overflow: ellipsis`) ; « Ce qu'on
+  sait » de « Ma liste » est un `ChampExtensible` (la remarque se lit en
+  entier).
+- **La liste des prospects ne passe en colonnes qu'à `xl`** (1280) : à 1024,
+  31 rem de colonnes fixes laissaient 25 px au nom et au dernier résultat.
+  En dessous, la carte du téléphone. Le contact (« Mme … · Namur ») ne
+  rejoint la ligne du nom qu'à `xl`, borné à 45 %.
+- **Le classement en cartes sur téléphone** (`TableauClassement`, extrait de
+  la page) : le tableau de six colonnes défilait DANS sa carte, et les
+  chiffres — tout ce qu'on vient lire — étaient hors de l'écran. À partir de
+  `sm` : tableau `table-fixed`, nom tronqué.
+- **« À faire » sorti de sa page** (`ZonesAFaire`, valeurs seulement, comme
+  `AffichageProspects`) : c'est ce qui permet de le rendre sur la page de
+  démonstration locale. `MaListe` accepte `etatInitial` pour la même raison.
+
+**Le contrôle : `tests/mobile/cadres.ts`** (`controlerCadres`, exécuté DANS la
+page ; `rienNeDepasse(page)` dans `outils.ts`, branché sur toutes les pages de
+`PAGES` + une fiche, test « rien ne dépasse de son cadre » de
+`coquille.spec.ts`). Chaque contenu visible est comparé à son CADRE (ancêtre
+qui se voit — fond, bordure, anneau —, `li`, `tr`, `td`, `[data-cadre]`) ET à
+son EMPLACEMENT (élément d'une rangée flex ou d'une grille : sans fond, mais
+un texte qui en sort chevauche le voisin). Cinq fautes : **dépasse**,
+**coupé** (rogné sans « … »), **tronqué sans texte entier** (ni `title`, ni
+lien, ni champ), **écrasé** (une troncature qui ne laisse pas trois
+caractères — un nom réduit à 0 px par une colonne qui a glissé) et **défile
+de côté** (un défilement horizontal cache son contenu, sauf `data-defile` :
+les deux rangées du pipeline). Une marge NÉGATIVE (zone de tap agrandie de la
+case « Fait ») ne compte pas. Passé sur la page de démonstration à 1280,
+1024, 768, 640, 390 et 360 px, avec des noms de 90 caractères, un mot de 65
+lettres sans espace, des notes de 400 caractères : **73 fautes avant, 0
+après** (À faire, liste, pipeline, fiche, débrief, Ma liste, classement).
+Chaque règle a été vérifiée en remettant le défaut qu'elle vise.
+
+Trouvés au passage, et corrigés : le titre d'une relance dans une rangée
+`flex` (un texte élément flex ne se coupe pas : 180 px de débordement sur le
+bloc « Reprogrammer ») ; la grille de la fiche en `lg:grid-cols-3` sans
+`grid-cols-1` à la base (une colonne `auto` prend la largeur de son plus long
+mot) ; `[auto_1fr]` et `[1.4fr_…]` (un `fr` seul vaut `minmax(auto, …)`) ;
+**la ligne d'une fiche de collègue sans étoile** — `BoutonEtoile` ne rend rien,
+la cellule de grille disparaissait et toute la ligne glissait d'une colonne,
+nom écrasé à zéro ; **« Ce qu'on sait » jamais tronqué dans la liste** —
+`block` et `line-clamp-1` sur le même bouton, le premier annule le
+`display: -webkit-box` du second ; le résumé de la carte d'objectifs coincé à
+côté du titre sur téléphone (sous le titre, ou caché quand les barres disent
+la même chose).
+
 ### Confiance IA — Chaud / Tiède / Froid (migration `011`, 4 août au soir)
 
 **La probabilité chiffrée à la main est retirée de l'interface** (décision de
@@ -1546,7 +1617,8 @@ Safari iOS zoome la page à chaque champ touché.
   `PerimetreSwitcher.tsx` — calculés une fois pour l'ordinateur, la puce et la
   feuille « Filtres »). La zone débrief tient en **une ligne par RDV**, trois
   puis « Voir les N » ; un tap ouvre la feuille du bas avec le MÊME
-  `DebriefRdv` (`DebriefList`, deux rendus CSS d'un seul état optimiste).
+  `DebriefRdv` (`DebriefList`, un seul état optimiste). Depuis le 28/10,
+  l'ordinateur aussi : le clic y déplie l'issue sous la ligne.
   Chaque relance : le titre sur toute la largeur, puis UNE ligne d'actions —
   Appeler (`tel:`), Résultat (ou « Débriefer le RDV »), la date (un tap déplie
   la date et les raccourcis). La case à cocher garde son dessin de 20 px mais
@@ -1667,7 +1739,8 @@ la feuille remonte de sa hauteur) ; la zone sûre en bas.
 360 × 800, 1280 × 900) × deux rôles, identifiants des comptes de test en
 variables d'environnement (`E2E_*`, voir la config). Il échoue
 automatiquement si une page est plus large que l'écran (et nomme les éléments
-qui dépassent) ou si une cible fait moins de 44 px. Les tests qui écrivent
+qui dépassent), si un contenu sort de son CADRE (`rienNeDepasse`, 28/10 —
+voir « Rien ne dépasse de son cadre ») ou si une cible fait moins de 44 px. Les tests qui écrivent
 créent leurs propres fiches « ZZ Test mobile e2e — … » et les retirent.
 ⚠ Piège du banc : `pkill -f "next start"` tue aussi le shell qui le lance (le
 motif est dans sa propre ligne de commande), et un ancien serveur resté sur le
@@ -3159,6 +3232,18 @@ porter sur chacun d'eux, pas seulement sur `index.ts`.
 ---
 
 ## Pièges déjà rencontrés — ne pas les redécouvrir
+
+**Un mot trop long pousse son cadre, et trois réflexes CSS l'y aident
+(28 octobre 2026).** (1) Le texte posé directement dans une rangée `flex`
+(`<p class="flex">{icône}{titre}</p>`) devient un élément flex dont la
+largeur minimale est son plus long mot : `min-w-0` ne suffit pas, il faut un
+bloc (icône `inline`). (2) Une colonne de grille `auto` ou un `fr` seul vaut
+`minmax(auto, …)` : elle prend la largeur du plus long mot — toujours
+`grid-cols-1` à la base et `minmax(0, 1fr)` dans un gabarit. (3) Un composant
+qui ne rend rien (`BoutonEtoile` en lecture) fait disparaître sa CELLULE de
+grille, et la ligne glisse d'une colonne : une cellule vide explicite. Rien
+de tout cela ne casse avec des données de test courtes — **la page de
+démonstration aux noms très longs et `rienNeDepasse` sont faits pour ça**.
 
 **Une réponse RSC qui porte un `Set-Cookie`, et l'en-tête `rsc` que le
 middleware ne voit pas (27 octobre 2026).** Mesuré en production : chaque

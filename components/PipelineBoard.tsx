@@ -205,7 +205,8 @@ export function PipelineBoard({
 
       {/* Téléphone : le sélecteur d'étape. Il défile de côté dans son propre
           cadre — la page, elle, ne déborde jamais. */}
-      <div className="-mx-4 mb-3 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
+      {/* `data-defile` : ce défilement de côté est VOULU (banc, cadres.ts). */}
+      <div data-defile className="-mx-4 mb-3 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
         <div className="flex w-max gap-1.5" role="group" aria-label="Étape affichée">
           {STATUS_ORDER.map((status) => {
             const n = items.filter((c) => c.status === status).length;
@@ -233,7 +234,7 @@ export function PipelineBoard({
         choix est alors verrouillé.
       </p>
 
-      <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+      <div data-defile className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
         <div className="lg:flex lg:min-w-max lg:gap-4">
           {STATUS_ORDER.map((status, columnIndex) => {
             const list = items.filter((c) => c.status === status);
@@ -403,13 +404,13 @@ export function PipelineBoard({
                           className="block"
                         >
                           <p className="flex min-w-0 items-center gap-1.5">
-                            <span className="truncate text-sm font-semibold text-slate-50">
+                            <span className="truncate text-sm font-semibold text-slate-50" title={c.company_name}>
                               {c.company_name}
                             </span>
                             {parJanet.has(c.id) && <EtiquetteJanet compact />}
                           </p>
                           {c.contact_name && (
-                            <p className="truncate text-xs text-slate-400">
+                            <p className="truncate text-xs text-slate-400" title={c.contact_name}>
                               {c.contact_name}
                             </p>
                           )}
@@ -452,7 +453,7 @@ export function PipelineBoard({
                             />
                           </p>
                           {c.confidence_level && c.confidence_reason && !c.confidence_locked && (
-                            <p className="mt-1 truncate text-[11px] text-slate-500">
+                            <p className="mt-1 truncate text-[11px] text-slate-500" title={c.confidence_reason}>
                               {c.confidence_reason}
                             </p>
                           )}

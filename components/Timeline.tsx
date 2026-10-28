@@ -156,7 +156,7 @@ export function Timeline({
                   <span className="text-[11px] text-slate-500">
                     {relative(entry.at)}
                   </span>
-                  <span className="ml-auto flex items-center gap-2">
+                  <span className="ml-auto flex min-w-0 max-w-full items-center gap-2">
                     {entry.pending ? (
                       <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
                         <span
@@ -168,7 +168,7 @@ export function Timeline({
                     ) : (
                       <>
                         {entry.by && (
-                          <span className="truncate text-xs text-slate-400">
+                          <span className="truncate text-xs text-slate-400" title={entry.by}>
                             {entry.by}
                           </span>
                         )}

@@ -19,14 +19,16 @@ test.describe("À faire", () => {
     await dansLePremierEcran(page, premiere, 2);
   });
 
-  test("téléphone : titre seul, débriefs en lignes compactes", async ({ page }, info) => {
+  test("débriefs en lignes compactes — téléphone ET ordinateur", async ({ page }, info) => {
     const { mobile, role } = contexte(info);
-    test.skip(!mobile || role !== "commercial", "commercial sur téléphone (4 RDV de test)");
+    test.skip(role !== "commercial", "commercial (4 RDV de test)");
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
-    await expect(page.getByText("Trois états, jamais mélangés")).toBeHidden();
-    await expect(page.locator("main").getByRole("link", { name: "+ Nouveau prospect" })).toBeHidden();
-    // Trois lignes, puis « Voir les N ».
+    if (mobile) {
+      await expect(page.getByText("Trois états, jamais mélangés")).toBeHidden();
+      await expect(page.locator("main").getByRole("link", { name: "+ Nouveau prospect" })).toBeHidden();
+    }
+    // Trois lignes, puis « Voir les N » — sur les deux écrans (28/10).
     const lignes = page.locator("#a-debriefer").getByRole("button", { name: /Débriefer$/ });
     await expect(lignes).toHaveCount(3);
     const voir = page.getByRole("button", { name: /^Voir les \d+$/ });
@@ -34,6 +36,16 @@ test.describe("À faire", () => {
     await voir.click();
     expect(await lignes.count()).toBeGreaterThan(3);
     await ciblesTactiles(page.locator("#a-debriefer"));
+    // Aucune issue affichée tant qu'on n'a rien ouvert.
+    await expect(page.locator("#a-debriefer").getByRole("group", { name: "Ce qu'a donné le rendez-vous" })).toHaveCount(0);
+    if (!mobile) {
+      // Ordinateur : le clic DÉPLIE l'issue sous la ligne, sans feuille.
+      await lignes.first().click();
+      await expect(page.locator("#a-debriefer").getByRole("group", { name: "Ce qu'a donné le rendez-vous" })).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.locator("#a-debriefer").getByRole("button", { name: /Replier$/ }).click();
+      await expect(page.locator("#a-debriefer").getByRole("group", { name: "Ce qu'a donné le rendez-vous" })).toHaveCount(0);
+    }
   });
 
   test("téléphone : une ligne d'actions sous le titre de la relance", async ({ page }, info) => {

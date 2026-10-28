@@ -10,6 +10,11 @@ html,
 body {
   background-color: #0a0e1a;
   color: #e6ebf5;
+  /* Rien ne dépasse de son cadre (28/10) : un mot plus long que sa ligne —
+     un nom de société collé, une adresse email, une URL — passe à la ligne
+     au lieu de pousser sa carte, sa ligne, puis la page. Sans effet sur un
+     texte ordinaire. Un élément de rangée flex doit aussi porter `min-w-0`. */
+  overflow-wrap: break-word;
 }
 
 /* Fond plat : les halos cyan/violet ne portaient aucune information et
@@ -52,6 +57,10 @@ body {
     @apply w-full rounded-xl bg-space-700/70 px-3.5 py-2.5 text-sm text-slate-100
            ring-1 ring-white/10 placeholder:text-slate-500 outline-none
            focus:ring-2 focus:ring-celya-blue/60 transition;
+    /* Un champ d'une ligne trop court pour sa valeur la termine par « … »
+       (rien ne dépasse de son cadre, 28/10) ; le texte entier revient au
+       tap, dans le champ. */
+    text-overflow: ellipsis;
   }
 
   .btn {

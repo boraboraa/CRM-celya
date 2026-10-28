@@ -139,7 +139,7 @@ export function TaskRow({
         lecture
           ? "block"
           : compact
-            ? "grid grid-cols-[auto_1fr] items-start"
+            ? "grid grid-cols-[auto_minmax(0,1fr)] items-start"
             : "flex flex-wrap items-start lg:flex-nowrap"
       }`}
     >
@@ -170,13 +170,15 @@ export function TaskRow({
       )}
 
       <div className="min-w-0 flex-1">
+        {/* Un bloc, pas une rangée flex : le texte d'un élément flex ne passe
+            pas à la ligne au milieu d'un mot trop long, il pousse la ligne. */}
         <p
-          className={`flex items-center gap-1.5 text-sm font-medium ${
+          className={`text-sm font-medium ${
             done ? "text-slate-500 line-through" : "text-slate-100"
           }`}
         >
           {task.priority === 1 && !done && (
-            <span className="inline-flex text-amber-400" title="Priorité haute">
+            <span className="mr-1.5 inline-flex align-[-1px] text-amber-400" title="Priorité haute">
               <Icone nom="alerte" className="h-3 w-3" />
             </span>
           )}
@@ -192,7 +194,7 @@ export function TaskRow({
                 // suivante » (lib/crm/ficheSuivante.ts).
                 href={lienDepuisAFaire(task.prospects.id)}
                 prefetch={false}
-                className="text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
+                className="min-w-0 text-slate-400 underline-offset-2 hover:text-celya-blue hover:underline"
               >
                 {task.prospects.starred_at && (
                   <span className="mr-1 inline-flex align-[-2px] text-amber-300" title="Étoilée">

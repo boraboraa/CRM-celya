@@ -161,10 +161,10 @@ export function ListeProspects({
         </div>
       )}
 
-      {/* Entêtes de colonne — ordinateur seulement. */}
+      {/* Entêtes de colonne — grand écran (`xl`) seulement : plus étroit, la carte. */}
       <div
         aria-hidden
-        className={`hidden px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 lg:grid lg:gap-3 ${
+        className={`hidden px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 xl:grid xl:gap-3 ${
           admin ? GRILLE_ADMIN : GRILLE
         }`}
       >
@@ -185,12 +185,12 @@ export function ListeProspects({
           return (
             <li
               key={p.id}
-              className={`relative px-3 py-2.5 transition lg:grid lg:items-center lg:gap-3 lg:py-2 lg:hover:bg-white/[0.025] ${
+              className={`relative px-3 py-2.5 transition xl:grid xl:items-center xl:gap-3 xl:py-2 xl:hover:bg-white/[0.025] ${
                 admin ? GRILLE_ADMIN : GRILLE
               } ${choisies.has(p.id) ? "bg-celya-blue/[0.06]" : ""}`}
             >
               {admin && (
-                <label className="absolute left-0 top-1.5 z-10 inline-flex h-11 w-9 cursor-pointer items-center justify-center lg:static">
+                <label className="absolute left-0 top-1.5 z-10 inline-flex h-11 w-9 cursor-pointer items-center justify-center xl:static">
                   <input
                     type="checkbox"
                     checked={choisies.has(p.id)}
@@ -202,25 +202,39 @@ export function ListeProspects({
               )}
 
               {/* ⭐ + qui c'est (téléphone : la première ligne, avec Appeler). */}
-              <div className={`flex min-w-0 items-start gap-1 lg:contents ${admin ? "pl-8 lg:pl-0" : ""}`}>
-                <BoutonEtoile
-                  prospectId={p.id}
-                  etoilee={p.etoilee}
-                  modifiable={p.modifiable}
-                  nom={p.company_name}
-                  className="-ml-2 -mt-1.5 lg:-my-1.5"
-                />
+              <div className={`flex min-w-0 items-start gap-1 xl:contents ${admin ? "pl-8 xl:pl-0" : ""}`}>
+                {/* Une cellule de grille TOUJOURS présente (ordinateur) : sur la
+                    fiche d'un collègue sans étoile, le bouton ne rend rien, et
+                    toute la ligne glissait d'une colonne — le nom écrasé à zéro. */}
+                {p.modifiable || p.etoilee ? (
+                  <BoutonEtoile
+                    prospectId={p.id}
+                    etoilee={p.etoilee}
+                    modifiable={p.modifiable}
+                    nom={p.company_name}
+                    className="-ml-2 -mt-1.5 xl:-my-1.5"
+                  />
+                ) : (
+                  <span aria-hidden className="hidden xl:block" />
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="flex min-w-0 items-center gap-1.5">
                     {/* Pas de préchargement : 500 lignes, 500 rendus de fiche. */}
                     <Link
                       href={`/prospects/${p.id}`}
                       prefetch={false}
-                      className="truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
+                      title={p.company_name}
+                      className="min-w-[3rem] truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
                     >
                       {p.company_name}
                     </Link>
-                    {qui && <span className="hidden min-w-0 truncate text-xs text-slate-400 sm:inline">{qui}</span>}
+                    {qui && (
+                      // Sur la ligne du nom à partir de `xl` seulement : plus étroit, le nom,
+                      // l'étiquette Janet et l'avatar ne laissent pas de quoi lire.
+                      <span className="hidden min-w-[3rem] max-w-[45%] truncate text-xs text-slate-400 xl:inline" title={qui}>
+                        {qui}
+                      </span>
+                    )}
                     {p.janet && <EtiquetteJanet compact />}
                     {p.responsable && (
                       <span className="shrink-0" title={p.responsable}>
@@ -228,15 +242,21 @@ export function ListeProspects({
                       </span>
                     )}
                   </p>
-                  {qui && <p className="truncate text-xs text-slate-400 sm:hidden">{qui}</p>}
+                  {qui && (
+                    <p className="truncate text-xs text-slate-400 xl:hidden" title={qui}>
+                      {qui}
+                    </p>
+                  )}
                   {p.note && (
                     <button
                       type="button"
                       onClick={() => setOuvertes((s) => basculer(s, p.id))}
                       aria-expanded={noteOuverte}
                       title={noteOuverte ? undefined : p.note}
-                      className={`relative z-10 mt-0.5 block w-full text-left text-xs leading-relaxed text-slate-500 ${
-                        noteOuverte ? "whitespace-pre-wrap text-slate-300" : "line-clamp-1"
+                      // `block` et `line-clamp-1` ne vont pas ensemble : le
+                      // second a besoin de `display: -webkit-box`.
+                      className={`relative z-10 mt-0.5 w-full text-left text-xs leading-relaxed text-slate-500 ${
+                        noteOuverte ? "block whitespace-pre-wrap text-slate-300" : "line-clamp-1"
                       }`}
                     >
                       {p.note}
@@ -248,7 +268,7 @@ export function ListeProspects({
                     href={tel}
                     aria-label={`Appeler ${p.company_name}`}
                     title={p.phone ?? undefined}
-                    className="relative z-10 -mr-1 -mt-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-celya-blue transition hover:bg-white/[0.06] lg:hidden"
+                    className="relative z-10 -mr-1 -mt-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-celya-blue transition hover:bg-white/[0.06] xl:hidden"
                   >
                     <Icone nom="telephone" className="h-4 w-4" />
                   </a>
@@ -256,8 +276,8 @@ export function ListeProspects({
               </div>
 
               {/* L'étape, la relance, le dernier résultat (téléphone : une ligne). */}
-              <div className={`mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs lg:contents ${admin ? "pl-8 lg:pl-0" : ""}`}>
-                <div className="relative z-10 lg:min-w-0">
+              <div className={`mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs xl:contents ${admin ? "pl-8 xl:pl-0" : ""}`}>
+                <div className="relative z-10 xl:min-w-0">
                   {p.modifiable ? (
                     // La PUCE se voit, le menu natif est posé dessus, transparent :
                     // un tap ouvre le sélecteur du téléphone, et la règle des
@@ -284,7 +304,7 @@ export function ListeProspects({
                     <StatusChip status={p.status} />
                   )}
                 </div>
-                <div className="min-w-0 truncate text-[11px] lg:order-none">
+                <div className="min-w-0 truncate text-[11px] xl:order-none">
                   {filtreEmails && p.dernier_mail ? (
                     <span className="text-slate-400">
                       {fmtDate(p.dernier_mail)} · {relative(p.dernier_mail)}
@@ -298,10 +318,10 @@ export function ListeProspects({
                       streak={p.last_no_answer_streak}
                     />
                   ) : (
-                    <span className="text-slate-600 lg:inline">{p.status === "a_appeler" ? "Jamais appelée" : ""}</span>
+                    <span className="text-slate-600 xl:inline">{p.status === "a_appeler" ? "Jamais appelée" : ""}</span>
                   )}
                 </div>
-                <div className="min-w-0 text-[11px] lg:text-xs">
+                <div className="min-w-0 text-[11px] xl:text-xs">
                   <ProchaineActionTexte
                     at={p.next_action_at}
                     kind={p.next_action_kind}
@@ -316,7 +336,7 @@ export function ListeProspects({
               </div>
 
               {/* Les gestes, ordinateur — au-dessus du lien étiré. */}
-              <div className="relative z-10 hidden items-center justify-end lg:flex">
+              <div className="relative z-10 hidden items-center justify-end xl:flex">
                 {p.email && p.modifiable && (
                   <Link
                     href={composerHref(p.id)}
@@ -387,8 +407,8 @@ export function ListeProspects({
   );
 }
 
-/** Les colonnes de la ligne, ordinateur (classes complètes : règle JIT). */
+/** Les colonnes de la ligne, à partir de `xl` (classes complètes : règle JIT). */
 const GRILLE =
-  "lg:grid-cols-[2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";
+  "xl:grid-cols-[2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";
 const GRILLE_ADMIN =
-  "lg:grid-cols-[2.25rem_2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";
+  "xl:grid-cols-[2.25rem_2.25rem_minmax(0,2.2fr)_9.5rem_minmax(0,1.5fr)_9rem_8rem]";

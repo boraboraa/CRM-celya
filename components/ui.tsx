@@ -515,6 +515,7 @@ export function PageHeader({
           className={`font-display font-semibold tracking-tight text-slate-50 ${
             compactMobile ? "truncate text-xl lg:text-2xl" : "text-2xl"
           }`}
+          title={compactMobile ? title : undefined}
         >
           {title}
         </h1>

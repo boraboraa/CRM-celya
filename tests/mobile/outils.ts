@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../../lib/env";
+import { controlerCadres } from "./cadres";
 
 export type Role = "commercial" | "admin";
 export type Appareil = "iphone" | "android" | "ordinateur";
@@ -51,6 +52,15 @@ export async function pasDeDefilementHorizontal(page: Page): Promise<void> {
     return { largeur, ecran, coupables };
   });
   expect(largeur, `page plus large que l'écran (${ecran} px) : ${coupables.join(" ; ")}`).toBeLessThanOrEqual(ecran);
+}
+
+/**
+ * Échec automatique : rien ne dépasse de son CADRE (carte, ligne, pastille,
+ * bouton) — pas seulement de la page. La règle vit dans `cadres.ts`.
+ */
+export async function rienNeDepasse(page: Page, selecteur = "main"): Promise<void> {
+  const fautes = await page.evaluate(controlerCadres, selecteur);
+  expect(fautes, `contenu hors de son cadre (${page.url()})`).toEqual([]);
 }
 
 /** Toutes les cibles VISIBLES du conteneur mesurent au moins `min` px de haut et de large. */

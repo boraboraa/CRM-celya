@@ -5,15 +5,8 @@ import { getSession } from "@/lib/auth";
 import { EmptyState, PageHeader } from "@/components/ui";
 import { lireClassement, periodesClassement } from "@/lib/crm/lectureObjectifs";
 import { DEBUT_SALES_TROPHY } from "@/lib/crm/compteurs";
+import { TableauClassement } from "@/components/TableauClassement";
 
-const COLONNES = [
-  ["appels", "Appels"],
-  ["reponses", "Réponses"],
-  ["interesses", "Intéressés"],
-  ["rdv", "RDV"],
-  ["essais", "Essais"],
-  ["numeros", "Numéros ajoutés"],
-] as const;
 
 const fmtJour = (ymd: string) => {
   const [a, m, j] = ymd.split("-").map(Number);
@@ -87,43 +80,7 @@ export default async function ClassementPage({
           hint="Y figurent les commerciaux qui ont un objectif — l'administrateur les pose depuis « Équipe »."
         />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
-            <thead className="border-b border-white/[0.06]">
-              <tr>
-                <th className="th w-10">#</th>
-                <th className="th">Nom</th>
-                {COLONNES.map(([k, l]) => (
-                  <th key={k} className="th text-right">
-                    {l}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04]">
-              {lignes.map((l, i) => {
-                const moi = l.user_id === session.userId;
-                return (
-                  <tr key={l.user_id} className={moi ? "bg-celya-blue/[0.07]" : undefined}>
-                    <td className="td tabular-nums text-slate-400">{i + 1}</td>
-                    <td className="td font-medium text-slate-100">
-                      {l.nom}
-                      {moi && <span className="ml-1.5 text-xs text-celya-blue">(vous)</span>}
-                    </td>
-                    {COLONNES.map(([k]) => (
-                      <td
-                        key={k}
-                        className={`td text-right tabular-nums ${k === "essais" && l.essais > 0 ? "font-semibold text-teal-300" : "text-slate-200"}`}
-                      >
-                        {l[k]}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <TableauClassement lignes={lignes} moiId={session.userId} />
       )}
 
       <p className="mt-4 text-xs leading-relaxed text-slate-500">

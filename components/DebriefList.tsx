@@ -37,10 +37,12 @@ export type DebriefMeeting = {
  * intéressé — ou « n'a pas eu lieu ». Optimiste : la ligne quitte la zone au
  * clic, et revient d'elle-même si le serveur refuse.
  *
- * TÉLÉPHONE (sous `lg`, 19/10) : neuf cartes hautes repoussaient la première
- * relance du jour à plusieurs écrans. Chaque RDV y tient sur UNE ligne
- * (société · date · « il y a X j ») ; un tap ouvre l'issue dans la feuille du
- * bas — le même `DebriefRdv`, pas une copie. Trois lignes, puis « Voir les N ».
+ * UNE LIGNE PAR RENDEZ-VOUS, téléphone ET ordinateur (28/10) : société · date
+ * · « il y a X j ». Sur ordinateur, quatre rendez-vous à débriefer faisaient
+ * quatre cartes de sept boutons avant la première relance. Le clic déplie
+ * l'issue SOUS la ligne (ordinateur) ou l'ouvre dans la feuille du bas
+ * (téléphone) — le même `DebriefRdv`, pas une copie. Trois lignes, puis
+ * « Voir les N ».
  */
 export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
   const [vue, retirer] = useOptimistic(
@@ -55,6 +57,8 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
   const [sansSuite, setSansSuite] = useState<string[]>([]);
   /** Téléphone : le RDV dont l'issue est ouverte dans la feuille du bas. */
   const [ouvert, setOuvert] = useState<string | null>(null);
+  /** Ordinateur : le RDV dont l'issue est dépliée sous sa ligne. */
+  const [deplie, setDeplie] = useState<string | null>(null);
   const [tout, setTout] = useState(false);
 
   if (vue.length === 0 && !erreur && sansSuite.length === 0) return null;
@@ -101,35 +105,77 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
       ))}
       {vue.length > 0 && (
         <>
-          {/* Téléphone : une ligne par rendez-vous. */}
-          <ul className="card animate-rise divide-y divide-white/[0.05] lg:hidden">
-            {lignes.map((m) => (
-              <li key={m.id}>
-                <button
-                  type="button"
-                  onClick={() => setOuvert(m.id)}
-                  aria-haspopup="dialog"
-                  className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition active:bg-white/[0.04]"
-                >
-                  <Icone nom="calendrier" className="h-4 w-4 shrink-0 text-amber-300/80" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-100">
-                      {m.prospect?.company_name ?? m.title}
+          {/* Une ligne par rendez-vous ; le clic ouvre l'issue — dépliée sous
+              la ligne sur ordinateur, dans la feuille du bas sur téléphone. */}
+          <ul className="card animate-rise divide-y divide-white/[0.05]">
+            {lignes.map((m) => {
+              const nom = m.prospect?.company_name ?? m.title;
+              const ouverte = deplie === m.id;
+              return (
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.matchMedia("(min-width: 1024px)").matches) {
+                        setDeplie(ouverte ? null : m.id);
+                      } else {
+                        setOuvert(m.id);
+                      }
+                    }}
+                    aria-expanded={ouverte}
+                    className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-white/[0.02] active:bg-white/[0.04]"
+                  >
+                    <Icone nom="calendrier" className="h-4 w-4 shrink-0 text-amber-300/80" />
+                    <span className="min-w-0 flex-1 lg:flex lg:items-baseline lg:gap-3">
+                      <span className="block truncate text-sm font-medium text-slate-100 lg:min-w-0" title={nom}>
+                        {nom}
+                      </span>
+                      <span className="block truncate text-xs text-slate-400 lg:shrink-0">
+                        {fmtDateTime(m.starts_at)} · {relative(m.starts_at)}
+                      </span>
                     </span>
-                    <span className="block truncate text-xs text-slate-400">
-                      {fmtDateTime(m.starts_at)} · {relative(m.starts_at)}
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-celya-blue">
+                      {ouverte ? "Replier" : "Débriefer"}
+                      <Icone
+                        nom="chevron"
+                        className={`hidden h-3 w-3 transition lg:block ${ouverte ? "rotate-180" : ""}`}
+                      />
                     </span>
-                  </span>
-                  <span className="shrink-0 text-xs font-medium text-celya-blue">Débriefer</span>
-                </button>
-              </li>
-            ))}
+                  </button>
+                  {/* Ordinateur seulement : la feuille du bas fait ce travail
+                      sur téléphone. Le state ne s'ouvre que sur un grand
+                      écran, la classe le garde caché si l'écran rétrécit. */}
+                  {ouverte && (
+                    <div className="hidden space-y-2.5 px-4 pb-4 lg:block">
+                      {m.prospect && (
+                        <p className="text-xs text-slate-400">
+                          <Link
+                            href={lienDepuisAFaire(m.prospect.id)}
+                            prefetch={false}
+                            className="text-celya-blue underline-offset-2 hover:underline"
+                          >
+                            Ouvrir la fiche
+                          </Link>
+                        </p>
+                      )}
+                      <DebriefRdv
+                        meetingId={m.id}
+                        prospectId={m.prospect?.id ?? null}
+                        contactActuel={m.prospect?.contact_name ?? null}
+                        pendant={pendant(m)}
+                        apres={apres(m)}
+                      />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
           {vue.length > APERCU && (
             <button
               type="button"
               onClick={() => setTout((t) => !t)}
-              className="btn-link mt-1 min-h-[44px] min-w-[44px] text-xs lg:hidden"
+              className="btn-link mt-1 min-h-[44px] min-w-[44px] text-xs"
             >
               {tout ? "Réduire" : `Voir les ${vue.length}`}
             </button>
@@ -168,41 +214,6 @@ export function DebriefList({ meetings }: { meetings: DebriefMeeting[] }) {
             )}
           </FeuilleBas>
 
-          {/* Ordinateur : la carte complète, l'issue à même la ligne. */}
-          <ul className="card animate-rise hidden divide-y divide-white/[0.05] lg:block">
-            {vue.map((m) => (
-              <li key={m.id} className="space-y-2.5 px-4 py-3.5">
-                <div className="flex items-center gap-3">
-                  <Icone nom="calendrier" className="h-4 w-4 shrink-0 text-slate-400" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-100">
-                      {m.prospect ? (
-                        <Link
-                          href={lienDepuisAFaire(m.prospect.id)}
-                          prefetch={false}
-                          className="underline-offset-2 hover:text-celya-blue hover:underline"
-                        >
-                          {m.prospect.company_name}
-                        </Link>
-                      ) : (
-                        m.title
-                      )}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {fmtDateTime(m.starts_at)} · {relative(m.starts_at)}
-                    </p>
-                  </div>
-                </div>
-                <DebriefRdv
-                  meetingId={m.id}
-                  prospectId={m.prospect?.id ?? null}
-                  contactActuel={m.prospect?.contact_name ?? null}
-                  pendant={pendant(m)}
-                  apres={apres(m)}
-                />
-              </li>
-            ))}
-          </ul>
         </>
       )}
     </>

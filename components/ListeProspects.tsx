@@ -1,6 +1,7 @@
 "use client";
 
-import { lieuAffiche } from "@/lib/crm/regions";
+import { communeAffichee } from "@/lib/crm/regions";
+import { PastilleRegion } from "@/components/PastilleRegion";
 import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { attribuerProspectsAction, moveProspectAction, supprimerProspectsAction } from "@/app/actions";
@@ -204,7 +205,7 @@ export function ListeProspects({
         {vue.map((p) => {
           const tel = lienTel(p.phone);
           const noteOuverte = ouvertes.has(p.id);
-          const qui = [p.contact_name, lieuAffiche(p.city, p.region)].filter(Boolean).join(" · ") || p.email || "";
+          const qui = [p.contact_name, communeAffichee(p.city, p.region)].filter(Boolean).join(" · ") || p.email || "";
           return (
             <li
               key={p.id}
@@ -247,10 +248,13 @@ export function ListeProspects({
                       href={`/prospects/${p.id}`}
                       prefetch={false}
                       title={p.company_name}
-                      className="min-w-[3rem] truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
+                      className="min-w-[6rem] truncate font-semibold text-slate-50 before:absolute before:inset-0 before:content-['']"
                     >
                       {p.company_name}
                     </Link>
+                    {/* La région (29/10) : sur la ligne du nom à partir de `xl`,
+                        sous le nom plus étroit. */}
+                    <PastilleRegion region={p.region} className="hidden min-w-0 max-w-[11rem] shrink-[0.2] xl:inline-flex" />
                     {qui && (
                       // Sur la ligne du nom à partir de `xl` seulement : plus étroit, le nom,
                       // l'étiquette Janet et l'avatar ne laissent pas de quoi lire.
@@ -265,11 +269,14 @@ export function ListeProspects({
                       </span>
                     )}
                   </p>
-                  {qui && (
-                    <p className="truncate text-xs text-slate-400 xl:hidden" title={qui}>
-                      {qui}
-                    </p>
-                  )}
+                  <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400 xl:hidden">
+                    <PastilleRegion region={p.region} className="max-w-[60%] shrink-0" />
+                    {qui && (
+                      <span className="min-w-[3rem] truncate" title={qui}>
+                        {qui}
+                      </span>
+                    )}
+                  </p>
                   {p.note && (
                     <button
                       type="button"

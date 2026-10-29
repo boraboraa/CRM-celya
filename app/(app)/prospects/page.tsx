@@ -262,6 +262,8 @@ export default async function ProspectsPage({
     id: p.id,
     company_name: p.company_name,
     contact_name: p.contact_name,
+    city: p.city,
+    region: p.region,
     status: p.status,
     confidence_level: p.confidence_level,
     confidence_reason: p.confidence_reason,

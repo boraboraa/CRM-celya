@@ -5,6 +5,32 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026, après-midi — la région en pastille
+
+Demande de Bora : « sur la fiche, quand c'est en aperçu, mettre la région ».
+**Une pastille région sur chaque fiche** — liste (sur la ligne du nom à `xl`,
+sous le nom plus étroit), carte du pipeline, tête de fiche :
+« Bruxelles · Auderghem », « Brabant flamand », ou « Région ? » en pointillé
+gris quand on ne sait pas (`components/PastilleRegion.tsx`, libellé par
+`pastilleRegion` ; la commune s'affiche à côté quand elle apprend quelque
+chose, `communeAffichee`). **Et la région se devine par l'indicatif du FIXE**
+quand ni la commune ni l'adresse ne disent rien : **la `038` est APPLIQUÉE**
+(`region_de_telephone`, le trigger `prospects_lieu` écoute aussi `phone`) —
+02 → « Bruxelles (commune à préciser) », 081 → Namur, 04 sur 9 chiffres →
+Liège… ; un GSM, un numéro spécial (0800, 090x, 070, 077, 078), un numéro
+étranger, et les zones à cheval (056, 067) ne disent rien. La commune et
+l'adresse passent TOUJOURS devant, une région posée à la main n'est jamais
+écrasée, et quand le numéro change, une région qui venait de l'ancien numéro
+suit le nouveau. Recopie TS : `regionDeTelephone` (`lib/crm/regions.ts`), jeu
+de cas commun `lib/crm/indicatifs.cas.json` (`test:regions` ET la recette).
+Reprise : **22 fiches** reçoivent une région par leur fixe, `updated_at`
+préservé ; **32 restent « Région ? »** (surtout des GSM et les fiches
+lyonnaises). Recette `supabase/recettes/038_assembler.sh` : **39 OK, 0 faute**.
+« Ma liste » montre la même chose avant l'import (`regionsDe` retombe sur
+l'indicatif). Contrôle des cadres sur page de démonstration locale, 1440 →
+360 px : **0 faute** (la pastille de la ligne a un plancher `min-w-0` et
+rétrécit peu, `shrink-[0.2]` ; le nom garde 6 rem au moins).
+
 ## État au 29 octobre 2026, midi — les perdues ne s'affichent plus
 
 Décision de Bora : **ce qui est perdu ne s'affiche plus par défaut** — ni dans
@@ -1561,6 +1587,7 @@ sans code postal) ; ailleurs, la **province** ; « Hors Belgique » pour un code
   city, address, region) range la commune (« woluwe saint pierre » →
   « Woluwe-Saint-Pierre ») et déduit la région — **sauf si la même écriture la
   fixe à la main**. Tous les écrivains (écran, MCP, Janet, SQL) y passent.
+- **Depuis la `038`** : à défaut de commune et d'adresse, l'indicatif du fixe (`region_de_telephone`, voir l'état du 29/10 après-midi).
 - **TypeScript ne porte que la LISTE** (`lib/crm/regions.ts`, = `regions_valides()`,
   vérifié par la recette), le filtre (`lireFiltreRegion` : une région,
   `g:bruxelles|wallonie|flandre`, ou `aucune`) et l'affichage (`lieuAffiche` :

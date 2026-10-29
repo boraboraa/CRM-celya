@@ -14,6 +14,9 @@ import {
   lireFiltreRegion,
   optionsFiltreRegion,
   valeurFiltreRegion,
+  regionDeTelephone,
+  pastilleRegion,
+  communeAffichee,
 } from "./regions.ts";
 
 let ok = 0;
@@ -88,6 +91,34 @@ cas("l'affichage : la commune, et la région quand elle apprend quelque chose", 
   assert.equal(lieuAffiche("  ", BRUXELLES_A_PRECISER), "Bruxelles");
   assert.equal(lieuAffiche("Lyon", null), "Lyon");
   assert.equal(lieuAffiche(null, null), null);
+});
+
+// --- L'indicatif du fixe (038) : le jeu de cas commun avec la recette SQL ---
+const indicatifs = JSON.parse(
+  readFileSync(new URL("./indicatifs.cas.json", import.meta.url), "utf8")
+) as { tel: string | null; region: string | null }[];
+cas(`l'indicatif du fixe : ${indicatifs.length} cas (indicatifs.cas.json, joués aussi par la recette 038)`, () => {
+  for (const c of indicatifs) assert.equal(regionDeTelephone(c.tel), c.region, `tel = ${c.tel}`);
+});
+cas("chaque région devinée par l'indicatif est une région de la liste fermée", () => {
+  for (const c of indicatifs) if (c.region) assert.ok(estRegion(c.region), c.region);
+});
+
+cas("la pastille : Bruxelles détaillé, la province ailleurs, « Région ? » sinon", () => {
+  assert.deepEqual(pastilleRegion("Auderghem"), { label: "Bruxelles · Auderghem", connue: true });
+  assert.deepEqual(pastilleRegion(BRUXELLES_A_PRECISER), { label: "Bruxelles", connue: true });
+  assert.deepEqual(pastilleRegion("Brabant flamand"), { label: "Brabant flamand", connue: true });
+  assert.deepEqual(pastilleRegion(HORS_BELGIQUE), { label: "Hors Belgique", connue: true });
+  assert.deepEqual(pastilleRegion(null), { label: "Région ?", connue: false });
+  assert.deepEqual(pastilleRegion("Atlantide"), { label: "Région ?", connue: false });
+});
+
+cas("la commune à côté de la pastille : seulement quand elle apprend quelque chose", () => {
+  assert.equal(communeAffichee("Auderghem", "Auderghem"), null);
+  assert.equal(communeAffichee("Overijse", "Brabant flamand"), "Overijse");
+  assert.equal(communeAffichee("Laeken", "Bruxelles-Ville"), "Laeken");
+  assert.equal(communeAffichee("Lyon", null), "Lyon");
+  assert.equal(communeAffichee(null, "Namur"), null);
 });
 
 console.log(`\n${ok} OK`);

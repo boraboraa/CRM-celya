@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { lieuAffiche } from "@/lib/crm/regions";
+import { communeAffichee } from "@/lib/crm/regions";
+import { PastilleRegion } from "@/components/PastilleRegion";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
@@ -382,8 +383,11 @@ export default async function ProspectDetailPage({
                   {prospect.email}
                 </a>
               )}
-              {lieuAffiche(prospect.city, prospect.region) && (
-                <span>{lieuAffiche(prospect.city, prospect.region)}</span>
+              {/* La région en pastille (29/10), la commune quand elle apprend
+                  quelque chose (« Overijse » sous « Brabant flamand »). */}
+              <PastilleRegion region={prospect.region} />
+              {communeAffichee(prospect.city, prospect.region) && (
+                <span>{communeAffichee(prospect.city, prospect.region)}</span>
               )}
             </p>
 

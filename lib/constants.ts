@@ -9,7 +9,6 @@ import type {
 
 export const STATUS_ORDER: ProspectStatus[] = [
   "a_appeler",
-  "contacte",
   "rendez_vous",
   "a_rappeler",
   "suivi_email",
@@ -20,7 +19,6 @@ export const STATUS_ORDER: ProspectStatus[] = [
 
 export const STATUS_LABEL: Record<ProspectStatus, string> = {
   a_appeler: "À appeler",
-  contacte: "Contacté",
   rendez_vous: "Rendez-vous",
   a_rappeler: "À rappeler",
   suivi_email: "Suivi par email",
@@ -32,18 +30,18 @@ export const STATUS_LABEL: Record<ProspectStatus, string> = {
 /**
  * Une couleur franche par étape, la même partout où l'étape apparaît (badge,
  * bandeau de colonne, liseré de carte). Progression froid → chaud à mesure que
- * l'affaire avance — ardoise, cyan, bleu, indigo, ambre — puis le vert/rouge
+ * l'affaire avance — ardoise, bleu, indigo, ciel, sarcelle — puis le vert/rouge
  * sémantique. « À rappeler » est INDIGO avec la flèche de retour : il ne doit
  * jamais se confondre avec « À appeler » (ardoise, téléphone). « Essai
  * gratuit » (030) est SARCELLE avec le paquet cadeau : juste avant
  * l'émeraude du gagné — l'affaire est presque faite. « Suivi
  * par email » (032) est CIEL avec l'arobase : on attend un mail, pas un appel —
- * jamais le bleu du rendez-vous seul, le pictogramme les distingue.
+ * jamais le bleu du rendez-vous seul, le pictogramme les distingue. Le cyan
+ * de « Contacté » (retirée le 29/10) n'est réattribué à rien.
  * Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir).
  */
 export const STATUS_CHIP: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-500/15 text-slate-300 ring-slate-400/25",
-  contacte: "bg-cyan-500/15 text-cyan-300 ring-cyan-400/25",
   rendez_vous: "bg-blue-500/15 text-blue-300 ring-blue-400/25",
   a_rappeler: "bg-indigo-500/15 text-indigo-300 ring-indigo-400/30",
   suivi_email: "bg-sky-500/15 text-sky-300 ring-sky-400/30",
@@ -55,7 +53,6 @@ export const STATUS_CHIP: Record<ProspectStatus, string> = {
 /** Pictogramme d'étape — la couleur ne porte jamais seule (daltonisme). */
 export const STATUS_ICON: Record<ProspectStatus, IconeNom> = {
   a_appeler: "telephone",
-  contacte: "note",
   rendez_vous: "calendrier",
   a_rappeler: "retour",
   suivi_email: "arobase",
@@ -67,7 +64,6 @@ export const STATUS_ICON: Record<ProspectStatus, IconeNom> = {
 /** Liseré gauche des cartes du pipeline, dans la couleur de l'étape. */
 export const STATUS_EDGE: Record<ProspectStatus, string> = {
   a_appeler: "border-l-slate-400/70",
-  contacte: "border-l-cyan-400/80",
   rendez_vous: "border-l-blue-400/80",
   a_rappeler: "border-l-indigo-400/80",
   suivi_email: "border-l-sky-400/80",
@@ -78,13 +74,17 @@ export const STATUS_EDGE: Record<ProspectStatus, string> = {
 
 /**
  * Ramène n'importe quelle valeur de statut (y compris les anciennes, encore
- * possibles dans des données pas encore migrées) vers l'une des huit étapes.
+ * possibles dans des données pas encore migrées) vers l'une des sept étapes.
  * Garde-fou permanent : l'affichage ne casse jamais sur un statut inconnu.
  */
 const LEGACY_STATUS: Record<string, ProspectStatus> = {
-  sans_reponse: "contacte",
-  contact_etabli: "contacte",
-  rappel_programme: "contacte",
+  // L'étape « Contacté » est retirée (29/10) : une valeur restée en base se
+  // lit « À rappeler » (on a eu quelqu'un, il y a une suite à donner).
+  contacte: "a_rappeler",
+  // Les plus anciennes (007) : « sans réponse » n'a eu personne.
+  sans_reponse: "a_appeler",
+  contact_etabli: "a_rappeler",
+  rappel_programme: "a_rappeler",
   rdv: "rendez_vous",
   nouveau: "a_appeler",
   qualifie: "rendez_vous",

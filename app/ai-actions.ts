@@ -11,7 +11,8 @@
  *    de façon déterministe. Rien de tout cela n'est délégué au modèle.
  *  - Ne jamais deviner : un champ absent du texte revient à null.
  *  - L'étape suit une règle écrite dans le prompt : a_appeler, sauf échange
- *    explicitement déjà eu → contacte. Le modèle n'en décide pas librement.
+ *    explicitement déjà eu → a_rappeler (« Contacté » est retirée le 29/10).
+ *    Le modèle n'en décide pas librement.
  *  - Sortie validée strictement ; hors format ou panne → le formulaire
  *    s'ouvre vide et la saisie manuelle fonctionne. L'IA propose, elle
  *    n'exécute pas : rien ne s'écrit en base ici.
@@ -158,7 +159,7 @@ export type ExtractedProspect = {
   address: string | null;
   city: string | null;
   source: string | null;
-  status: Extract<ProspectStatus, "a_appeler" | "contacte">;
+  status: Extract<ProspectStatus, "a_appeler" | "a_rappeler">;
   notes: string | null;
 };
 
@@ -175,7 +176,7 @@ const EXTRACT_SYSTEM = `Tu extrais les coordonnées d'un prospect belge à parti
 
 Règles absolues :
 1. N'invente JAMAIS rien. Un champ absent du texte vaut null — jamais une supposition, jamais une reconstruction plausible. Recopie les valeurs telles qu'elles apparaissent (le numéro de téléphone dans son format d'origine).
-2. "status" suit une règle, pas ton jugement : "a_appeler" dans tous les cas, SAUF si le texte indique explicitement qu'un échange a déjà eu lieu avec ce prospect (il a répondu, on s'est parlé, rencontré, il a demandé à être recontacté…) — alors "contacte".
+2. "status" suit une règle, pas ton jugement : "a_appeler" dans tous les cas, SAUF si le texte indique explicitement qu'un échange a déjà eu lieu avec ce prospect (il a répondu, on s'est parlé, rencontré, il a demandé à être recontacté…) — alors "a_rappeler".
 3. "address" : l'adresse postale telle qu'elle est écrite (rue, numéro, code postal, ville) — recopiée, jamais complétée, JAMAIS le pays. Si le texte contient un lien Google Maps, mets le lien tel quel dans "address". Sinon null. "city" reste la ville seule.
 4. "source" : une valeur de ${JSON.stringify(SOURCES)} uniquement si le texte la mentionne explicitement (ex. « rencontré au salon », « recommandé par »), sinon null.
 5. "confidence" : pour chaque champ non null, ta confiance entre 0 et 1 (1 = lu tel quel dans le texte ; plus bas si le texte est ambigu ou la capture peu lisible).
@@ -185,7 +186,7 @@ Réponds UNIQUEMENT avec un objet JSON, sans texte autour :
 {
   "company_name": ..., "contact_name": ..., "phone": ..., "email": ...,
   "website": ..., "sector": ..., "address": ..., "city": ..., "source": ...,
-  "status": "a_appeler" | "contacte",
+  "status": "a_appeler" | "a_rappeler",
   "confidence": { "company_name": 0.98, ... },
   "raw_notes": ...
 }
@@ -214,7 +215,7 @@ Réponse :
 Texte :
 Toitures Vandenberghe bvba — Kortrijksesteenweg 210, 9000 Gand — 09 225 11 33 — info@toitures-vdb.be (rencontré au salon Batibouw, m'a demandé de le recontacter en septembre)
 Réponse :
-{"company_name":"Toitures Vandenberghe bvba","contact_name":null,"phone":"09 225 11 33","email":"info@toitures-vdb.be","website":null,"sector":"Toiture","address":"Kortrijksesteenweg 210, 9000 Gand","city":"Gand","source":"Salon / événement","status":"contacte","confidence":{"company_name":0.98,"phone":0.97,"email":0.97,"sector":0.9,"address":0.96,"city":0.97,"source":0.95},"raw_notes":"Rencontré au salon Batibouw, à recontacter en septembre"}`;
+{"company_name":"Toitures Vandenberghe bvba","contact_name":null,"phone":"09 225 11 33","email":"info@toitures-vdb.be","website":null,"sector":"Toiture","address":"Kortrijksesteenweg 210, 9000 Gand","city":"Gand","source":"Salon / événement","status":"a_rappeler","confidence":{"company_name":0.98,"phone":0.97,"email":0.97,"sector":0.9,"address":0.96,"city":0.97,"source":0.95},"raw_notes":"Rencontré au salon Batibouw, à recontacter en septembre"}`;
 
 /** Seuil sous lequel un champ déduit est signalé « à vérifier ». */
 const CONFIDENCE_FLOOR = 0.7;
@@ -289,7 +290,9 @@ export async function extractProspectAction(input: {
     source: SOURCES.includes(cleanStr(raw.source) ?? "")
       ? cleanStr(raw.source)
       : null,
-    status: raw.status === "contacte" ? "contacte" : "a_appeler",
+    // « contacte » : la valeur d'avant le 29/10, qu'un modèle peut encore
+    // renvoyer — elle vaut la même chose.
+    status: raw.status === "a_rappeler" || raw.status === "contacte" ? "a_rappeler" : "a_appeler",
     notes: cleanStr(raw.raw_notes, 1000),
   };
 
@@ -398,8 +401,6 @@ Règles absolues :
      (jour, et heure si elle est dite). Un « RDV à planifier », « il faudrait
      se voir », « je le rappelle pour caler un RDV » n'est PAS un rendez-vous :
      mets null.
-   - "contacte" si un échange a réellement eu lieu (on s'est parlé, il a
-     répondu).
    - "essai_gratuit" (le client a démarré un essai gratuit), "gagne" et
      "perdu" : tu peux les proposer, mais ce sont des décisions humaines —
      elles ne seront jamais appliquées sans un clic.
@@ -429,7 +430,7 @@ Note : « la secrétaire dit de revoir ça après les fêtes »
 {"etape":null,"date_relance":"2027-01-04","heure":null,"lieu":null,"manque":null,"contact_name":null,"resume":"À relancer début janvier, à la demande de la secrétaire."}
 
 Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la semaine prochaine »
-{"etape":"contacte","date_relance":"2026-08-10","heure":null,"lieu":null,"manque":null,"contact_name":null,"resume":"Échange positif par téléphone, rendez-vous à planifier au prochain appel."}`;
+{"etape":null,"date_relance":"2026-08-10","heure":null,"lieu":null,"manque":null,"contact_name":null,"resume":"Échange positif par téléphone, rendez-vous à planifier au prochain appel."}`;
 
   const raw = await chatJSON({ system, user: note, maxTokens: 400 });
   if (!raw) return { unavailable: true };
@@ -452,8 +453,9 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
   let statutReserve: string | null = null;
 
   if (statut === "rendez_vous" && !dateLocale) {
-    // « Rendez-vous » exige une date réelle. Sans elle, le fait n'existe pas.
-    statut = "contacte";
+    // « Rendez-vous » exige une date réelle. Sans elle, le fait n'existe pas :
+    // l'étape suivra l'échange enregistré (« À rappeler »), rien de plus.
+    statut = null;
     statutReserve =
       "Aucune date de rendez-vous dans la note : l'étape « Rendez-vous » demande une date réelle.";
   } else if (statut === "rendez_vous") {
@@ -466,11 +468,11 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
     statutReserve =
       "« Essai gratuit » ne s'obtient jamais automatiquement — à vous de confirmer (étape de la fiche, ou débrief « Essai gratuit démarré »).";
   } else if (statut === "a_rappeler") {
-    // « À rappeler » suit le DÉBRIEF d'un rendez-vous (026/027), jamais un
-    // texte libre : le modèle ne la propose pas.
+    // « À rappeler » suit un FAIT (l'échange enregistré, le résultat d'appel,
+    // le débrief), jamais un texte libre : le modèle ne la propose pas.
     statut = null;
     statutReserve =
-      "« À rappeler » vient du débrief d'un rendez-vous : utilisez « Intéressé — à rappeler » sur la carte du rendez-vous.";
+      "« À rappeler » suit l'échange lui-même : la fiche y passera une fois la note enregistrée comme un échange réel.";
   } else if (statut === "suivi_email") {
     // « Suivi par email » suit le RÉSULTAT d'appel du même nom (033), jamais
     // un texte libre : le modèle ne la propose pas.

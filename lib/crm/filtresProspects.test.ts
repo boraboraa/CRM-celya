@@ -1,6 +1,6 @@
 // npm run test:filtres — l'URL de /prospects et les puces des filtres actifs.
 import assert from "node:assert/strict";
-import { depuisValeurEtape, filtresActifs, hrefProspects, lireVue, valeurEtape, VUES } from "./filtresProspects.ts";
+import { depuisValeurEtape, filtresActifs, hrefProspects, lireVue, nettoyerParams, statutConnu, valeurEtape, VUES } from "./filtresProspects.ts";
 import { echeance, etoileesDabord, ordonnerProspects, rangPriorite } from "./ordreProspects.ts";
 
 let ok = 0;
@@ -10,7 +10,7 @@ function cas(nom: string, f: () => void) {
   console.log(`  ✓ ${nom}`);
 }
 
-const ETAPES = { a_appeler: "À appeler", contacte: "Contacté", perdu: "Perdu" };
+const ETAPES = { a_appeler: "À appeler", a_rappeler: "À rappeler", perdu: "Perdu" };
 
 cas("sans rien : /prospects nu", () => {
   assert.equal(hrefProspects({}), "/prospects");
@@ -43,8 +43,8 @@ cas("un affichage inconnu (URL ou cookie trafiqués) est ignoré", () => {
 
 cas("le menu « Étape » porte les étapes ET les deux raccourcis", () => {
   assert.equal(valeurEtape({}), "tous");
-  assert.equal(valeurEtape({ statut: "contacte" }), "contacte");
-  assert.equal(valeurEtape({ filtre: "a_debriefer", statut: "contacte" }), "f:a_debriefer");
+  assert.equal(valeurEtape({ statut: "a_rappeler" }), "a_rappeler");
+  assert.equal(valeurEtape({ filtre: "a_debriefer", statut: "a_rappeler" }), "f:a_debriefer");
   assert.deepEqual(depuisValeurEtape("f:emails"), { statut: null, filtre: "emails" });
   assert.deepEqual(depuisValeurEtape("f:constructor"), { statut: null, filtre: null });
   assert.deepEqual(depuisValeurEtape("suivi_email"), { statut: "suivi_email", filtre: null });
@@ -71,15 +71,15 @@ cas("un tri inconnu (URL trafiquée) n'est pas recopié", () => {
 
 cas("tout est conservé, dans un ordre fixe", () => {
   assert.equal(
-    hrefProspects({ perimetre: "equipe", filtre: "emails", vue: "colonnes", tri: "nom", statut: "contacte", q: "garage" }),
-    "/prospects?q=garage&statut=contacte&tri=nom&vue=colonnes&filtre=emails&perimetre=equipe"
+    hrefProspects({ perimetre: "equipe", filtre: "emails", vue: "colonnes", tri: "nom", statut: "a_rappeler", q: "garage" }),
+    "/prospects?q=garage&statut=a_rappeler&tri=nom&vue=colonnes&filtre=emails&perimetre=equipe"
   );
 });
 
 cas("over remplace ou retire un seul paramètre", () => {
-  const p = { q: "garage", statut: "contacte", perimetre: "moi" };
+  const p = { q: "garage", statut: "a_rappeler", perimetre: "moi" };
   assert.equal(hrefProspects(p, { statut: null }), "/prospects?q=garage&perimetre=moi");
-  assert.equal(hrefProspects(p, { vue: "colonnes" }), "/prospects?q=garage&statut=contacte&vue=colonnes&perimetre=moi");
+  assert.equal(hrefProspects(p, { vue: "colonnes" }), "/prospects?q=garage&statut=a_rappeler&vue=colonnes&perimetre=moi");
 });
 
 cas("un filtre inconnu (URL trafiquée) est ignoré, pas recopié", () => {
@@ -205,10 +205,10 @@ cas("région inconnue ou trafiquée : jamais recopiée dans une URL ni montrée"
 });
 
 cas("région : une puce retirable, qui garde les autres filtres", () => {
-  const a = filtresActifs({ region: "g:wallonie", statut: "contacte" }, ETAPES);
+  const a = filtresActifs({ region: "g:wallonie", statut: "a_rappeler" }, ETAPES);
   const r = a.find((f) => f.cle === "region")!;
   assert.equal(r.label, "Toute la Wallonie");
-  assert.equal(r.retirer, "/prospects?statut=contacte");
+  assert.equal(r.retirer, "/prospects?statut=a_rappeler");
   assert.equal(filtresActifs({ region: "aucune" }, ETAPES)[0].label, "Région inconnue");
   assert.equal(filtresActifs({ region: "Uccle" }, ETAPES)[0].label, "Uccle");
 });
@@ -217,6 +217,22 @@ cas("tri « Commune » : dans l'URL, et en puce (en liste seulement)", () => {
   assert.equal(hrefProspects({ tri: "commune" }), "/prospects?tri=commune");
   assert.equal(filtresActifs({ tri: "commune" }, ETAPES)[0].label, "Tri : Commune");
   assert.deepEqual(filtresActifs({ tri: "commune", vue: "colonnes" }, ETAPES), []);
+});
+
+cas("une étape RETIRÉE dans l'URL (?statut=contacte, ?statut=proposition) vaut « toutes » (29/10)", () => {
+  assert.equal(statutConnu("contacte"), undefined);
+  assert.equal(statutConnu("proposition"), undefined);
+  assert.equal(statutConnu("n'importe quoi"), undefined);
+  assert.equal(statutConnu("tous"), undefined);
+  assert.equal(statutConnu("a_rappeler"), "a_rappeler");
+  assert.equal(statutConnu("avec_perdues"), "avec_perdues");
+  const p = nettoyerParams({ q: "garage", statut: "contacte", perimetre: "moi" });
+  assert.deepEqual(p, { q: "garage", perimetre: "moi" });
+  assert.equal(hrefProspects(p), "/prospects?q=garage&perimetre=moi");
+  assert.equal(valeurEtape(p), "tous");
+  assert.equal(filtresActifs(p, ETAPES).some((f) => f.cle === "statut"), false, "aucune puce d'étape");
+  const intact = { statut: "suivi_email" };
+  assert.equal(nettoyerParams(intact), intact, "une étape connue : les paramètres ne sont pas recopiés");
 });
 
 console.log(`\n${ok} OK`);

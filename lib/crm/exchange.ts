@@ -38,7 +38,8 @@ export type SaveExchangeInput = {
    * Cette note atteste-t-elle d'un échange réel avec le prospect ?
    * Défaut true (la saisie humaine passe par « Noter un échange ») ; le
    * connecteur MCP doit le déclarer explicitement. Sans attestation, une
-   * note de repérage ne fait pas passer la fiche en « Contacté ».
+   * note de repérage ne fait pas bouger l'étape (une note attestée sans
+   * résultat d'appel la fait passer en « À rappeler », 29/10).
    */
   isExchange?: boolean;
   /**

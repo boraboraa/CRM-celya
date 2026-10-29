@@ -7,7 +7,7 @@
  *   2. personne au bout du fil : répondeur, pas de réponse, occupé → « pas de
  *      réponse » (pas un échange) ; standard automatique → « barrage », mais
  *      SANS compter comme un échange (dans le CRM, un barrage est un humain
- *      qui filtre : la fiche passerait sinon en « Contacté ») ;
+ *      qui filtre — ici, c'est une machine ; la fiche reste « À appeler ») ;
  *   3. ce que Janet DÉCLARE par `noter_resultat` ;
  *   4. à défaut, « à rappeler ». Une fin illisible n'arrive jamais ici : elle
  *      est un échec neutre, rien n'est écrit (lib/appelsIa/fin.ts).

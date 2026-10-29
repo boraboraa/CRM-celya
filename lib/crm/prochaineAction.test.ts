@@ -229,7 +229,7 @@ console.log("\n— 5bis. plus_rien_de_prevu —");
   );
   verifie(
     "honoré sans suite : pareil",
-    plusRienDePrevu({ nextActionAt: null, status: "contacte", aEuUnRdvClos: [ "honore" ].some(rdvClos) }),
+    plusRienDePrevu({ nextActionAt: null, status: "a_rappeler", aEuUnRdvClos: [ "honore" ].some(rdvClos) }),
     true
   );
   verifie(
@@ -284,7 +284,7 @@ console.log("\n— 9. fiche_close_ne_reclame_rien —");
   verifie("close : gagné, perdu", ["gagne", "perdu"].map(ficheClose), [true, true]);
   verifie(
     "ouvertes : les quatre autres",
-    ["a_appeler", "contacte", "rendez_vous", "a_rappeler"].map(ficheClose),
+    ["a_appeler", "rendez_vous", "a_rappeler", "suivi_email"].map(ficheClose),
     [false, false, false, false]
   );
   // L'essai gratuit (030) n'est PAS une fin de parcours : sa relance de fin
@@ -346,7 +346,7 @@ console.log("\n— 9. fiche_close_ne_reclame_rien —");
   // Changer l'étape change ce que dit la fiche, dans les deux sens.
   verifie(
     "ouverte → gagne : le débrief disparaît ; gagne → ouverte : il revient",
-    [fiche([], [boetendael], LE_23, "contacte").aDebriefer, fiche([], [boetendael], LE_23, "gagne").aDebriefer],
+    [fiche([], [boetendael], LE_23, "a_rappeler").aDebriefer, fiche([], [boetendael], LE_23, "gagne").aDebriefer],
     [true, false]
   );
 

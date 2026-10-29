@@ -521,7 +521,7 @@ try {
     verifie("raccroché par l'annexe : serveur vocal reconnu en direct", [r.raccrochePar, r.machineEnDirect, i.session!.raccroches.length], ["serveur_machine", "standard_ivr", 1]);
     const plan = planifierFin(contexte(i));
     verifie("classement : standard automatique", plan.appel.classement, "standard_ivr");
-    verifie("journal : barrage SANS échange (la fiche ne passe pas en Contacté)", plan.journal && [plan.journal.outcome, plan.journal.isExchange, plan.journal.sujet], ["barrage", false, "Standard automatique"]);
+    verifie("journal : barrage SANS échange (la fiche reste À appeler)", plan.journal && [plan.journal.outcome, plan.journal.isExchange, plan.journal.sujet], ["barrage", false, "Standard automatique"]);
     verifie("file : cycle terminé, « standard automatique »", plan.file && plan.file.statut !== "en_attente" ? [plan.file.statut, plan.file.motif, plan.file.essais] : plan.file, ["termine", "standard automatique", 1]);
     verifie(
       "relance le lendemain ouvré à 9h : « Janet : standard automatique, à contacter autrement »",

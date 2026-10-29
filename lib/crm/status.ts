@@ -5,26 +5,37 @@
  * (c'est ainsi qu'une fiche s'est retrouvée en « Rendez-vous » sans qu'aucun
  * rendez-vous ne soit posé). Elle se déduit de faits vérifiables :
  *
- *   a_appeler    défaut — aucun échange sortant enregistré
- *   contacte     au moins un échange réel (email envoyé/reçu, note d'appel
- *                attestée, rendez-vous)
+ *   a_appeler    défaut — personne n'a encore été eu : jamais appelé, pas
+ *                décroché, ou un barrage (on n'a pas eu le décideur)
  *   rendez_vous  UNIQUEMENT une activité « rendez_vous » réellement
  *                enregistrée, ou un rendez-vous (non annulé) dans l'agenda
- *   a_rappeler   un résultat d'appel « À rappeler » (activities.outcome,
- *                29/10), ou un rendez-vous débriefé « intéressé, à
+ *   a_rappeler   un résultat d'appel « À rappeler » ou « Intéressé »
+ *                (activities.outcome, 29/10), une note attestée sans
+ *                résultat (« j'ai réellement eu cet échange ») plus récente
+ *                que le dernier email, ou un
+ *                rendez-vous débriefé « intéressé, à
  *                rappeler » (meetings.debrief_issue, migration 027) — par
  *                le débrief explicite, ou par un résultat « À rappeler » /
  *                « Intéressé » posé après lui (débrief implicite, en base)
- *   suivi_email  UNIQUEMENT un résultat d'appel « Suivi par email »
+ *   suivi_email  un résultat d'appel « Suivi par email »
  *                (activities.outcome, 033) ou un rendez-vous débriefé
- *                « Suivi par email » (meetings.debrief_issue, 033)
+ *                « Suivi par email » (meetings.debrief_issue, 033) — ou,
+ *                faute de plus précis (ni résultat d'appel ni rendez-vous),
+ *                un email envoyé ou reçu plus récent que la dernière note
+ *                d'échange (« déjà appelé, à contacter par mail », puis
+ *                quatre mails : la suite se joue par mail)
+ *   (« Contacté » est RETIRÉE le 29/10, décision de Bora : ce n'était jamais
+ *    une prochaine action. Un barrage reste « À appeler », un échange part
+ *    en « À rappeler », un email en « Suivi par email ». La valeur d'enum
+ *    reste en base, inerte, refusée par la contrainte 043.)
  *   (« Proposition » est RETIRÉE le 29/10 : plus aucun fait n'y mène, et
  *    `proposal_sent_at` n'est plus lu — la colonne reste, inerte)
  *   gagne/perdu  JAMAIS automatiques — décisions humaines irréversibles
  *
  * Trois invariants :
  *   1. l'auto-classification n'avance que sur un fait non ambigu ;
- *   2. elle ne recule jamais une étape toute seule ;
+ *   2. elle ne recule jamais une étape toute seule (effet assumé : une fiche
+ *      en « Suivi par email » qui reçoit ensuite « À rappeler » y reste) ;
  *   3. elle ne passe jamais par-dessus un choix humain (status_locked) — au
  *      mieux elle suggère, et Bora accepte ou ignore.
  *
@@ -42,7 +53,7 @@ import { normalizeStatus, fmtDate, fmtDateTime } from "../constants.ts";
 /** Ordre d'avancement. « Gagné » et « Perdu » sont des fins de parcours. */
 export const STATUS_RANK: Record<ProspectStatus, number> = {
   a_appeler: 0,
-  contacte: 1,
+  // (« Contacté », rang 1, est retirée le 29/10.)
   rendez_vous: 2,
   a_rappeler: 3,
   // « Suivi par email » (032) : on a eu quelqu'un, qui veut l'info par mail —
@@ -70,18 +81,24 @@ export function isManualOnly(status: ProspectStatus): boolean {
 export type Fact = { at: string; label: string };
 
 export type ProspectFacts = {
-  /** Dernier échange réel — email, note d'appel attestée, rendez-vous. */
-  exchange: Fact | null;
+  /** Dernier email envoyé ou reçu — mène à « Suivi par email » quand rien
+   *  de plus précis (rappel, rendez-vous) n'est là. */
+  email: Fact | null;
   /** Rendez-vous réellement enregistré (activité datée ou agenda). */
   meeting: Fact | null;
-  /** Rendez-vous débriefé « intéressé, à rappeler » (027). */
+  /** Une suite à donner par téléphone : résultat « À rappeler » ou
+   *  « Intéressé », débrief « intéressé, à rappeler » (027). */
   rappel: Fact | null;
+  /** Dernière note attestée SANS résultat d'appel (« j'ai réellement eu cet
+   *  échange ») — mène à « À rappeler », sauf si un email est plus récent. */
+  echange: Fact | null;
   /** Un « Suivi par email » : résultat d'appel ou issue de débrief (033). */
   suiviEmail: Fact | null;
 };
 
 export const NO_FACTS: ProspectFacts = {
-  exchange: null,
+  email: null,
+  echange: null,
   meeting: null,
   rappel: null,
   suiviEmail: null,
@@ -102,9 +119,10 @@ export type FactRows = {
     occurred_at: string;
     is_exchange: boolean | null;
     is_draft: boolean | null;
-    /** Le résultat d'appel (019, 033) — absent chez un appelant qui ne le lit
-     *  pas : il ne déduit alors pas « Suivi par email ». */
-    outcome?: string | null;
+    /** Le résultat d'appel (019, 033). OBLIGATOIRE depuis le 29/10 : sans
+     *  lui, un « Barrage » (compté comme échange) passerait pour une note
+     *  attestée et enverrait la fiche en « À rappeler ». */
+    outcome: string | null;
   }[];
   emails: { direction: string; received_at: string }[];
   /** Rendez-vous de la fiche (agenda) — le filtre « non annulé » est
@@ -128,7 +146,8 @@ export type FactRows = {
  */
 export function factsFromRows(rows: FactRows): ProspectFacts {
   const facts: ProspectFacts = {
-    exchange: null,
+    email: null,
+    echange: null,
     meeting: null,
     rappel: null,
     suiviEmail: null,
@@ -136,19 +155,28 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
 
   for (const a of rows.activities) {
     if (a.is_draft) continue;
+    const outcome = a.outcome ?? null;
 
     // « À rappeler » (résultat d'appel, 29/10, décision de Bora) : la personne
     // a demandé qu'on la rappelle — la fiche entre dans l'étape « À rappeler »,
-    // comme après un débrief « intéressé, à rappeler ». Avant, elle restait en
-    // « Contacté » alors que sa carte disait « À rappeler ».
-    if (a.outcome === "rappeler") {
+    // comme après un débrief « intéressé, à rappeler ».
+    if (outcome === "rappeler") {
       facts.rappel = latest(facts.rappel, {
         at: a.occurred_at,
         label: `la personne a demandé à être rappelée le ${fmtDate(a.occurred_at)}`,
       });
     }
 
-    if (a.outcome === "suivi_email") {
+    // « Intéressé » (29/10, « Contacté » retirée) : on a eu la personne, il y
+    // a une suite à donner — c'est « À rappeler ».
+    if (outcome === "interesse") {
+      facts.rappel = latest(facts.rappel, {
+        at: a.occurred_at,
+        label: `la personne s'est montrée intéressée le ${fmtDate(a.occurred_at)}`,
+      });
+    }
+
+    if (outcome === "suivi_email") {
       facts.suiviEmail = latest(facts.suiviEmail, {
         at: a.occurred_at,
         label: `la personne a demandé un suivi par email le ${fmtDate(a.occurred_at)}`,
@@ -160,18 +188,19 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
         at: a.occurred_at,
         label: `un rendez-vous a été enregistré le ${fmtDate(a.occurred_at)}`,
       });
-      facts.exchange = latest(facts.exchange, {
-        at: a.occurred_at,
-        label: `un rendez-vous a été enregistré le ${fmtDate(a.occurred_at)}`,
-      });
     } else if (a.type === "email") {
-      facts.exchange = latest(facts.exchange, {
+      facts.email = latest(facts.email, {
         at: a.occurred_at,
         label: `un email a été échangé le ${fmtDate(a.occurred_at)}`,
       });
-    } else if (a.is_exchange !== false) {
-      // Note attestée : « j'ai eu cet échange » était cochée.
-      facts.exchange = latest(facts.exchange, {
+    } else if (a.is_exchange !== false && outcome === null) {
+      // Note attestée SANS résultat d'appel (« j'ai réellement eu cet
+      // échange ») : on a eu quelqu'un, la suite se donne en rappelant.
+      // ⚠ Un résultat n'entre jamais par ici : « Barrage » est compté comme
+      // un échange (saveExchangeCore) mais n'est PAS un fait d'étape — on n'a
+      // pas eu le décideur, la fiche reste « À appeler » ; « Pas décroché »
+      // et « Pas intéressé » non plus.
+      facts.echange = latest(facts.echange, {
         at: a.occurred_at,
         label: `un échange a été noté le ${fmtDate(a.occurred_at)}`,
       });
@@ -179,7 +208,7 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
   }
 
   for (const e of rows.emails) {
-    facts.exchange = latest(facts.exchange, {
+    facts.email = latest(facts.email, {
       at: e.received_at,
       label:
         e.direction === "entrant"
@@ -292,8 +321,23 @@ export function statusFromFacts(facts: ProspectFacts): ProspectStatus {
   if (facts.suiviEmail) return "suivi_email";
   if (facts.rappel) return "a_rappeler";
   if (facts.meeting) return "rendez_vous";
-  if (facts.exchange) return "contacte";
+  // L'email passe APRÈS le rendez-vous : un mail de confirmation ne sort
+  // jamais une fiche de « Rendez-vous ». Entre un email et une note
+  // d'échange sans résultat, le PLUS RÉCENT dit la suite.
+  const suite = dernierEntreEmailEtEchange(facts);
+  if (suite === "email") return "suivi_email";
+  if (suite === "echange") return "a_rappeler";
   return "a_appeler";
+}
+
+/** Entre le dernier email et la dernière note d'échange, lequel est le plus
+ *  récent (à égalité : l'email — c'est l'écrit qui porte la suite). */
+function dernierEntreEmailEtEchange(facts: ProspectFacts): "email" | "echange" | null {
+  const { email, echange } = facts;
+  if (!email && !echange) return null;
+  if (!echange) return "email";
+  if (!email) return "echange";
+  return new Date(echange.at).getTime() > new Date(email.at).getTime() ? "echange" : "email";
 }
 
 /** L'événement déclencheur, en clair — affiché à chaque changement auto. */
@@ -301,10 +345,9 @@ export function factReason(
   derived: ProspectStatus,
   facts: ProspectFacts
 ): string | null {
-  if (derived === "suivi_email") return facts.suiviEmail?.label ?? null;
-  if (derived === "a_rappeler") return facts.rappel?.label ?? null;
+  if (derived === "suivi_email") return (facts.suiviEmail ?? facts.email)?.label ?? null;
+  if (derived === "a_rappeler") return (facts.rappel ?? facts.echange)?.label ?? null;
   if (derived === "rendez_vous") return facts.meeting?.label ?? null;
-  if (derived === "contacte") return facts.exchange?.label ?? null;
   return null;
 }
 

@@ -5,6 +5,46 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026, soir — l'étape « Contacté » retirée
+
+Décision de Bora : « Contacté, ça ne sera jamais une prochaine action ».
+**Sept étapes** : À appeler → Rendez-vous → À rappeler → Suivi par email →
+Essai gratuit → Gagné / Perdu. Chaque fait dit la suite
+(`statusFromFacts`, `lib/crm/status.ts`) :
+- **Barrage** (compté comme échange à l'écran) et **Pas décroché** ne sont
+  JAMAIS un fait d'étape : la fiche reste **À appeler** (on n'a pas eu le
+  décideur ; le rappel auto de la PR #28 est posé) ;
+- **Intéressé**, **À rappeler**, débrief « à rappeler » → **À rappeler** ;
+- entre une **note attestée sans résultat** (`facts.echange`) et un **email**
+  envoyé ou reçu (`facts.email`), **le plus récent** dit la suite : note →
+  À rappeler, email → Suivi par email (« déjà appelé, à contacter par mail »
+  puis quatre mails = Suivi par email) ; le fait email passe APRÈS le
+  rendez-vous (un mail de confirmation ne sort jamais une fiche de RDV) ;
+- `FactRows.activities[].outcome` est désormais **obligatoire** : sans lui,
+  un Barrage passerait pour une note attestée.
+`normalizeStatus` lit `contacte` « À rappeler » (et `sans_reponse` « À
+appeler ») ; l'import CSV idem ; l'extraction IA propose `a_rappeler` au lieu
+de `contacte` ; une étape retirée restée dans l'URL (`?statut=contacte`) est
+ignorée (`statutConnu` / `nettoyerParams`, `lib/crm/filtresProspects.ts`) ;
+`crm-mail` : une réponse reçue fait passer `a_appeler` → **`suivi_email`**.
+Jeu de cas COMMUN `lib/crm/etapes.cas.json` (21 cas) : `test:etapes` (règle
+TS) ET la recette SQL de la 042 (même résultat exigé).
+
+**Migrations ÉCRITES, PAS appliquées** — dans cet ordre : fusion de la PR →
+**redéploiement de `crm-mail` depuis le dépôt** (+ diff de contrôle) →
+**`042`** (données : chaque fiche « Contacté » rangée par la recopie SQL de la
+règle, copie d'avant dans `reprise_042` — RLS fermée, à supprimer une fois
+validée —, verrou et motif des verrouillées gardés, `updated_at` et prochaine
+action inchangés via `session_replication_role = replica` le temps de la
+transaction) → **`043`** (contrainte `prospects_sans_contacte`). Recette
+`supabase/recettes/042_assembler.sh` (+ `042_corps.sql`,
+`042_attendus.json`) : **19 OK, 0 faute** le 29/10 au soir — 26 fiches : 7 en
+À appeler (6 barrages + AUTOLUB), 7 en Suivi par email (Baradent,
+Prekelinden, Dufranne, Keller, MSimmo, The Lodge, Thom-immo), 12 en À
+rappeler (dont Catius et Croon, verrouillées). Une fiche hors tableau ou
+rangée ailleurs = FAUTE : à rejouer juste avant d'appliquer (la base grossit).
+Branche `claude/sans-contacte`.
+
 ## État au 29 octobre 2026, 16h — « À rappeler » range la fiche dans l'étape
 
 Retour de Bora : après le résultat d'appel « À rappeler », la carte disait
@@ -778,9 +818,9 @@ au préalable.
 
 ### Les étapes — et la règle qui remplace la mécanique
 
-⚠ **Depuis le 29/10, « Proposition » n'existe plus** (huit étapes) : voir
-l'état du 29/10 en fin d'après-midi. Ce qui suit la mentionne encore, pour
-mémoire.
+⚠ **Depuis le 29/10, « Proposition » n'existe plus**, ni **« Contacté »**
+(sept étapes) : voir les états du 29/10. Ce qui suit les mentionne encore,
+pour mémoire.
 
 Statuts (`prospect_status`) : `a_appeler` → `contacte` → `rendez_vous` →
 `a_rappeler` (migration `026`, 18/10 : le RDV a eu lieu, il faut rappeler la
@@ -3299,7 +3339,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
-`npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
+`npm run test:debrief`, `npm run test:etapes`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
 `npm run test:relance`,
 `npm run test:secteurs`, `npm run test:regions`, `npm run test:suppression`, `npm run test:perdues`, `npm run test:doublons`, `npm run test:ma-liste`,

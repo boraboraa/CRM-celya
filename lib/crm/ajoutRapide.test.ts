@@ -40,7 +40,7 @@ cas("toutes les colonnes, toujours les mêmes clés (piège PGRST102)", () => {
   const pleine = ligneProspect(
     entreeFormulaire(formulaire({
       company_name: "X", contact_name: "Y", email: "A@B.BE", phone: "1", website: "w", sector: "s",
-      address: "a", city: "c", status: "contacte", source: "so", value_estimate: "1 200,50", owner_id: "", notes: "n",
+      address: "a", city: "c", status: "a_rappeler", source: "so", value_estimate: "1 200,50", owner_id: "", notes: "n",
     })),
     MOI
   );

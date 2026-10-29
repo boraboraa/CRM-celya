@@ -51,6 +51,15 @@ cas("le menu « Étape » porte les étapes ET les deux raccourcis", () => {
   assert.deepEqual(depuisValeurEtape("tous"), { statut: null, filtre: null });
 });
 
+cas("« Toutes, perdues comprises » : s'écrit dans l'URL, se lit dans le menu, devient une puce retirable", () => {
+  assert.equal(hrefProspects({ statut: "avec_perdues" }), "/prospects?statut=avec_perdues");
+  assert.equal(valeurEtape({ statut: "avec_perdues" }), "avec_perdues");
+  assert.deepEqual(depuisValeurEtape("avec_perdues"), { statut: "avec_perdues", filtre: null });
+  const puces = filtresActifs({ statut: "avec_perdues" }, ETAPES);
+  assert.deepEqual(puces.map((f) => f.label), ["Toutes, perdues comprises"]);
+  assert.equal(puces[0].retirer, "/prospects");
+});
+
 cas("« Activité récente » n'est plus le défaut : elle s'écrit, et devient une puce", () => {
   assert.equal(hrefProspects({ tri: "recent" }), "/prospects?tri=recent");
   assert.deepEqual(filtresActifs({ tri: "recent" }, ETAPES).map((f) => f.label), ["Tri : Activité récente"]);

@@ -17,6 +17,11 @@ import { Icone } from "@/components/ui";
 import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { CallOutcome } from "@/lib/types";
+import type { AnnulationRefus } from "@/lib/crm/perdues";
+
+/** Ce que « Pas intéressé » fait de la fiche, dit une fois (29/10). */
+const PHRASE_PERDU =
+  "Fiche passée en « Perdu » : elle ne s'affiche plus dans la liste ni dans « À faire » (filtre « Perdu » pour la revoir).";
 
 function fmtJourCourt(jourISO: string): string {
   return new Intl.DateTimeFormat("fr-BE", {
@@ -40,8 +45,10 @@ function fmtJourCourt(jourISO: string): string {
  *   · un champ d'une ligne, dictable APRÈS le tap, qui devient le texte que la
  *     carte affichera (`activities.subject`) ;
  *   · pour « Pas intéressé », ce champ devient obligatoire et la raison va
- *     AUSSI dans `prospects.lost_reason` — sans jamais appliquer l'étape
- *     « Perdu », qui reste une décision humaine (invariant de status.ts).
+ *     AUSSI dans `prospects.lost_reason` ; depuis le 29/10, la fiche passe en
+ *     « Perdu » (et disparaît par défaut de la liste et de « À faire » —
+ *     lib/crm/perdues.ts). Une seconde pastille juste après DÉFAIT ce passage :
+ *     étape et relances d'avant.
  *
  * « À rappeler » ne date rien ici : la carte PROCHAINE ACTION porte la ligne
  * « Relancer », et un rappel s'y pose d'un tap. `onRappeler` sert exactement à
@@ -75,6 +82,8 @@ export function ResultatAppel({
    */
   const [choisi, setChoisi] = useState<CallOutcome | null>(null);
   const [activiteId, setActiviteId] = useState<string | null>(null);
+  /** Ce que « Pas intéressé » a fait (passage en Perdu) — rendu à la correction. */
+  const [annulation, setAnnulation] = useState<AnnulationRefus | null>(null);
   const [texte, setTexte] = useState("");
   /** Le texte déjà parti au serveur — pour ne pas le renvoyer inchangé. */
   const [texteEnregistre, setTexteEnregistre] = useState("");
@@ -144,14 +153,22 @@ export function ResultatAppel({
           activiteId,
           outcome: o,
           texte: texte.trim() || null,
+          annulation,
         });
         if (res.error) {
           setChoisi(avant);
           setErreur(res.error);
           return;
         }
+        if (res.annulation !== undefined) setAnnulation(res.annulation);
         setTexteEnregistre(texte.trim());
-        setNote("Corrigé.");
+        setNote(
+          o === "refus"
+            ? `Corrigé. ${PHRASE_PERDU}`
+            : avant === "refus"
+              ? "Corrigé — la fiche reprend son étape et ses relances."
+              : "Corrigé."
+        );
         // Corrigé EN « à rappeler » : la date manque toujours, la carte le dit.
         if (o === "rappeler" || o === "suivi_email") onRappeler?.();
       });
@@ -171,10 +188,12 @@ export function ResultatAppel({
         return;
       }
       setActiviteId(res.activiteId ?? null);
+      setAnnulation(res.annulation ?? null);
       setTexteEnregistre(texte.trim());
       setNote(
         [
           "Enregistré.",
+          o === "refus" ? PHRASE_PERDU : null,
           res.autoStatus
             ? `Étape → « ${STATUS_LABEL[res.autoStatus]} » — ${res.autoReason}.`
             : null,
@@ -313,8 +332,7 @@ export function ResultatAppel({
       {besoinRaison && (
         <p className="text-[11px] text-amber-300/90">
           « Pas intéressé » sans raison ne sert à personne — un mot suffit. La
-          fiche ne passera pas en « Perdu » pour autant : ça reste votre
-          décision.
+          fiche passera en « Perdu ».
         </p>
       )}
 

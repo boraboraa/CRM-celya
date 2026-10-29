@@ -17,6 +17,7 @@ import {
   type Vue,
 } from "@/lib/crm/filtresProspects";
 import { optionsFiltreRegion, valeurFiltreRegion } from "@/lib/crm/regions";
+import { AVEC_PERDUES, LIBELLE_AVEC_PERDUES, LIBELLE_SANS_PERDUES } from "@/lib/crm/perdues";
 
 /**
  * L'écran /prospects, sans ses lectures (27/10, au soir) : la page charge, ce
@@ -63,8 +64,15 @@ export function AffichageProspects({
     label,
     actif,
   });
+  // Les perdues sont masquées par défaut EN LISTE (29/10, lib/crm/perdues.ts) :
+  // le choix par défaut le dit, et « Toutes, perdues comprises » les rend. Le
+  // pipeline n'en a pas besoin — sa colonne « Perdu » est déjà repliée.
+  const enListe = vue === "liste";
+  const libelleTous = enListe ? LIBELLE_SANS_PERDUES : "Toutes les étapes";
+  const avecPerdues: [string, string] | null = enListe ? [AVEC_PERDUES, LIBELLE_AVEC_PERDUES] : null;
   const etapesLiens = [
-    lien({ statut: null }, "Toutes", !params.statut || params.statut === "tous"),
+    lien({ statut: null }, enListe ? LIBELLE_SANS_PERDUES : "Toutes", !params.statut || params.statut === "tous"),
+    ...(avecPerdues ? [lien({ statut: AVEC_PERDUES }, LIBELLE_AVEC_PERDUES, params.statut === AVEC_PERDUES)] : []),
     ...STATUS_ORDER.map((st) => lien({ statut: st }, STATUS_LABEL[st], params.statut === st)),
   ];
   const liensVue: [Vue, string][] = [
@@ -176,6 +184,8 @@ export function AffichageProspects({
           regions={regions}
           qui={qui}
           avecTri={vue === "liste"}
+          libelleTous={libelleTous}
+          avecPerdues={avecPerdues}
         />
       </div>
 

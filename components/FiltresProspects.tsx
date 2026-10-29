@@ -30,6 +30,8 @@ export function FiltresProspects({
   qui = null,
   avecTri,
   seulementRecherche = false,
+  libelleTous = "Toutes les étapes",
+  avecPerdues = null,
 }: {
   q: string;
   /** La valeur du menu « Étape » : une étape, `f:<raccourci>` ou `tous` (valeurEtape). */
@@ -46,6 +48,13 @@ export function FiltresProspects({
   /** Le périmètre : des liens tout faits (optionsPerimetre) — null : pas de menu. */
   qui?: { href: string; label: string; actif: boolean }[] | null;
   avecTri: boolean;
+  /**
+   * Le libellé du choix par défaut : « Toutes sauf perdues » en liste (les
+   * perdues y sont masquées par défaut, 29/10 — lib/crm/perdues.ts).
+   */
+  libelleTous?: string;
+  /** [valeur, libellé] du choix « Toutes, perdues comprises » — null : absent. */
+  avecPerdues?: [string, string] | null;
   /**
    * Téléphone : la recherche seule, sans libellé — l'étape et le tri passent
    * dans la feuille « Filtres ». Même champ, même délai, même URL.
@@ -144,7 +153,8 @@ export function FiltresProspects({
         aria-label="Étape"
         className={menu}
       >
-        <option value="tous">Toutes les étapes</option>
+        <option value="tous">{libelleTous}</option>
+        {avecPerdues && <option value={avecPerdues[0]}>{avecPerdues[1]}</option>}
         {etapes.map(([v, label]) => (
           <option key={v} value={v}>
             {label}

@@ -26,6 +26,7 @@ import {
 } from "@/lib/crm/maListe";
 import { doublonsEquipe } from "@/lib/crm/doublonsEquipe";
 import { importProspectsCore, nomsDesProprietaires, type ImportResult } from "@/lib/crm/prospects";
+import { regionDeTelephone } from "@/lib/crm/regions";
 
 /** Ce que l'écran garde en mémoire : au plus 200 fiches (deux collages et demi). */
 const PLAFOND_SESSION = 200;
@@ -76,12 +77,15 @@ async function regionsDe(
     p_adresses: fiches.map((f) => f.address ?? null),
     p_noms: fiches.map((f) => f.company_name ?? null),
   });
-  if (error || !Array.isArray(data)) return vides;
   const out: (string | null)[] = [...vides];
-  for (const r of data as { i: number; region: string | null }[]) {
-    if (r.i >= 1 && r.i <= out.length) out[r.i - 1] = r.region ?? null;
+  if (!error && Array.isArray(data)) {
+    for (const r of data as { i: number; region: string | null }[]) {
+      if (r.i >= 1 && r.i <= out.length) out[r.i - 1] = r.region ?? null;
+    }
   }
-  return out;
+  // 038 : rien de la commune ni de l'adresse → l'indicatif du fixe, comme le
+  // trigger (recopie `regionDeTelephone`, même jeu de cas que la base).
+  return out.map((r, i) => r ?? regionDeTelephone(fiches[i].phone ?? fiches[i].phone_lu ?? null));
 }
 
 async function verifier(

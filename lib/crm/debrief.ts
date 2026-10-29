@@ -270,8 +270,8 @@ export type RdvEnAttente = {
  * Les rendez-vous qui attendent leur débrief : de PROSPECT (un RDV personnel
  * ne réclame jamais rien — le « Rdv Ephec » du 18/10), vivants, commencés,
  * non débriefés, sur une fiche ni gagnée ni perdue (023). UN SEUL par fiche :
- * le plus récent — les plus anciens seront clos « remplacés » par la base dès
- * qu'il sera débriefé (027). Plus de Nice Cars en double dans la zone.
+ * le plus récent — les autres seront clos « remplacés » par la base dès
+ * qu'il sera débriefé (027, 036). Plus de Nice Cars en double dans la zone.
  * Trié du plus ancien au plus récent : le plus en retard d'abord.
  */
 export function rdvADebriefer<R extends RdvEnAttente>(
@@ -294,6 +294,43 @@ export function rdvADebriefer<R extends RdvEnAttente>(
   }
   return [...parFiche.values()].sort(
     (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Débriefer un RDV ferme les autres RDV passés de la fiche — miroir SQL (036)
+// ---------------------------------------------------------------------------
+
+/**
+ * Les rendez-vous que la base ferme (`annule` / `remplace`, une ligne au
+ * journal) quand `tenu` passe en « honore » — débrief explicite, débrief
+ * implicite ou essai gratuit. La règle s'exécute EN SQL
+ * (`meetings_rdv_remplaces`, migration 036) ; cette fonction en est la
+ * recopie, jouée par `test:debrief`.
+ *
+ * API CAR 3000 (29/10) : deux RDV en attente, le 26/09 et le 28/09. Débriefer
+ * le 26/09 laissait le 28/09 « À débriefer » — la 027 ne fermait que les plus
+ * ANCIENS. Désormais : TOUS les autres RDV de prospect de la fiche déjà
+ * commencés et non débriefés, plus anciens ou plus récents. Jamais un RDV à
+ * venir ; jamais sur une fiche gagnée ou perdue.
+ */
+export function rdvFermesParDebrief<R extends RdvEnAttente>(
+  meetings: R[],
+  tenuId: string,
+  statutFiche: string | null | undefined,
+  now: number = Date.now()
+): R[] {
+  if (statutFiche === "gagne" || statutFiche === "perdu") return [];
+  const tenu = meetings.find((m) => m.id === tenuId);
+  if (!tenu || tenu.kind !== "prospect" || !tenu.prospect_id) return [];
+  return meetings.filter(
+    (m) =>
+      m.id !== tenuId &&
+      m.prospect_id === tenu.prospect_id &&
+      m.kind === "prospect" &&
+      ["prevu", "confirme", "reporte"].includes(m.status) &&
+      !m.debriefed_at &&
+      new Date(m.starts_at).getTime() <= now
   );
 }
 

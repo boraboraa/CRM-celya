@@ -18,6 +18,8 @@ import {
 } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
+import { PastilleRegion } from "@/components/PastilleRegion";
+import { communeAffichee } from "@/lib/crm/regions";
 
 /**
  * La couleur de chaque étape, déclinée pour la colonne : bandeau d'en-tête,
@@ -77,6 +79,9 @@ export type BoardProspect = {
   id: string;
   company_name: string;
   contact_name: string | null;
+  /** La commune et la région (034, 038) — la pastille de la carte. */
+  city?: string | null;
+  region?: string | null;
   status: ProspectStatus;
   confidence_level: ConfidenceLevel | null;
   confidence_reason: string | null;
@@ -414,6 +419,16 @@ export function PipelineBoard({
                               {c.contact_name}
                             </p>
                           )}
+                          {/* La région (29/10) : « Bruxelles · Auderghem »,
+                              « Brabant flamand · Overijse », ou « Région ? ». */}
+                          <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+                            <PastilleRegion region={c.region} className="min-w-0" />
+                            {communeAffichee(c.city, c.region) && (
+                              <span className="min-w-0 truncate" title={communeAffichee(c.city, c.region)!}>
+                                {communeAffichee(c.city, c.region)}
+                              </span>
+                            )}
+                          </p>
 
                           {/* La DERNIÈRE ACTION : canal + résultat + date —
                               ce qui manquait le plus sur la carte. */}

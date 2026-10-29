@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
-import { normalizeStatus, isCallOutcome } from "@/lib/constants";
+import { normalizeStatus, isCallOutcome, STATUS_ORDER } from "@/lib/constants";
+import { estPerdue, lireAnnulation, type AnnulationRefus } from "@/lib/crm/perdues";
 import type { ProspectStatus } from "@/lib/types";
 import {
   manualStatusPatch,
@@ -598,10 +599,93 @@ export async function saveExchangeAction(
 export type ResultatAppelState = ActionState & {
   /** L'entrée de journal créée — c'est elle que « préciser » complètera. */
   activiteId?: string | null;
+  /**
+   * « Pas intéressé » a fait passer la fiche en Perdu (29/10) : ce qu'il faut
+   * pour le DÉFAIRE si la pastille était la mauvaise (lib/crm/perdues.ts).
+   */
+  annulation?: AnnulationRefus | null;
   autoStatus?: ProspectStatus | null;
   autoReason?: string | null;
   conflit?: MeetingConflit | null;
 };
+
+/**
+ * « Pas intéressé » fait passer la fiche en Perdu (29/10, décision de Bora :
+ * ce qui est perdu ne s'affiche plus par défaut — lib/crm/perdues.ts). Par le
+ * MÊME cœur que tout changement d'étape humain (`saveExchangeCore` avec
+ * `statut: "perdu"`) : verrou, raison, relances ouvertes annulées, confiance.
+ *
+ * Renvoie de quoi DÉFAIRE le geste (étape et verrou d'avant, relances
+ * annulées), ou null quand la fiche était déjà perdue — rien à défaire.
+ */
+async function passerEnPerduApresRefus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  prospectId: string,
+  motif: string | null
+): Promise<{ annulation: AnnulationRefus | null; error?: string }> {
+  const { data: fiche } = await supabase
+    .from("prospects")
+    .select("status, status_locked")
+    .eq("id", prospectId)
+    .maybeSingle();
+  if (!fiche) return { annulation: null, error: "Prospect introuvable." };
+  if (estPerdue(fiche.status)) return { annulation: null };
+  const { data: ouvertes } = await supabase
+    .from("tasks")
+    .select("id")
+    .eq("prospect_id", prospectId)
+    .eq("status", "a_faire");
+  const res = await saveExchangeCore(supabase, userId, {
+    prospectId,
+    type: "note",
+    statut: "perdu",
+    motif,
+  });
+  if (res.error) return { annulation: null, error: res.error };
+  return {
+    annulation: {
+      etape: fiche.status as string,
+      verrou: fiche.status_locked === true,
+      relances: (ouvertes ?? []).map((t) => t.id as string),
+    },
+  };
+}
+
+/**
+ * Défaire un « Pas intéressé » tapé par erreur : l'étape et le verrou d'avant,
+ * les relances que le passage en Perdu avait annulées. Ne touche une fiche
+ * que si elle est ENCORE perdue (rien à défaire sinon), et seulement les
+ * relances de CETTE fiche, encore annulées.
+ */
+async function defairePerdu(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  prospectId: string,
+  annulation: AnnulationRefus
+): Promise<void> {
+  const { data: fiche } = await supabase
+    .from("prospects")
+    .select("status")
+    .eq("id", prospectId)
+    .maybeSingle();
+  if (!fiche || !estPerdue(fiche.status)) return;
+  await supabase
+    .from("prospects")
+    .update(
+      annulation.verrou
+        ? { ...manualStatusPatch(annulation.etape as ProspectStatus), lost_reason: null }
+        : { status: annulation.etape, ...unlockStatusPatch(), lost_reason: null }
+    )
+    .eq("id", prospectId);
+  if (annulation.relances.length > 0) {
+    await supabase
+      .from("tasks")
+      .update({ status: "a_faire" })
+      .eq("prospect_id", prospectId)
+      .eq("status", "annule")
+      .in("id", annulation.relances);
+  }
+}
 
 /**
  * Consigner ce qu'a donné un appel, en un geste : 📵 pas de réponse, 🚧
@@ -614,8 +698,10 @@ export type ResultatAppelState = ActionState & {
  * journal, même règle d'échange, même cadence de relance, même recalcul de
  * confiance. Deux invariants tenus par le cœur, pas par cet appelant :
  *   · 'sans_reponse' n'est PAS un échange (la fiche reste « À appeler ») ;
- *   · « Pas intéressé » enregistre la RAISON (prospects.lost_reason) mais
- *     n'applique jamais l'étape « Perdu » — elle reste une décision humaine.
+ *   · « Pas intéressé » enregistre la RAISON (prospects.lost_reason) ET,
+ *     depuis le 29/10, fait passer la fiche en « Perdu » — c'est l'humain qui
+ *     a tapé « Pas intéressé », comme il taperait l'étape. Défaisable par une
+ *     seconde pastille (`preciserResultatAction` + `annulation`).
  */
 export async function enregistrerResultatAction(input: {
   prospectId: string;
@@ -655,9 +741,19 @@ export async function enregistrerResultatAction(input: {
   });
   if (result.error) return { error: result.error };
 
+  // « Pas intéressé » → Perdu (29/10). APRÈS l'entrée de journal : la raison
+  // et le résultat sont déjà écrits, quoi qu'il arrive ici.
+  let annulation: AnnulationRefus | null = null;
+  if (input.outcome === "refus") {
+    const perdu = await passerEnPerduApresRefus(supabase, userId, input.prospectId, texte);
+    if (perdu.error) return { error: perdu.error, activiteId: result.activiteId ?? null };
+    annulation = perdu.annulation;
+  }
+
   revalidateProspect(input.prospectId);
   if (input.rendezVous) revalidatePath("/agenda");
   return {
+    annulation,
     activiteId: result.activiteId ?? null,
     autoStatus: result.autoStatus,
     autoReason: result.autoReason,
@@ -684,10 +780,13 @@ export async function preciserResultatAction(input: {
   rendezVous?: boolean;
   rdvLieu?: string | null;
   rdvFin?: string | null;
-}): Promise<ActionState> {
+  /** Ce que le « Pas intéressé » corrigé avait fait — pour le défaire. */
+  annulation?: unknown;
+}): Promise<ActionState & { annulation?: AnnulationRefus | null }> {
   const { supabase, userId } = await currentUserId();
   const texte = input.texte?.trim().slice(0, 300) || null;
   const correction = isCallOutcome(input.outcome) ? input.outcome : null;
+  let annulation: AnnulationRefus | null | undefined = undefined;
 
   if (texte || correction) {
     // La RLS tranche : un membre ne modifie que ses propres entrées
@@ -708,13 +807,25 @@ export async function preciserResultatAction(input: {
     if (error) return { error: error.message };
     if (!ligne) return { error: "Entrée introuvable." };
 
-    // « Pas intéressé » : la raison vit AUSSI sur la fiche. Toujours sans
-    // toucher à l'étape — « Perdu » ne s'applique jamais tout seul.
+    // « Pas intéressé » : la raison vit AUSSI sur la fiche.
     if (ligne.outcome === "refus" && texte) {
       await supabase
         .from("prospects")
         .update({ lost_reason: texte })
         .eq("id", input.prospectId);
+    }
+
+    // « Pas intéressé » ↔ autre chose (29/10) : corrigé EN « Pas intéressé »,
+    // la fiche passe en Perdu ; corrigé DEPUIS « Pas intéressé », elle revient
+    // à son étape d'avant, ses relances avec — avant la réévaluation.
+    if (correction === "refus") {
+      const perdu = await passerEnPerduApresRefus(supabase, userId, input.prospectId, texte);
+      if (perdu.error) return { error: perdu.error };
+      annulation = perdu.annulation;
+    } else if (correction) {
+      const aDefaire = lireAnnulation(input.annulation, STATUS_ORDER);
+      if (aDefaire) await defairePerdu(supabase, input.prospectId, aDefaire);
+      annulation = null;
     }
 
     // Une correction change ce que les FAITS disent : l'étape et la confiance
@@ -739,7 +850,7 @@ export async function preciserResultatAction(input: {
   }
 
   revalidateProspect(input.prospectId);
-  return { success: "Enregistré." };
+  return { success: "Enregistré.", ...(annulation !== undefined ? { annulation } : {}) };
 }
 
 // =====================================================================

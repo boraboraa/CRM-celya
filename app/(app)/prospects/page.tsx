@@ -5,6 +5,7 @@ import { type LigneListe } from "@/components/ListeProspects";
 import { optionsPerimetre } from "@/components/PerimetreSwitcher";
 import { AffichageProspects } from "@/components/AffichageProspects";
 import { lireVue, VUE_COOKIE } from "@/lib/crm/filtresProspects";
+import { ETAPES_MASQUEES, masquerPerdues } from "@/lib/crm/perdues";
 import { filtreRecherche } from "@/lib/crm/recherche";
 import { type BoardProspect } from "@/components/PipelineBoard";
 import { STATUS_ORDER, normalizeStatus } from "@/lib/constants";
@@ -111,6 +112,11 @@ export default async function ProspectsPage({
   // et fausserait résultats et compteur au-delà de 500 fiches).
   if (statutFilter) {
     query = query.eq("status", statutFilter);
+  } else if (view === "liste" && masquerPerdues(statut)) {
+    // Les perdues ne s'affichent plus par défaut dans la liste (29/10,
+    // lib/crm/perdues.ts) — « Perdu » ou « Toutes, perdues comprises » les
+    // rendent. Le pipeline les garde dans sa colonne repliée.
+    query = query.not("status", "in", `(${ETAPES_MASQUEES.join(",")})`);
   }
   if (filtreRegion?.type === "aucune") query = query.is("region", null);
   else if (filtreRegion) query = query.in("region", filtreRegion.regions);
@@ -256,6 +262,8 @@ export default async function ProspectsPage({
     id: p.id,
     company_name: p.company_name,
     contact_name: p.contact_name,
+    city: p.city,
+    region: p.region,
     status: p.status,
     confidence_level: p.confidence_level,
     confidence_reason: p.confidence_reason,

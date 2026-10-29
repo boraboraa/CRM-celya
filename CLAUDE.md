@@ -5,6 +5,24 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026, fin d'après-midi — « Pas décroché » pose un rappel
+
+Décision de Bora : « quand la personne n'a pas décroché, c'est de toute façon
+une relance à faire ». **« Pas décroché » et « Barrage » posent TOUT SEULS un
+rappel** : le prochain jour ouvré (fériés belges exclus — le calendrier de
+Janet, `lendemainOuvre`), à l'AUTRE moitié de la journée (appelé avant 13h →
+14h, après → 10h). Jamais par-dessus une date dite (le texte « rappeler
+jeudi », le « Pour quand ? »), une relance déjà prévue APRÈS aujourd'hui, un
+RDV à venir (024) ou une fiche gagnée / perdue ; une relance du jour ou en
+retard est RE-DATÉE (jamais de doublon). La règle : `decisionRappelAuto` /
+`rappelAutomatique` (`lib/crm/relance.ts`, `test:relance`) ; l'écriture :
+`poserRappelAuto` (`lib/crm/rappelAuto.ts`, par `saveExchangeCore` sans
+texte), appelée par `enregistrerResultatAction`, `preciserResultatAction`
+(correction EN pas décroché / barrage) et l'outil MCP `ajouter_note`. Sous les
+pastilles : « Rappel posé demain à 14h · Changer » (ouvre « Pour quand ? »).
+Janet n'est pas concernée (elle a son propre cycle). Même PR que le retrait de
+« Proposition » (#28).
+
 ## État au 29 octobre 2026, fin d'après-midi — l'étape « Proposition » retirée
 
 Décision de Bora (« un de trop, c'est trop chargé ») : **plus d'étape

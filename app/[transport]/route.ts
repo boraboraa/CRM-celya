@@ -89,6 +89,7 @@ import { createProspectCore, importProspectsCore } from "@/lib/crm/prospects";
 import { DEBUT_SALES_TROPHY, ZERO, phraseObjectifs, type Compteurs } from "@/lib/crm/compteurs";
 import { lireClassement, periodesClassement } from "@/lib/crm/lectureObjectifs";
 import { saveExchangeCore } from "@/lib/crm/exchange";
+import { poserRappelAuto } from "@/lib/crm/rappelAuto";
 import {
   poserRendezVous,
   deplacerRendezVous,
@@ -1083,7 +1084,7 @@ function register(server: McpServer) {
         .enum(OUTCOME_ORDER as [string, ...string[]])
         .optional()
         .describe(
-          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler), « interesse » (intéressé), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; posez la relance avec « planifier_relance »), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler), « interesse » (intéressé), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; posez la relance avec « planifier_relance »), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » et « barrage » posent TOUT SEULS un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
         ),
     },
     async (args, extra) => {
@@ -1136,6 +1137,15 @@ function register(server: McpServer) {
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
+      // « Pas décroché » / « Barrage » (29/10) : le même rappel automatique
+      // qu'à l'écran — le prochain jour ouvré, à l'autre moitié de la journée.
+      const rappelAuto =
+        args.brouillon === true
+          ? null
+          : await poserRappelAuto(admin, viewer.userId, resolved.id, args.resultat ?? null, {
+              dateHumaine: Boolean(rdvLe),
+            });
+
       const bits = [
         args.brouillon
           ? `✅ Brouillon rangé sur ${resolved.company_name} (hors chronologie).`
@@ -1147,6 +1157,9 @@ function register(server: McpServer) {
         bits.push(
           `⚠ Ce créneau chevauche « ${r.conflit.title} » (${fmtDateTime(r.conflit.starts_at)}).`
         );
+      }
+      if (rappelAuto) {
+        bits.push(`Rappel posé automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`);
       }
       if (r.statusChanged) {
         bits.push(

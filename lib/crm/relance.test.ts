@@ -25,6 +25,9 @@ import {
   libelleRelance,
   instantRelance,
   relanceAvantRdv,
+  rappelAutomatique,
+  decisionRappelAuto,
+  declencheRappelAuto,
 } from "./relance.ts";
 
 let fautes = 0;
@@ -112,6 +115,38 @@ verifie("une relance vendredi tombe après : rien à signaler",
 verifie("jeudi à 11h, une heure avant le RDV : signalée",
   relanceAvantRdv("2026-10-29T11:00", RDV_JEUDI_12H), true);
 verifie("sans RDV : rien", relanceAvantRdv("2026-10-28T09:00", null), false);
+
+console.log("\n— le rappel automatique après « Pas décroché » / « Barrage » (29/10) —");
+verifie("seuls « Pas décroché » et « Barrage » le déclenchent",
+  ["sans_reponse", "barrage", "rappeler", "interesse", "suivi_email", "refus", null].map(declencheRappelAuto),
+  [true, true, false, false, false, false, false]);
+verifie("appelé mardi matin (10h20) → mercredi 14h", rappelAutomatique(MARDI_10H20), "2026-10-28T14:00");
+verifie("appelé mardi après-midi (15h10) → mercredi 10h", rappelAutomatique(MARDI_15H10), "2026-10-28T10:00");
+verifie("13h pile, c'est l'après-midi → lendemain 10h",
+  rappelAutomatique(new Date("2026-10-27T12:00:00Z")), "2026-10-28T10:00");
+verifie("appelé vendredi matin → lundi 14h (jamais le week-end)",
+  rappelAutomatique(new Date("2026-10-30T10:00:00Z")), "2026-11-02T14:00");
+verifie("appelé mardi 10/11 l'après-midi → jeudi 12/11 10h (le 11 novembre est férié)",
+  rappelAutomatique(new Date("2026-11-10T15:00:00Z")), "2026-11-12T10:00");
+verifie("heure d'été : vendredi 23/10 à 10h → lundi 26/10 14h", rappelAutomatique(VENDREDI_ETE), "2026-10-26T14:00");
+
+const base = { outcome: "sans_reponse", dateHumaine: false, statut: "a_appeler", rdvAVenir: false, relancesOuvertes: [] as string[], now: MARDI_10H20 };
+verifie("fiche sans relance : rappel posé", decisionRappelAuto(base), { poser: "2026-10-28T14:00" });
+verifie("« Barrage » : pareil", decisionRappelAuto({ ...base, outcome: "barrage" }), { poser: "2026-10-28T14:00" });
+verifie("relance d'aujourd'hui (9h, en cours) : re-datée",
+  decisionRappelAuto({ ...base, relancesOuvertes: ["2026-10-27T08:00:00Z"] }), { poser: "2026-10-28T14:00" });
+verifie("relance en retard (lundi) : re-datée",
+  decisionRappelAuto({ ...base, relancesOuvertes: ["2026-10-26T08:00:00Z"] }), { poser: "2026-10-28T14:00" });
+verifie("relance déjà prévue jeudi : on n'y touche pas",
+  decisionRappelAuto({ ...base, relancesOuvertes: ["2026-10-29T08:00:00Z"] }), { poser: null, raison: "relance_prevue" });
+verifie("une date dite par l'humain (« rappeler jeudi ») : elle gagne",
+  decisionRappelAuto({ ...base, dateHumaine: true }), { poser: null, raison: "date_humaine" });
+verifie("un RDV à venir : rien d'automatique (024)",
+  decisionRappelAuto({ ...base, rdvAVenir: true }), { poser: null, raison: "rdv_a_venir" });
+verifie("fiche perdue ou gagnée : rien",
+  ["perdu", "gagne"].map((statut) => decisionRappelAuto({ ...base, statut }).poser), [null, null]);
+verifie("un autre résultat : rien",
+  decisionRappelAuto({ ...base, outcome: "interesse" }), { poser: null, raison: "pas_concerne" });
 
 if (fautes > 0) {
   console.log(`\n${fautes} cas en échec.`);

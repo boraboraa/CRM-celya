@@ -5,6 +5,19 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026 — un débrief ferme les doublons
+
+**La `036` est APPLIQUÉE** (29/10) : débriefer un RDV (explicite, implicite,
+essai) ferme TOUS les autres RDV passés en attente de la fiche — plus anciens
+OU plus récents (la 027 ne fermait que les plus anciens : API CAR 3000,
+débriefé via son RDV du 26/09, affichait encore « À débriefer · 28/09 » et
+cachait sa relance). Ligne au journal « RDV du 28/09 clos par le débrief du RDV
+du 26/09 ». Reprise : API CAR 3000 seule (Nice Cars et Vivier d'oie se règlent
+au prochain débrief). Recette `supabase/recettes/036.sql` : **11 OK, 0 faute**.
+Recopie TS : `rdvFermesParDebrief` (`test:debrief`). Et la carte PROCHAINE
+ACTION replie son « Relancer » derrière « Planifier une relance » pendant un
+débrief (deux gros sélecteurs s'empilaient). Branche `claude/debrief-doublons`.
+
 ## État au 28 octobre 2026, tard — supprimer une fiche
 
 Les PR #23, #24 et #25 sont fusionnées (badge « À débriefer », commune et

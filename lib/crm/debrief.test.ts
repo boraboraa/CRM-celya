@@ -25,6 +25,7 @@ import {
   estIssueDebrief,
   issueImplicite,
   rdvClosParEssai,
+  rdvFermesParDebrief,
   ISSUES_TENUES,
   type RdvEnAttente,
 } from "./debrief.ts";
@@ -201,6 +202,33 @@ verifie("un RDV déjà débriefé, annulé ou perso : rien",
     moto("ann", RDV_29_09, "annule"),
     { id: "perso", prospect_id: null, kind: "perso", status: "prevu", starts_at: RDV_29_09 },
   ], "rendez_vous", "essai_gratuit", NOW), null);
+
+// --- 2c. Débriefer ferme les autres RDV passés (miroir du trigger 036) ------
+console.log("\n— débriefer ferme les autres RDV passés de la fiche —");
+const api = (id: string, starts_at: string, status = "prevu", extra: Partial<RdvEnAttente> = {}): RdvEnAttente =>
+  ({ id, prospect_id: "api", kind: "prospect", status, starts_at, debriefed_at: null, ...extra });
+const rdvApi = [
+  api("api-26", "2026-09-26T10:17:00Z"),
+  api("api-28", "2026-09-28T09:00:00Z"),
+  api("api-futur", FUTUR),
+  api("api-deja", "2026-09-10T08:00:00Z", "honore", { debriefed_at: "2026-09-11T08:00:00Z" }),
+  api("api-annule", "2026-09-12T08:00:00Z", "annule"),
+  { id: "autre-fiche", prospect_id: "nice", kind: "prospect", status: "prevu", starts_at: "2026-09-29T08:00:00Z" },
+  { id: "perso", prospect_id: null, kind: "perso", status: "prevu", starts_at: "2026-09-27T08:00:00Z" },
+];
+verifie("API CAR 3000 : débriefer le 26/09 ferme le 28/09 (plus RÉCENT) — rien d'autre",
+  rdvFermesParDebrief(rdvApi, "api-26", "rendez_vous", NOW).map((m) => m.id), ["api-28"]);
+verifie("débriefer le 28/09 ferme le 26/09 (plus ancien, comme la 027)",
+  rdvFermesParDebrief(rdvApi, "api-28", "rendez_vous", NOW).map((m) => m.id), ["api-26"]);
+verifie("un RDV à venir, déjà débriefé, annulé, d'une autre fiche ou perso : jamais",
+  rdvFermesParDebrief(rdvApi, "api-26", "a_rappeler", NOW).some((m) =>
+    ["api-futur", "api-deja", "api-annule", "autre-fiche", "perso"].includes(m.id)), false);
+verifie("fiche gagnée ou perdue : rien",
+  [rdvFermesParDebrief(rdvApi, "api-26", "gagne", NOW).length, rdvFermesParDebrief(rdvApi, "api-26", "perdu", NOW).length], [0, 0]);
+verifie("Nice Cars (29/09, 06/10) : débriefer l'un ferme l'autre",
+  rdvFermesParDebrief([api("n29", "2026-09-29T13:00:00Z"), api("n06", "2026-10-06T13:00:00Z")], "n06", "rendez_vous", NOW).map((m) => m.id),
+  ["n29"]);
+verifie("RDV inconnu : rien", rdvFermesParDebrief(rdvApi, "absent", "rendez_vous", NOW), []);
 
 // --- 3. L'étape « À rappeler » ----------------------------------------------
 console.log("\n— l'étape « À rappeler » —");

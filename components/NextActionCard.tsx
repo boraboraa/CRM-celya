@@ -81,6 +81,10 @@ export function NextActionCard({
   const [erreur, setErreur] = useState<string>();
   /** « À rappeler » vient d'être tapé : la ligne Relancer réclame une date. */
   const [pourQuand, setPourQuand] = useState(false);
+  // Pendant un débrief, le débrief porte SON choix de date (« Rappeler
+  // quand ? ») : le « Relancer » de la carte se replie derrière un lien, sinon
+  // deux gros sélecteurs s'empilent (API CAR 3000, 29/10).
+  const [relanceDepliee, setRelanceDepliee] = useState(false);
 
   /**
    * L'action telle qu'elle s'affiche MAINTENANT. Reporter, marquer fait ou
@@ -365,12 +369,23 @@ export function NextActionCard({
             rendez-vous : on informe, on ne bloque pas (024). Elle remontera
             dans « À appeler » le jour venu ; la fiche, elle, dira toujours le
             RDV. */}
-        <ChoixRelance
-          onChoisir={relancer}
-          pending={pending}
-          avertissement={pourQuand ? "Pour quand ?" : null}
-          info={rdvAVenir ? infoRdvPrevu(rdvAVenir) : null}
-        />
+        {aDebriefer && !relanceDepliee ? (
+          <button
+            type="button"
+            onClick={() => setRelanceDepliee(true)}
+            className="btn-link min-h-[44px] text-xs"
+          >
+            <Icone nom="calendrier" />
+            Planifier une relance
+          </button>
+        ) : (
+          <ChoixRelance
+            onChoisir={relancer}
+            pending={pending}
+            avertissement={pourQuand ? "Pour quand ?" : null}
+            info={rdvAVenir ? infoRdvPrevu(rdvAVenir) : null}
+          />
+        )}
 
         {canEmail && (
           <button

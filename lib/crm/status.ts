@@ -10,7 +10,8 @@
  *                attestée, rendez-vous)
  *   rendez_vous  UNIQUEMENT une activité « rendez_vous » réellement
  *                enregistrée, ou un rendez-vous (non annulé) dans l'agenda
- *   a_rappeler   UNIQUEMENT un rendez-vous débriefé « intéressé, à
+ *   a_rappeler   un résultat d'appel « À rappeler » (activities.outcome,
+ *                29/10), ou un rendez-vous débriefé « intéressé, à
  *                rappeler » (meetings.debrief_issue, migration 027) — par
  *                le débrief explicite, ou par un résultat « À rappeler » /
  *                « Intéressé » posé après lui (débrief implicite, en base)
@@ -135,6 +136,17 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
 
   for (const a of rows.activities) {
     if (a.is_draft) continue;
+
+    // « À rappeler » (résultat d'appel, 29/10, décision de Bora) : la personne
+    // a demandé qu'on la rappelle — la fiche entre dans l'étape « À rappeler »,
+    // comme après un débrief « intéressé, à rappeler ». Avant, elle restait en
+    // « Contacté » alors que sa carte disait « À rappeler ».
+    if (a.outcome === "rappeler") {
+      facts.rappel = latest(facts.rappel, {
+        at: a.occurred_at,
+        label: `la personne a demandé à être rappelée le ${fmtDate(a.occurred_at)}`,
+      });
+    }
 
     if (a.outcome === "suivi_email") {
       facts.suiviEmail = latest(facts.suiviEmail, {

@@ -272,6 +272,35 @@ const tenuSuitePosee = factsFromRows({
   meetings: [{ starts_at: RDV_29_09, status: "honore", debrief_issue: "suite_posee", debriefed_at: "2026-10-15T09:00:00Z" }],
 });
 verifie("un RDV tenu sans issue « à rappeler » ne mène PAS à « À rappeler »", statusFromFacts(tenuSuitePosee), "rendez_vous");
+// --- « À rappeler » par le RÉSULTAT d'appel (29/10) -------------------------
+const appelRappeler = factsFromRows({
+  ...sansRien,
+  activities: [{ type: "note", occurred_at: "2026-10-29T15:04:00Z", is_exchange: true, is_draft: false, outcome: "rappeler" }],
+});
+verifie("un résultat « À rappeler » → l'étape déduite est « À rappeler » (plus « Contacté »)",
+  statusFromFacts(appelRappeler), "a_rappeler");
+verifie("…avec son motif en clair", appelRappeler.rappel?.label,
+  "la personne a demandé à être rappelée le 29 oct. 2026");
+v = evaluateStatus("contacte", false, appelRappeler);
+verifie("AVANCE : Contacté → À rappeler", [v.derived, v.apply], ["a_rappeler", true]);
+v = evaluateStatus("a_appeler", false, appelRappeler);
+verifie("AVANCE : À appeler → À rappeler", v.apply, true);
+v = evaluateStatus("contacte", true, appelRappeler);
+verifie("VERROU : seulement suggéré", [v.apply, v.suggest], [false, true]);
+v = evaluateStatus("suivi_email", false, appelRappeler);
+verifie("NE RECULE JAMAIS : Suivi par email reste", v.apply, false);
+v = evaluateStatus("essai_gratuit", false, appelRappeler);
+verifie("NE RECULE JAMAIS : Essai gratuit reste", v.apply, false);
+verifie("un brouillon « À rappeler » n'est pas un fait",
+  statusFromFacts(factsFromRows({ ...sansRien, activities: [{ type: "note", occurred_at: "2026-10-29T15:04:00Z", is_exchange: true, is_draft: true, outcome: "rappeler" }] })),
+  "a_appeler");
+verifie("« Intéressé » seul ne mène pas à « À rappeler » (Contacté)",
+  statusFromFacts(factsFromRows({ ...sansRien, activities: [{ type: "note", occurred_at: "2026-10-29T15:04:00Z", is_exchange: true, is_draft: false, outcome: "interesse" }] })),
+  "contacte");
+verifie("« Pas décroché » et « Barrage » non plus",
+  ["sans_reponse", "barrage"].map((outcome) => statusFromFacts(factsFromRows({ ...sansRien, activities: [{ type: "note", occurred_at: "2026-10-29T15:04:00Z", is_exchange: outcome === "barrage", is_draft: false, outcome }] }))),
+  ["a_appeler", "contacte"]);
+
 // --- « Suivi par email » : on y entre par le FAIT ---------------------------
 const appelSuivi = factsFromRows({
   ...sansRien,

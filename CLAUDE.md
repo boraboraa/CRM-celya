@@ -5,6 +5,21 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026, 16h — « À rappeler » range la fiche dans l'étape
+
+Retour de Bora : après le résultat d'appel « À rappeler », la carte disait
+« À rappeler » mais la fiche restait dans la colonne « Contacté ». **Un
+résultat `rappeler` est désormais un FAIT** (`factsFromRows`,
+`lib/crm/status.ts`, motif « la personne a demandé à être rappelée le … ») :
+la fiche passe en « À rappeler » par la règle des faits — jamais par-dessus le
+verrou (suggestion seulement), jamais en arrière (Suivi par email, Essai,
+Gagné, Perdu restent). « Intéressé », « Pas décroché » et « Barrage » ne
+changent rien. **La `041` est APPLIQUÉE** (données) : 12 fiches non
+verrouillées en Contacté passent en « À rappeler », recette
+`supabase/recettes/041.sql` 5 OK. **La `040` est APPLIQUÉE aussi** (après la
+fusion de #28) : l'étape « Proposition » est refusée en base.
+`test:debrief` étendu. Branche `claude/rappeler-etape`.
+
 ## État au 29 octobre 2026, fin d'après-midi — « Pas décroché » pose un rappel
 
 Décision de Bora : « quand la personne n'a pas décroché, c'est de toute façon

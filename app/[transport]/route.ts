@@ -148,6 +148,7 @@ import {
   type SaisieBrief,
 } from "@/lib/appelsIa/brief";
 import { ajouterJours, instantBruxelles, jourFr, partiesBruxelles } from "@/lib/appelsIa/calendrier";
+import { ETAPES_MASQUEES } from "@/lib/crm/perdues";
 import {
   CLASSEMENT_LABEL,
   OUTCOME_LABEL_APPEL,
@@ -721,7 +722,7 @@ function register(server: McpServer) {
   // --- a_faire --------------------------------------------------------------
   server.tool(
     "a_faire",
-    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre). Poser un rendez-vous clôture les relances qui tombaient avant lui : c'est le débrief du rendez-vous qui décide de la suite.",
+    "Liste ce qu'il y a à faire : les relances en retard et celles du jour. Par DÉFAUT, uniquement les relances de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Réutilise la logique de l'écran « À faire » (c'est la date qui décide : une relance datée du 14 octobre ne remonte que le 14 octobre). Poser un rendez-vous clôture les relances qui tombaient avant lui : c'est le débrief du rendez-vous qui décide de la suite. Les relances des fiches PERDUES n'y figurent pas.",
     {
       perimetre: z
         .enum(["moi", "equipe"])
@@ -740,7 +741,11 @@ function register(server: McpServer) {
       // la vérification en mémoire ci-dessous. La cloison (scopeJoinedProspects)
       // d'abord, le périmètre (assignee_id, comme l'écran « À faire ») ensuite.
       const SELECT =
-        "id, title, due_at, priority, prospect_id, assignee_id, prospects!inner(company_name, phone, owner_id)";
+        "id, title, due_at, priority, prospect_id, assignee_id, prospects!inner(company_name, phone, owner_id, status)";
+      // Les relances des fiches PERDUES ne remontent plus (29/10, comme
+      // l'écran — lib/crm/perdues.ts) : la jointure `!inner` rend le filtre
+      // sur l'étape filtrant.
+      const sansPerdues = `(${ETAPES_MASQUEES.join(",")})`;
 
       const [overdue, today, rdvPasses] = await Promise.all([
         filtrerTaches(
@@ -749,6 +754,7 @@ function register(server: McpServer) {
               .from("tasks")
               .select(SELECT)
               .eq("status", "a_faire")
+              .not("prospects.status", "in", sansPerdues)
               .lt("due_at", start),
             viewer
           ),
@@ -761,6 +767,7 @@ function register(server: McpServer) {
               .from("tasks")
               .select(SELECT)
               .eq("status", "a_faire")
+              .not("prospects.status", "in", sansPerdues)
               .gte("due_at", start)
               .lte("due_at", end),
             viewer
@@ -1080,7 +1087,7 @@ function register(server: McpServer) {
         .enum(OUTCOME_ORDER as [string, ...string[]])
         .optional()
         .describe(
-          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler), « interesse » (intéressé), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; posez la relance avec « planifier_relance »), « refus » (pas intéressé — « motif » OBLIGATOIRE ; l'étape ne passe PAS en Perdu). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler), « interesse » (intéressé), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; posez la relance avec « planifier_relance »), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
         ),
     },
     async (args, extra) => {
@@ -1113,7 +1120,12 @@ function register(server: McpServer) {
         note: args.note,
         resume: args.resume,
         contactName: args.contact,
-        statut: args.statut as ProspectStatus | undefined,
+        // « refus » (pas intéressé) fait passer la fiche en Perdu (29/10),
+        // comme à l'écran — elle sort alors des listes par défaut.
+        statut:
+          args.resultat === "refus" && args.brouillon !== true
+            ? "perdu"
+            : (args.statut as ProspectStatus | undefined),
         motif: args.motif,
         dateLocale: rdvLe,
         rdvLieu: rdvLe ? (args.lieu ?? null) : null,

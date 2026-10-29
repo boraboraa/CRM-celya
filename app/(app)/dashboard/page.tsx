@@ -25,6 +25,7 @@ import { ligneAgendaJour } from "@/lib/crm/agendaJour";
 import { rdvADebriefer } from "@/lib/crm/debrief";
 import { ordreAFaire } from "@/lib/crm/ficheSuivante";
 import { MemoireAFaire } from "@/components/FicheSuivante";
+import { sansPerdues } from "@/lib/crm/perdues";
 import {
   lirePerimetre,
   filtrerTaches,
@@ -85,7 +86,7 @@ export default async function TodoPage({
   // `starred_at` (031) n'est nommée que si la base la connaît : chaque lecture
   // qui la porte passe par `avecRepliColonne` (lib/crm/tolerance.ts).
   const TASK_SELECT = (e: boolean): string =>
-    `id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, next_action_at, next_action_kind${e ? ", starred_at" : ""})`;
+    `id, title, details, due_at, status, priority, prospect_id, assignee_id, prospects(id, company_name, contact_name, phone, email, status, next_action_at, next_action_kind${e ? ", starred_at" : ""})`;
 
   // Les requêtes partent ENSEMBLE. La liste des fiches en attente était
   // auparavant lancée après coup, une fois les identifiants connus : un
@@ -240,8 +241,11 @@ export default async function TodoPage({
     !viewer.isAdmin ? lireMesObjectifs(supabase, viewer.userId) : Promise.resolve(null),
   ]);
 
-  const overdueAll = (overdueRes.data ?? []) as unknown as TaskWithProspect[];
-  const todayAll = (todayRes.data ?? []) as unknown as TaskWithProspect[];
+  // Les relances des fiches PERDUES ne s'affichent plus (29/10, décision de
+  // Bora — lib/crm/perdues.ts) : ce qui est perdu ne réclame rien. Elles
+  // restent sur la fiche, et la liste les montre au filtre « Perdu ».
+  const overdueAll = sansPerdues((overdueRes.data ?? []) as unknown as (TaskWithProspect & { prospects?: { status?: string | null } | null })[]) as TaskWithProspect[];
+  const todayAll = sansPerdues((todayRes.data ?? []) as unknown as (TaskWithProspect & { prospects?: { status?: string | null } | null })[]) as TaskWithProspect[];
   // Les DEUX zones d'action du tableau restent personnelles, même en périmètre
   // d'équipe : trier une réponse et débriefer un rendez-vous ÉCRIVENT (l'un
   // rattache un email et pose une relance, l'autre clôt un RDV et verse un

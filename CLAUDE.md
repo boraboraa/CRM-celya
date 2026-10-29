@@ -5,6 +5,31 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026, midi — les perdues ne s'affichent plus
+
+Décision de Bora : **ce qui est perdu ne s'affiche plus par défaut** — ni dans
+la liste des prospects, ni dans « À faire » (ni dans l'outil MCP `a_faire`).
+Le menu « Étape » de la liste dit « Toutes sauf perdues » (défaut) et propose
+« Toutes, perdues comprises » (`?statut=avec_perdues`) et « Perdu » seul. Le
+pipeline ne change pas (colonne « Perdu » déjà repliée). La règle :
+`lib/crm/perdues.ts` (`masquerPerdues`, `sansPerdues`, `ETAPES_MASQUEES`),
+`npm run test:perdues`.
+
+Et **« Pas intéressé » (résultat d'appel) fait passer la fiche en Perdu**,
+verrouillée, relances annulées — écran ET MCP (`ajouter_note(resultat:
+refus)`). **Ceci remplace l'invariant « Pas intéressé n'applique jamais
+Perdu »** écrit plus bas (2 septembre, 27 octobre). Une seconde pastille juste
+après DÉFAIT le passage (étape, verrou et relances d'avant :
+`passerEnPerduApresRefus` / `defairePerdu` dans `app/actions.ts`,
+`AnnulationRefus` renvoyée au composant). Janet ne met toujours jamais une
+fiche en Perdu. **La `037` est APPLIQUÉE** (données seulement) : 4 fiches
+dont le dernier résultat était « Pas intéressé » (Syrez beauté, Les
+Germaines, Point S Lyon 3, Garage Rachais Dacia) passent en Perdu — recette
+`supabase/recettes/037.sql`, **5 OK, 0 faute**. 29 perdues sur 128.
+⚠ Relevé au passage : **25 fiches sans responsable** (`owner_id` nul — les
+fiches lyonnaises de Rémi, dont le compte n'existe plus) ; seul l'admin les
+voit. Non traité, à décider avec Bora.
+
 ## État au 29 octobre 2026 — un débrief ferme les doublons
 
 **La `036` est APPLIQUÉE** (29/10) : débriefer un RDV (explicite, implicite,
@@ -3187,7 +3212,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
 `npm run test:relance`,
-`npm run test:secteurs`, `npm run test:regions`, `npm run test:suppression`, `npm run test:doublons`, `npm run test:ma-liste`,
+`npm run test:secteurs`, `npm run test:regions`, `npm run test:suppression`, `npm run test:perdues`, `npm run test:doublons`, `npm run test:ma-liste`,
 `npm run test:objectifs`, `npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
 `npm run test:frontiere` (purs,
 sans réseau — `test:appels-live` ouvre un faux serveur Live **local**, et

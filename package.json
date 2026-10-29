@@ -24,6 +24,7 @@
     "test:secteurs": "node --experimental-strip-types lib/crm/secteurs.test.ts",
     "test:regions": "node --experimental-strip-types lib/crm/regions.test.ts",
     "test:suppression": "node --experimental-strip-types lib/crm/suppression.test.ts",
+    "test:perdues": "node --experimental-strip-types lib/crm/perdues.test.ts",
     "test:doublons": "node --experimental-strip-types lib/crm/doublons.test.ts",
     "test:ma-liste": "node --experimental-strip-types lib/crm/maListe.test.ts",
     "test:objectifs": "node --experimental-strip-types lib/crm/compteurs.test.ts",

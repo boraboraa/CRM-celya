@@ -9,6 +9,7 @@
  */
 // Chemin RELATIF avec extension : le test s'exécute tel quel sous node.
 import { lireFiltreRegion, valeurFiltreRegion } from "./regions.ts";
+import { AVEC_PERDUES, LIBELLE_AVEC_PERDUES } from "./perdues.ts";
 
 export type ParamsProspects = {
   q?: string;
@@ -132,6 +133,11 @@ export function filtresActifs(
   const out: FiltreActif[] = [];
   const q = params.q?.trim();
   if (q) out.push({ cle: "q", label: `« ${q} »`, retirer: hrefProspects(params, { q: null }) });
+  // « Toutes, perdues comprises » (29/10) : les perdues sont masquées par
+  // défaut — les montrer est un filtre comme un autre, retirable.
+  if (params.statut === AVEC_PERDUES) {
+    out.push({ cle: "statut", label: LIBELLE_AVEC_PERDUES, retirer: hrefProspects(params, { statut: null }) });
+  }
   if (params.statut && params.statut !== "tous" && etapes[params.statut]) {
     out.push({
       cle: "statut",

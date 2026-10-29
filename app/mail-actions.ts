@@ -146,8 +146,8 @@ export async function syncNowAction(): Promise<ActionState> {
 
 /**
  * Le chemin d'envoi, écrit une seule fois : SMTP par l'edge function, puis
- * tout ce que l'edge function ne fait PAS — la proposition, la cadence de
- * relance, l'étape et la confiance. Partagé par l'envoi depuis le composeur
+ * tout ce que l'edge function ne fait PAS — la cadence de relance, l'étape
+ * et la confiance. Partagé par l'envoi depuis le composeur
  * et par l'envoi d'un brouillon en un clic.
  */
 async function sendAndFollowUp(
@@ -158,7 +158,6 @@ async function sendAndFollowUp(
     to: string;
     subject: string;
     body: string;
-    isProposal?: boolean;
   }
 ): Promise<ActionState> {
   const { prospectId, to, subject, body } = input;
@@ -180,13 +179,6 @@ async function sendAndFollowUp(
   });
   if (res.error) return { error: res.error };
 
-  if (input.isProposal) {
-    await supabase
-      .from("prospects")
-      .update({ proposal_sent_at: new Date().toISOString() })
-      .eq("id", prospectId);
-  }
-
   // Cadence : un mail envoyé CLÔT l'action en cours — la relance ouverte
   // passe « fait » (elle ne reste plus « en retard »), et la suite est datée :
   // « Relancer … si pas de réponse » à +5 jours. La fiche passe dans la zone
@@ -194,7 +186,7 @@ async function sendAndFollowUp(
   const cadence = await applyEmailSentCadence(supabase, userId, prospectId);
 
   // Un email réellement envoyé est un fait fort : l'étape peut avancer
-  // (« À appeler » → « Contacté », ou « Proposition » si la case est cochée).
+  // (« À appeler » → « Contacté »).
   // applyAutoStatus n'avance jamais à rebours et respecte le verrou.
   const auto = await applyAutoStatus(supabase, prospectId);
   // Et c'est un événement : la confiance se recalcule (jamais bloquant).
@@ -226,9 +218,6 @@ export async function sendProspectEmailAction(
     to: String(fd.get("to") ?? "").trim(),
     subject: String(fd.get("subject") ?? "").trim(),
     body: String(fd.get("body") ?? "").trim(),
-    // Signal explicite : ce message EST la proposition. Jamais deviné dans
-    // le texte — c'est la case cochée qui fait foi.
-    isProposal: fd.get("is_proposal") === "1",
   });
 }
 

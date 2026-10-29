@@ -47,7 +47,6 @@ export type Raccourci = {
   /** « YYYY-MM-DD » — l'échéance reste à 09:00, c'est voulu. */
   relance?: { date: string };
   sansReponse?: boolean;
-  propositionEnvoyee?: boolean;
   contact?: string;
   /** SUGGESTION seule, jamais appliquée : « Perdu » reste une décision humaine. */
   suggestionPerdu?: { motif?: string };
@@ -278,13 +277,8 @@ export function lireRaccourcis(texte: string, maintenant: Date): Raccourci {
     marque(sansRep, "sans_reponse");
   }
 
-  const proposition = premier(
-    /\b(devis envoye|proposition envoyee|offre envoyee)\b/g
-  );
-  if (proposition) {
-    resultat.propositionEnvoyee = true;
-    marque(proposition, "proposition");
-  }
+  // « devis envoyé » n'est plus lu (29/10) : l'étape « Proposition » est
+  // retirée, le texte reste au journal tel quel.
 
   const perdu = premier(/\b(perdu|pas interesse|refus)\b/g);
   if (perdu) {

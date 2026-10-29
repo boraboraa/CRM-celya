@@ -398,8 +398,6 @@ Règles absolues :
      (jour, et heure si elle est dite). Un « RDV à planifier », « il faudrait
      se voir », « je le rappelle pour caler un RDV » n'est PAS un rendez-vous :
      mets null.
-   - "proposition" UNIQUEMENT si la note dit qu'un devis / une offre a été
-     ENVOYÉ. « Je dois lui envoyer un devis » n'est pas une proposition envoyée.
    - "contacte" si un échange a réellement eu lieu (on s'est parlé, il a
      répondu).
    - "essai_gratuit" (le client a démarré un essai gratuit), "gagne" et
@@ -479,9 +477,6 @@ Note : « bien accroché au téléphone, RDV à planifier, je le rappelle la sem
     statut = null;
     statutReserve =
       "« Suivi par email » vient du résultat d'appel du même nom : touchez-le sur la carte de la fiche.";
-  } else if (statut === "proposition") {
-    statutReserve =
-      "Cochez « j'ai envoyé une proposition » si le devis est bien parti : c'est ce geste qui fait foi.";
   }
 
   // L'heure et le lieu — validés en code, comme le reste. L'heure survit

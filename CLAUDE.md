@@ -5,6 +5,32 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 29 octobre 2026, fin d'après-midi — l'étape « Proposition » retirée
+
+Décision de Bora (« un de trop, c'est trop chargé ») : **plus d'étape
+« Proposition »**. Huit étapes : À appeler → Contacté → Rendez-vous → À
+rappeler → Suivi par email → Essai gratuit → Gagné / Perdu. Retirés avec elle,
+parce qu'ils n'y menaient qu'elle (0 fiche n'avait jamais `proposal_sent_at`,
+0 RDV débriefé « proposition ») : l'issue de débrief « Proposition envoyée »,
+la case « J'ai envoyé une proposition / un devis » de la note et « Ce message
+est une proposition » du composeur, la pastille « devis envoyé » du parseur et
+de l'ajout rapide, le fait `facts.proposal` (`lib/crm/status.ts`), les
+paramètres MCP `proposition_envoyee` / `proposition` et l'issue `proposition`
+de `debriefer_rendez_vous`. Un CSV qui dit « proposition », « devis » ou
+« négociation » entre en « À rappeler » ; `normalizeStatus` lit une valeur
+restée « proposition » comme « À rappeler ». **Restent en base, inertes** : la
+valeur d'enum (Postgres ne la retire pas), la colonne `proposal_sent_at`, la
+valeur `proposition` admise par `meetings_debrief_issue_connue`.
+
+**La `039` est APPLIQUÉE** (données) : New Auto Torino et Wondercar car
+Overijs passent en « À rappeler », toujours verrouillées (choix de Bora). **La
+`040` (contrainte `prospects_sans_proposition`) est ÉCRITE, PAS appliquée** :
+à appliquer **après la fusion** — l'ancien code proposait encore la colonne
+« Proposition », un dépôt y aurait échoué (23514). Recette
+`supabase/recettes/039_040.sql` : **7 OK, 0 faute**. Branche
+`claude/sans-proposition`. Contrôle des cadres (liste, pipeline, débrief),
+1440 → 360 px : 0 faute, le mot « Proposition » n'apparaît plus.
+
 ## État au 29 octobre 2026, après-midi — la région en pastille
 
 Demande de Bora : « sur la fiche, quand c'est en aperçu, mettre la région ».
@@ -717,7 +743,11 @@ l'ancienne app de comptabilité, qui avait déjà un `profiles`. Ce schéma comp
 a été entièrement supprimé le 2 août à la demande de Bora, sauvegarde remise
 au préalable.
 
-### Les neuf étapes — et la règle qui remplace la mécanique
+### Les étapes — et la règle qui remplace la mécanique
+
+⚠ **Depuis le 29/10, « Proposition » n'existe plus** (huit étapes) : voir
+l'état du 29/10 en fin d'après-midi. Ce qui suit la mentionne encore, pour
+mémoire.
 
 Statuts (`prospect_status`) : `a_appeler` → `contacte` → `rendez_vous` →
 `a_rappeler` (migration `026`, 18/10 : le RDV a eu lieu, il faut rappeler la

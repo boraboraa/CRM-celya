@@ -15,7 +15,7 @@ function cas(nom: string, f: () => void) {
   console.log(`  ✓ ${nom}`);
 }
 
-const ETAPES = ["a_appeler", "contacte", "rendez_vous", "a_rappeler", "proposition", "gagne", "perdu"];
+const ETAPES = ["a_appeler", "contacte", "rendez_vous", "a_rappeler", "suivi_email", "gagne", "perdu"];
 
 cas("par défaut (aucune étape choisie), les perdues sont masquées", () => {
   assert.equal(masquerPerdues(undefined), true);

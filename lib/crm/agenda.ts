@@ -10,7 +10,7 @@
  *   · deplacerRendezVous  — reporter, en versant l'ancienne et la nouvelle
  *                           date au journal ;
  *   · cloturerRendezVous  — le DÉBRIEF : l'ISSUE du rendez-vous (à rappeler,
- *                           proposition, signé, pas intéressé — ou annulé),
+ *                           essai, signé, pas intéressé — ou annulé),
  *                           avec compte rendu (lib/crm/debrief.ts).
  *
  * Deux invariants hérités de la règle des faits :
@@ -571,11 +571,9 @@ export async function cloturerRendezVous(
       .maybeSingle();
     const close = fiche?.status === "gagne" || fiche?.status === "perdu";
 
-    // La fiche : la proposition (le FAIT qui mène à « Proposition »), ou
-    // l'étape DÉCIDÉE par l'issue (« Signé » → Gagné, « Pas intéressé » →
-    // Perdu, verrouillées comme un clic sur l'étape).
+    // La fiche : l'étape DÉCIDÉE par l'issue (« Signé » → Gagné, « Pas
+    // intéressé » → Perdu, verrouillées comme un clic sur l'étape).
     const patch: Record<string, unknown> = {};
-    if (effets?.proposition) patch.proposal_sent_at = new Date().toISOString();
     if (effets?.etapeDecidee && !close) {
       Object.assign(patch, manualStatusPatch(effets.etapeDecidee));
       etape = effets.etapeDecidee;

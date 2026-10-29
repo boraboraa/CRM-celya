@@ -128,8 +128,10 @@ cas("par défaut, ce qui s'est passé EST un échange réel", () => {
   assert.equal(lire("passé au garage, le gérant est intéressé")?.echange?.isExchange, true);
 });
 
-cas("« devis envoyé » : la proposition", () => {
-  assert.equal(lire("devis envoyé")?.echange?.proposalSent, true);
+cas("« devis envoyé » : une note, plus de pastille « Proposition » (retirée le 29/10)", () => {
+  const r = lire("devis envoyé");
+  assert.equal(r?.echange?.type, "note");
+  assert.equal(r?.pastilles.some((p) => /proposition/i.test(p)), false);
 });
 
 cas("ligne vide : rien à consigner, rien de bloqué", () => {

@@ -20,7 +20,7 @@ type Cas = {
   maintenant: string;
   attendu: Attendu;
   /** Champs qui doivent être ABSENTS. */
-  absents?: ("rdv" | "relance" | "sansReponse" | "propositionEnvoyee" | "contact" | "suggestionPerdu")[];
+  absents?: ("rdv" | "relance" | "sansReponse" | "contact" | "suggestionPerdu")[];
 };
 
 // Le 2026-08-01 est un samedi ; le 2026-08-04 un mardi ; le 2026-08-31 un lundi.
@@ -127,11 +127,13 @@ const CAS: Cas[] = [
     maintenant: "2026-08-31T08:00",
     attendu: { rdv: { debut: "2026-09-04T12:00", lieu: "chez Marchal" } },
   },
-  // --- proposition envoyée, contact, perte (suggestion SEULE).
+  // --- contact, perte (suggestion SEULE). « devis envoyé » n'est plus lu
+  //     (l'étape « Proposition » est retirée le 29/10) : rien ne sort.
   {
     note: "devis envoyé au gérant",
     maintenant: "2026-08-31T08:00",
-    attendu: { propositionEnvoyee: true },
+    attendu: {},
+    absents: ["rdv", "relance", "sansReponse", "suggestionPerdu"],
   },
   {
     note: "le gérant c'est Marc",
@@ -168,7 +170,7 @@ const CAS: Cas[] = [
     note: "belle vitrine, à revoir un de ces jours",
     maintenant: "2026-08-31T08:00",
     attendu: {},
-    absents: ["rdv", "relance", "sansReponse", "propositionEnvoyee", "suggestionPerdu"],
+    absents: ["rdv", "relance", "sansReponse", "suggestionPerdu"],
   },
   // --- le déclencheur seul : on demande le jour, on ne devine rien.
   {

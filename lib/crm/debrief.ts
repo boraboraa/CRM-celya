@@ -13,7 +13,6 @@
  *                            l'étape suit le fait → « À rappeler » (026)
  *   Suivi par email          tenu ; relance à la date choisie (EXIGÉE) ;
  *                            l'étape suit le fait → « Suivi par email » (033)
- *   Proposition envoyée      tenu ; proposal_sent_at → « Proposition »
  *   Essai gratuit démarré    tenu ; « Essai gratuit », VERROUILLÉ (031) —
  *                            le « win » d'un étudiant ; une date « Et
  *                            ensuite ? » reste offerte (la fin de l'essai)
@@ -28,8 +27,11 @@
  * Un tap suffit pour l'issue ; seules « à rappeler » et « suivi par email »
  * demandent une date, seule « pas intéressé » demande une raison. Le compte rendu reste facultatif.
  *
+ * (« Proposition envoyée » est RETIRÉE le 29/10, avec l'étape — jamais
+ * servie ; la valeur reste admise par la contrainte de la 033, inerte.)
+ *
  * Les invariants de lib/crm/status.ts tiennent : « À rappeler » et
- * « Proposition » ne bougent que par les FAITS (jamais par-dessus un verrou) ;
+ * « Suivi par email » ne bougent que par les FAITS (jamais par-dessus un verrou) ;
  * « Gagné » et « Perdu » ne sont jamais déduits — ils sont ici DÉCIDÉS par
  * l'humain qui tape l'issue, comme un clic sur l'étape (décision de Bora,
  * 18/10).
@@ -46,7 +48,6 @@ import { jourHeureCourt } from "./prochaineAction.ts";
 export type IssueTenue =
   | "a_rappeler"
   | "suivi_email"
-  | "proposition"
   | "essai"
   | "signe"
   | "pas_interesse";
@@ -57,7 +58,6 @@ export type IssueDebrief = IssueTenue | IssueNonTenue;
 export const ISSUES_TENUES: IssueTenue[] = [
   "a_rappeler",
   "suivi_email",
-  "proposition",
   "essai",
   "signe",
   "pas_interesse",
@@ -66,7 +66,6 @@ export const ISSUES_TENUES: IssueTenue[] = [
 export const ISSUE_LABEL: Record<IssueDebrief, string> = {
   a_rappeler: "Intéressé — à rappeler",
   suivi_email: "Suivi par email",
-  proposition: "Proposition envoyée",
   essai: "Essai gratuit démarré",
   signe: "Signé",
   pas_interesse: "Pas intéressé",
@@ -78,7 +77,6 @@ export const ISSUE_LABEL: Record<IssueDebrief, string> = {
 export const ISSUE_ICON: Record<IssueDebrief, IconeNom> = {
   a_rappeler: "pouce",
   suivi_email: "arobase",
-  proposition: "enveloppe",
   essai: "cadeau",
   signe: "coche",
   pas_interesse: "croix",
@@ -90,7 +88,6 @@ export const ISSUE_ICON: Record<IssueDebrief, IconeNom> = {
 export const ISSUE_CHIP: Record<IssueDebrief, string> = {
   a_rappeler: "bg-indigo-500/15 text-indigo-200 ring-indigo-400/30 hover:bg-indigo-500/25",
   suivi_email: "bg-sky-500/15 text-sky-200 ring-sky-400/30 hover:bg-sky-500/25",
-  proposition: "bg-amber-500/15 text-amber-200 ring-amber-400/30 hover:bg-amber-500/25",
   essai: "bg-teal-500/15 text-teal-200 ring-teal-400/30 hover:bg-teal-500/25",
   signe: "bg-emerald-500/15 text-emerald-200 ring-emerald-400/30 hover:bg-emerald-500/25",
   pas_interesse: "bg-rose-500/10 text-rose-200 ring-rose-400/25 hover:bg-rose-500/20",
@@ -111,8 +108,6 @@ export type EffetsDebrief = {
   debriefIssue: IssueTenue | "pas_decroche" | null;
   /** Étape DÉCIDÉE (verrouillée) — null : l'étape suit les faits. */
   etapeDecidee: ProspectStatus | null;
-  /** Marquer la proposition envoyée (le fait qui mène à « Proposition »). */
-  proposition: boolean;
   /** La date de rappel est exigée. */
   exigeDate: boolean;
   /** La raison est exigée (versée dans lost_reason). */
@@ -130,7 +125,6 @@ export function effetsDebrief(issue: IssueDebrief): EffetsDebrief {
     statutRdv: "honore",
     debriefIssue: null,
     etapeDecidee: null,
-    proposition: false,
     exigeDate: false,
     exigeRaison: false,
     suiteOfferte: true,
@@ -144,8 +138,6 @@ export function effetsDebrief(issue: IssueDebrief): EffetsDebrief {
       // On a eu la personne, qui veut l'info par mail : une RÉPONSE, et une
       // relance pour vérifier que le mail a bien été lu.
       return { ...base, debriefIssue: "suivi_email", exigeDate: true, outcome: "suivi_email" };
-    case "proposition":
-      return { ...base, debriefIssue: "proposition", proposition: true };
     case "essai":
       // Pas une fin de parcours : la fiche en essai garde ses relances, et
       // « Et ensuite ? » reste offert (la date de fin d'essai). Le résultat

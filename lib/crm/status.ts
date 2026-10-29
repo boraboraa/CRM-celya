@@ -17,7 +17,8 @@
  *   suivi_email  UNIQUEMENT un résultat d'appel « Suivi par email »
  *                (activities.outcome, 033) ou un rendez-vous débriefé
  *                « Suivi par email » (meetings.debrief_issue, 033)
- *   proposition  UNIQUEMENT un signal explicite (proposal_sent_at)
+ *   (« Proposition » est RETIRÉE le 29/10 : plus aucun fait n'y mène, et
+ *    `proposal_sent_at` n'est plus lu — la colonne reste, inerte)
  *   gagne/perdu  JAMAIS automatiques — décisions humaines irréversibles
  *
  * Trois invariants :
@@ -44,12 +45,10 @@ export const STATUS_RANK: Record<ProspectStatus, number> = {
   rendez_vous: 2,
   a_rappeler: 3,
   // « Suivi par email » (032) : on a eu quelqu'un, qui veut l'info par mail —
-  // plus loin qu'un « à rappeler », pas encore une proposition chiffrée.
+  // plus loin qu'un « à rappeler ».
   suivi_email: 4,
-  proposition: 5,
-  // L'essai gratuit (030) passe devant la proposition et derrière l'issue :
-  // aucun fait ne la déduit (MANUAL_ONLY), mais une fiche en essai ne doit
-  // pas reculer en « Proposition » quand un devis est (re)marqué envoyé.
+  // L'essai gratuit (030) : aucun fait ne la déduit (MANUAL_ONLY), et une
+  // fiche en essai ne recule jamais. (« Proposition », rang 5, est retirée.)
   essai_gratuit: 6,
   gagne: 7,
   perdu: 7,
@@ -78,8 +77,6 @@ export type ProspectFacts = {
   rappel: Fact | null;
   /** Un « Suivi par email » : résultat d'appel ou issue de débrief (033). */
   suiviEmail: Fact | null;
-  /** Proposition explicitement marquée envoyée. */
-  proposal: Fact | null;
 };
 
 export const NO_FACTS: ProspectFacts = {
@@ -87,7 +84,6 @@ export const NO_FACTS: ProspectFacts = {
   meeting: null,
   rappel: null,
   suiviEmail: null,
-  proposal: null,
 };
 
 /** Garde le fait le plus récent des deux. */
@@ -119,7 +115,6 @@ export type FactRows = {
     debrief_issue?: string | null;
     debriefed_at?: string | null;
   }[];
-  proposalSentAt: string | null;
 };
 
 /**
@@ -136,7 +131,6 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
     meeting: null,
     rappel: null,
     suiviEmail: null,
-    proposal: null,
   };
 
   for (const a of rows.activities) {
@@ -209,13 +203,6 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
     }
   }
 
-  if (rows.proposalSentAt) {
-    facts.proposal = {
-      at: rows.proposalSentAt,
-      label: `une proposition a été marquée envoyée le ${fmtDate(rows.proposalSentAt)}`,
-    };
-  }
-
   return facts;
 }
 
@@ -247,7 +234,7 @@ export async function readProspectFacts(
   supabase: SupabaseClient,
   prospectId: string
 ): Promise<ProspectFacts> {
-  const [activitiesRes, emailsRes, meetingsRes, prospectRes] = await Promise.all([
+  const [activitiesRes, emailsRes, meetingsRes] = await Promise.all([
     supabase
       .from("activities")
       .select("type, occurred_at, is_exchange, is_draft, outcome")
@@ -275,20 +262,12 @@ export async function readProspectFacts(
       .neq("status", "annule")
       .order("starts_at", { ascending: false })
       .limit(20),
-    supabase
-      .from("prospects")
-      .select("proposal_sent_at")
-      .eq("id", prospectId)
-      .maybeSingle(),
   ]);
 
   return factsFromRows({
     activities: (activitiesRes.data ?? []) as FactRows["activities"],
     emails: (emailsRes.data ?? []) as FactRows["emails"],
     meetings: (meetingsRes.data ?? []) as FactRows["meetings"],
-    proposalSentAt:
-      (prospectRes.data as { proposal_sent_at: string | null } | null)
-        ?.proposal_sent_at ?? null,
   });
 }
 
@@ -298,7 +277,6 @@ export async function readProspectFacts(
 
 /** L'étape que les faits justifient — jamais « Gagné » ni « Perdu ». */
 export function statusFromFacts(facts: ProspectFacts): ProspectStatus {
-  if (facts.proposal) return "proposition";
   if (facts.suiviEmail) return "suivi_email";
   if (facts.rappel) return "a_rappeler";
   if (facts.meeting) return "rendez_vous";
@@ -311,7 +289,6 @@ export function factReason(
   derived: ProspectStatus,
   facts: ProspectFacts
 ): string | null {
-  if (derived === "proposition") return facts.proposal?.label ?? null;
   if (derived === "suivi_email") return facts.suiviEmail?.label ?? null;
   if (derived === "a_rappeler") return facts.rappel?.label ?? null;
   if (derived === "rendez_vous") return facts.meeting?.label ?? null;

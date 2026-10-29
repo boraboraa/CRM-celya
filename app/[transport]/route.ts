@@ -997,7 +997,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, a_rappeler (le rendez-vous a eu lieu, il faut rappeler la personne — ne pas confondre avec a_appeler), suivi_email (on a eu la personne, qui veut l'information par mail — l'étape suit d'elle-même un résultat « suivi_email » d'« ajouter_note »), proposition, essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, a_rappeler (le rendez-vous a eu lieu, il faut rappeler la personne — ne pas confondre avec a_appeler), suivi_email (on a eu la personne, qui veut l'information par mail — l'étape suit d'elle-même un résultat « suivi_email » d'« ajouter_note »), essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1071,10 +1071,6 @@ function register(server: McpServer) {
         .describe(
           "true pour un texte non envoyé (brouillon d'email) : rangé dans « Brouillons », hors chronologie, et ne compte pour aucun fait."
         ),
-      proposition_envoyee: z
-        .boolean()
-        .optional()
-        .describe("true si une proposition / un devis vient d'être ENVOYÉ (fait passer en « Proposition »)."),
       statut: z
         .enum(STATUS_ENUM)
         .optional()
@@ -1136,7 +1132,6 @@ function register(server: McpServer) {
         // quelqu'un — la même règle que l'écran (enregistrerResultatAction).
         isExchange: args.resultat ? args.resultat !== "sans_reponse" : args.echange === true,
         isDraft: args.brouillon === true,
-        proposalSent: args.proposition_envoyee === true,
         outcome: isCallOutcome(args.resultat) ? args.resultat : null,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
@@ -1185,12 +1180,6 @@ function register(server: McpServer) {
         .describe("Email du destinataire. Par défaut, l'adresse de la fiche prospect."),
       objet: z.string().max(MAX_SUBJECT).optional(),
       message: z.string().max(MAX_BODY).optional(),
-      proposition: z
-        .boolean()
-        .optional()
-        .describe(
-          "true si ce message est une proposition / un devis (fait passer la fiche en « Proposition »)."
-        ),
       confirmer: z
         .boolean()
         .optional()
@@ -1275,7 +1264,6 @@ function register(server: McpServer) {
             objet,
             message,
             origine,
-            proposition: args.proposition === true,
           }
         );
       }
@@ -1291,15 +1279,9 @@ function register(server: McpServer) {
       if ("error" in envoi) return fail(`Envoi impossible : ${envoi.error}`);
 
       // --- Ce que l'edge function ne fait pas (elle n'écrit que l'email et
-      //     l'activité) : la proposition, la cadence, l'étape, la confiance.
+      //     l'activité) : la cadence, l'étape, la confiance.
       //     Exactement la même suite que sendProspectEmailAction — un mail
       //     parti d'ici est indiscernable d'un mail parti de l'interface.
-      if (args.proposition === true) {
-        await admin
-          .from("prospects")
-          .update({ proposal_sent_at: new Date().toISOString() })
-          .eq("id", fiche.id);
-      }
       const cadence = await applyEmailSentCadence(admin, userId, fiche.id);
       const auto = await applyAutoStatus(admin, fiche.id);
       await recalcConfidence(admin, fiche.id);
@@ -1670,16 +1652,16 @@ function register(server: McpServer) {
   // débrief fait par Claude est indiscernable d'un débrief fait à la main.
   server.tool(
     "debriefer_rendez_vous",
-    "Dit ce qu'a donné un rendez-vous PASSÉ (le débrief) : « a_rappeler » (intéressé, à rappeler — « rappeler_le » OBLIGATOIRE ; l'étape passe en « À rappeler »), « suivi_email » (la personne veut l'info par mail — « rappeler_le » OBLIGATOIRE, la date de relance ; l'étape passe en « Suivi par email »), « proposition » (proposition envoyée — l'étape passe en « Proposition »), « essai » (essai gratuit démarré — l'étape passe en « Essai gratuit », verrouillée ; « rappeler_le » facultatif pour la fin d'essai), « signe » (l'étape passe en « Gagné », verrouillée), « pas_interesse » (« raison » OBLIGATOIRE, versée en raison de perte ; l'étape passe en « Perdu », verrouillée, et les relances ouvertes sont annulées) « pas_decroche » (un RDV téléphonique où personne n'a décroché : il n'a pas eu lieu, il est annulé, le journal dit « pas de réponse » ; « rappeler_le » facultatif) ou « annule » (le rendez-vous n'a pas eu lieu ; pour le REPORTER à une date connue, utilisez « deplacer_rendez_vous »). N'utilisez une issue QUE si l'utilisateur l'a dite : ne devinez jamais « signé » ou « pas intéressé ». S'il manque la date de rappel ou la raison, POSEZ LA QUESTION. Les rendez-vous à débriefer sont listés par « a_faire » (rdv_a_debriefer). Note : un échange, un résultat d'appel ou un email posé après le rendez-vous le clôt déjà tout seul (« tenu »).",
+    "Dit ce qu'a donné un rendez-vous PASSÉ (le débrief) : « a_rappeler » (intéressé, à rappeler — « rappeler_le » OBLIGATOIRE ; l'étape passe en « À rappeler »), « suivi_email » (la personne veut l'info par mail — « rappeler_le » OBLIGATOIRE, la date de relance ; l'étape passe en « Suivi par email »), « essai » (essai gratuit démarré — l'étape passe en « Essai gratuit », verrouillée ; « rappeler_le » facultatif pour la fin d'essai), « signe » (l'étape passe en « Gagné », verrouillée), « pas_interesse » (« raison » OBLIGATOIRE, versée en raison de perte ; l'étape passe en « Perdu », verrouillée, et les relances ouvertes sont annulées) « pas_decroche » (un RDV téléphonique où personne n'a décroché : il n'a pas eu lieu, il est annulé, le journal dit « pas de réponse » ; « rappeler_le » facultatif) ou « annule » (le rendez-vous n'a pas eu lieu ; pour le REPORTER à une date connue, utilisez « deplacer_rendez_vous »). N'utilisez une issue QUE si l'utilisateur l'a dite : ne devinez jamais « signé » ou « pas intéressé ». S'il manque la date de rappel ou la raison, POSEZ LA QUESTION. Les rendez-vous à débriefer sont listés par « a_faire » (rdv_a_debriefer). Note : un échange, un résultat d'appel ou un email posé après le rendez-vous le clôt déjà tout seul (« tenu »).",
     {
       id: z.string().describe("Identifiant du rendez-vous (« a_faire » → rdv_a_debriefer, ou « agenda »)."),
       issue: z
-        .enum(["a_rappeler", "suivi_email", "proposition", "essai", "signe", "pas_interesse", "pas_decroche", "annule"])
+        .enum(["a_rappeler", "suivi_email", "essai", "signe", "pas_interesse", "pas_decroche", "annule"])
         .describe("Ce qu'a donné le rendez-vous."),
       rappeler_le: z
         .string()
         .optional()
-        .describe("Pour « a_rappeler » et « suivi_email » (OBLIGATOIRE) ; facultatif pour « proposition », « essai » (la fin d'essai), « pas_decroche » et « annule » : « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm »."),
+        .describe("Pour « a_rappeler » et « suivi_email » (OBLIGATOIRE) ; facultatif pour « essai » (la fin d'essai), « pas_decroche » et « annule » : « YYYY-MM-DD » (09:00) ou « YYYY-MM-DDTHH:mm »."),
       raison: z.string().optional().describe("Pour « pas_interesse » : pourquoi, en une phrase (OBLIGATOIRE)."),
       compte_rendu: z.string().optional().describe("Compte rendu en une ligne, versé au journal (facultatif)."),
     },

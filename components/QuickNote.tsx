@@ -18,11 +18,12 @@ import type { ActivityType, ProspectStatus } from "@/lib/types";
  * Ce qui reste ici :
  *  · la zone de texte — elle part au journal telle quelle, jamais réécrite ;
  *  · les pastilles du parseur déterministe (rendez-vous, lieu, relance, appel
- *    sans réponse, proposition, contact, « Perdu ? ») : ce qui SERA
+ *    sans réponse, contact, « Perdu ? ») : ce qui SERA
  *    enregistré, retirable d'un clic sur la croix ;
  *  · « Analyser le texte » pour les notes que le parseur ne sait pas lire ;
- *  · trois options rares, repliées sous « Plus d'options » : un email déjà
- *    parti d'ailleurs, une note de repérage, une proposition envoyée.
+ *  · deux options rares, repliées sous « Plus d'options » : un email déjà
+ *    parti d'ailleurs, une note de repérage. (« Proposition envoyée » est
+ *    retirée le 29/10, avec l'étape.)
  *
  * Ce qui est parti, et où :
  *  · le RÉSULTAT d'un appel → la carte PROCHAINE ACTION, sous le pouce ;
@@ -73,10 +74,9 @@ export function QuickNote({
   const [applyContact, setApplyContact] = useState(true);
   /** Relance proposée par l'assistant — affichée en pastille, retirable. */
   const [dateProposee, setDateProposee] = useState<string | null>(null);
-  // Les trois options rares, repliées sous « Plus d'options ».
+  // Les deux options rares, repliées sous « Plus d'options ».
   const [emailDeja, setEmailDeja] = useState(false);
   const [reperage, setReperage] = useState(false);
-  const [proposalSent, setProposalSent] = useState(false);
   const [suggestion, setSuggestion] = useState<{
     statut: ProspectStatus;
     reserve: string | null;
@@ -141,8 +141,6 @@ export function QuickNote({
     raccourcis?.relance && !masques.has("relance") ? raccourcis.relance : null;
   const sansRepPastille =
     Boolean(raccourcis?.sansReponse) && !masques.has("sans_reponse");
-  const propositionPastille =
-    Boolean(raccourcis?.propositionEnvoyee) && !masques.has("proposition");
   const contactPropose =
     raccourcis?.contact && !masques.has("contact")
       ? propositionContact(raccourcis.contact, contactActuel)
@@ -153,7 +151,7 @@ export function QuickNote({
       ? raccourcis.suggestionPerdu
       : null;
   const pastillesActives = Boolean(
-    rdvBrut || relancePastille || sansRepPastille || propositionPastille || contactPastille
+    rdvBrut || relancePastille || sansRepPastille || contactPastille
   );
 
   /** Les 14 prochains jours — pour compléter « Quel jour ? » d'un clic. */
@@ -225,7 +223,6 @@ export function QuickNote({
     setDateProposee(null);
     setEmailDeja(false);
     setReperage(false);
-    setProposalSent(false);
     setSuggestion(undefined);
     setAiNote(undefined);
     setAiIndisponible(false);
@@ -323,7 +320,6 @@ export function QuickNote({
         rdvFin: rdvComplet && rdvFinHM ? `${rdvJour}T${rdvFinHM}` : null,
         isExchange,
         noAnswer,
-        proposalSent: proposalSent || propositionPastille,
       });
       if (res.error) {
         setError(res.error);
@@ -413,12 +409,6 @@ export function QuickNote({
                 <Pastille onRetirer={() => masquer("sans_reponse")}>
                   <Icone nom="telephone" className="h-3 w-3" />
                   Appelé, pas décroché
-                </Pastille>
-              )}
-              {propositionPastille && (
-                <Pastille onRetirer={() => masquer("proposition")}>
-                  <Icone nom="enveloppe" className="h-3 w-3" />
-                  Proposition envoyée
                 </Pastille>
               )}
               {contactPropose && (
@@ -608,20 +598,6 @@ export function QuickNote({
               Note de repérage
               <span className="block text-[11px] text-slate-500">
                 Aucun échange : rien ne bouge sur la fiche.
-              </span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2 text-xs text-slate-300">
-            <input
-              type="checkbox"
-              checked={proposalSent}
-              onChange={(e) => setProposalSent(e.target.checked)}
-              className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
-            />
-            <span>
-              J&apos;ai envoyé une proposition / un devis
-              <span className="block text-[11px] text-slate-500">
-                Seul ce geste fait passer la fiche en « Proposition ».
               </span>
             </span>
           </label>

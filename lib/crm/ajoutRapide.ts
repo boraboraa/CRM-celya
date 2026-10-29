@@ -11,7 +11,7 @@
  *    rendez-vous ») — jamais aujourd'hui par défaut, c'est l'erreur qui a
  *    perdu le RDV du 31/08 ;
  *  - « rappeler jeudi » pose une relance ; « pdr » est un appel sans réponse
- *    (pas un échange) ; « devis envoyé », la proposition ;
+ *    (pas un échange) ;
  *  - le texte part au journal TEL QUEL ;
  *  - c'est un ÉCHANGE RÉEL par défaut (décision de Bora, 19/10), sauf
  *    « Repéré, pas encore contacté » — une note de repérage : la fiche reste
@@ -37,7 +37,6 @@ export type EchangeRapide = {
   rdvFin: string | null;
   isExchange: boolean;
   noAnswer: boolean;
-  proposalSent: boolean;
 };
 
 export type LectureRapide = {
@@ -93,8 +92,6 @@ export function lireCeQuiSestPasse(
 
   const noAnswer = type === "note" && Boolean(r?.sansReponse);
   if (noAnswer) pastilles.push("Appelé, pas décroché");
-  const proposalSent = Boolean(r?.propositionEnvoyee);
-  if (proposalSent) pastilles.push("Proposition envoyée");
 
   const contactLu = r?.contact ?? null;
   const contactName = options.contactSaisi?.trim() || contactLu;
@@ -119,7 +116,6 @@ export function lireCeQuiSestPasse(
       rdvFin: rdv?.fin && rdv.fin.length >= 16 ? rdv.fin.slice(0, 16) : null,
       isExchange,
       noAnswer,
-      proposalSent,
     },
   };
 }

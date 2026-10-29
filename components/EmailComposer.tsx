@@ -81,7 +81,6 @@ export function EmailComposer({
   const [to, setTo] = useState(prefill?.to ?? defaultTo);
   const [subject, setSubject] = useState(prefill?.subject ?? "");
   const [body, setBody] = useState(prefill?.body ?? "");
-  const [proposition, setProposition] = useState(false);
 
   const formRef = useRef<HTMLFormElement>(null);
   const toRef = useRef<HTMLInputElement>(null);
@@ -122,7 +121,6 @@ export function EmailComposer({
         // affiché sous le bandeau vert.
         setSubject("");
         setBody("");
-        setProposition(false);
       }
       return res;
     },
@@ -230,25 +228,6 @@ export function EmailComposer({
           placeholder="Le message part de votre boîte Zoho — les réponses reviennent dans votre fil et remontent ici."
         />
       </div>
-
-      {/* Le signal explicite : « proposition » ne se devine jamais dans le
-          texte du message, c'est cette case qui fait foi. */}
-      <label className="flex items-start gap-2 rounded-xl bg-white/[0.02] px-3.5 py-2.5 text-xs text-slate-300 ring-1 ring-white/[0.06]">
-        <input
-          type="checkbox"
-          name="is_proposal"
-          value="1"
-          checked={proposition}
-          onChange={(e) => setProposition(e.target.checked)}
-          className="mt-0.5 h-3.5 w-3.5 accent-[#4F7BFF]"
-        />
-        <span>
-          Ce message est une proposition / un devis
-          <span className="block text-[11px] text-slate-500">
-            Fait passer la fiche en « Proposition » à l&apos;envoi.
-          </span>
-        </span>
-      </label>
 
       <FormError message={state.error} />
       {state.success && (

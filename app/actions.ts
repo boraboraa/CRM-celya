@@ -31,6 +31,7 @@ import { estRegion } from "@/lib/crm/regions";
 import { LOT_MAX, idsPropres, peutSupprimerEnLot, resultatSuppression } from "@/lib/crm/suppression";
 import { DEBUT_SALES_TROPHY, lundiDe } from "@/lib/crm/compteurs";
 import { saveExchangeCore, type SaveExchangeInput } from "@/lib/crm/exchange";
+import { poserRappelAuto } from "@/lib/crm/rappelAuto";
 import {
   poserRendezVous,
   deplacerRendezVous,
@@ -604,6 +605,11 @@ export type ResultatAppelState = ActionState & {
    * pour le DÉFAIRE si la pastille était la mauvaise (lib/crm/perdues.ts).
    */
   annulation?: AnnulationRefus | null;
+  /**
+   * « Pas décroché » / « Barrage » : le rappel posé tout seul (ISO UTC, 29/10 —
+   * lib/crm/relance.ts `decisionRappelAuto`), ou null.
+   */
+  rappelAuto?: string | null;
   autoStatus?: ProspectStatus | null;
   autoReason?: string | null;
   conflit?: MeetingConflit | null;
@@ -750,10 +756,18 @@ export async function enregistrerResultatAction(input: {
     annulation = perdu.annulation;
   }
 
+  // « Pas décroché » / « Barrage » (29/10) : c'est de toute façon une
+  // relance à faire — le prochain jour ouvré, à l'autre moitié de la journée.
+  // Jamais par-dessus une date dite, une relance déjà prévue ou un RDV.
+  const rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, input.outcome, {
+    dateHumaine: Boolean(input.dateLocale),
+  });
+
   revalidateProspect(input.prospectId);
   if (input.rendezVous) revalidatePath("/agenda");
   return {
     annulation,
+    rappelAuto,
     activiteId: result.activiteId ?? null,
     autoStatus: result.autoStatus,
     autoReason: result.autoReason,
@@ -782,11 +796,12 @@ export async function preciserResultatAction(input: {
   rdvFin?: string | null;
   /** Ce que le « Pas intéressé » corrigé avait fait — pour le défaire. */
   annulation?: unknown;
-}): Promise<ActionState & { annulation?: AnnulationRefus | null }> {
+}): Promise<ActionState & { annulation?: AnnulationRefus | null; rappelAuto?: string | null }> {
   const { supabase, userId } = await currentUserId();
   const texte = input.texte?.trim().slice(0, 300) || null;
   const correction = isCallOutcome(input.outcome) ? input.outcome : null;
   let annulation: AnnulationRefus | null | undefined = undefined;
+  let rappelAuto: string | null = null;
 
   if (texte || correction) {
     // La RLS tranche : un membre ne modifie que ses propres entrées
@@ -847,10 +862,17 @@ export async function preciserResultatAction(input: {
     });
     if (res.error) return { error: res.error };
     if (input.rendezVous) revalidatePath("/agenda");
+  } else if (correction) {
+    // Corrigé EN « Pas décroché » / « Barrage » : le même rappel qu'au tap.
+    rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, correction);
   }
 
   revalidateProspect(input.prospectId);
-  return { success: "Enregistré.", ...(annulation !== undefined ? { annulation } : {}) };
+  return {
+    success: "Enregistré.",
+    ...(annulation !== undefined ? { annulation } : {}),
+    ...(rappelAuto ? { rappelAuto } : {}),
+  };
 }
 
 // =====================================================================

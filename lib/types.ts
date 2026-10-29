@@ -1,6 +1,6 @@
 export type UserRole = "admin" | "commercial";
 
-/** Les sept étapes d'un prospect, du panier d'entrée au client signé.
+/** Les huit étapes d'un prospect, du panier d'entrée au client signé.
  *  « À appeler » est une colonne (la liste des entreprises à démarcher),
  *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape.
  *  « À rappeler » (migration 026) : le rendez-vous a eu lieu, il faut
@@ -8,14 +8,16 @@ export type UserRole = "admin" | "commercial";
  *  « Essai gratuit » (migration 030) : le client essaie, gratuitement — le
  *  « win » d'un étudiant. Manuelle, et pas une fin de parcours.
  *  « Suivi par email » (migration 032) : on a eu quelqu'un qui veut l'info
- *  par mail — on y entre par le FAIT (le résultat d'appel ou le débrief). */
+ *  par mail — on y entre par le FAIT (le résultat d'appel ou le débrief).
+ *  « Proposition » est RETIRÉE (29/10, décision de Bora : une étape de trop,
+ *  jamais servie) ; la valeur reste dans l'enum Postgres, refusée par la
+ *  contrainte de la 040, et `normalizeStatus` la lit « À rappeler ». */
 export type ProspectStatus =
   | "a_appeler"
   | "contacte"
   | "rendez_vous"
   | "a_rappeler"
   | "suivi_email"
-  | "proposition"
   | "essai_gratuit"
   | "gagne"
   | "perdu";

@@ -190,12 +190,15 @@ const STATUS_ALIASES: Record<string, ProspectStatus> = {
   suivi_email: "suivi_email",
   "suivi par email": "suivi_email",
   "suivi email": "suivi_email",
-  proposition: "proposition",
-  devis: "proposition",
-  proposal: "proposition",
-  negociation: "proposition",
-  négociation: "proposition",
-  negotiation: "proposition",
+  // L'étape « Proposition » est retirée (29/10) : un CSV qui la dit (ou un
+  // devis, une négociation) entre en « À rappeler », comme les 2 fiches
+  // reprises par la 039.
+  proposition: "a_rappeler",
+  devis: "a_rappeler",
+  proposal: "a_rappeler",
+  negociation: "a_rappeler",
+  négociation: "a_rappeler",
+  negotiation: "a_rappeler",
   essai_gratuit: "essai_gratuit",
   "essai gratuit": "essai_gratuit",
   essai: "essai_gratuit",

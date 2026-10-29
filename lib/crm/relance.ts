@@ -27,6 +27,7 @@
  */
 
 import { isoToLocalInput, localInputToISO } from "../time.ts";
+import { lendemainOuvre } from "../appelsIa/calendrier.ts";
 
 /** Sans heure choisie : 9h. */
 export const HEURE_DEFAUT = "09:00";
@@ -184,4 +185,67 @@ export function heurePourJour(ymd: string, voulue: string | null, now: Date): st
 export function choixParDefaut(now: Date): { ymd: string; hm: string } {
   const ymd = decalerJour(ajouterJours(maintenantLocal(now).ymd, 1), 0, now);
   return { ymd, hm: heurePourJour(ymd, HEURE_DEFAUT, now) };
+}
+
+// ---------------------------------------------------------------------------
+// Le rappel AUTOMATIQUE après « Pas décroché » ou « Barrage » (29/10, décision
+// de Bora : « quand la personne n'a pas décroché, c'est de toute façon une
+// relance à faire »). Avant, ces deux résultats n'écrivaient que le journal :
+// une relance du jour passait « en retard » le lendemain, et une fiche sans
+// relance sortait de « À faire » sans un mot.
+//
+//   quand    le PROCHAIN JOUR OUVRÉ (lundi–vendredi, fériés belges exclus —
+//            le calendrier de Janet) ;
+//   à quelle heure   l'AUTRE moitié de la journée : appelé le matin (avant
+//            13h) → 14h ; l'après-midi → 10h. On ne joint pas le matin ?
+//            on essaie l'après-midi, et l'inverse ;
+//   jamais   par-dessus une date humaine (le texte dit « rappeler jeudi »),
+//            une relance déjà prévue APRÈS aujourd'hui (posée par quelqu'un),
+//            un rendez-vous à venir (024 : rien d'automatique avant un RDV),
+//            une fiche gagnée ou perdue.
+//
+// Une relance du jour ou en retard n'est pas « prévue » : elle est re-datée
+// (saveExchangeCore ne crée jamais de doublon). La règle est ICI, une fois ;
+// `poserRappelAuto` (lib/crm/rappelAuto.ts) la joue pour l'écran ET le MCP.
+// ---------------------------------------------------------------------------
+
+/** Les résultats d'appel qui posent un rappel tout seuls. */
+export const RESULTATS_RAPPEL_AUTO = ["sans_reponse", "barrage"] as const;
+
+export function declencheRappelAuto(outcome: string | null | undefined): boolean {
+  return (RESULTATS_RAPPEL_AUTO as readonly string[]).includes(outcome ?? "");
+}
+
+/** « YYYY-MM-DDTHH:mm » : le prochain jour ouvré, l'autre moitié de journée. */
+export function rappelAutomatique(now: Date): string {
+  const { hm } = maintenantLocal(now);
+  return valeurRelance(lendemainOuvre(now), hm < "13:00" ? "14:00" : "10:00");
+}
+
+export type RaisonSansRappel =
+  | "pas_concerne"
+  | "date_humaine"
+  | "fiche_close"
+  | "rdv_a_venir"
+  | "relance_prevue";
+
+/** Faut-il poser le rappel, et à quelle date ? Pur : l'appelant lit la base. */
+export function decisionRappelAuto(input: {
+  outcome: string | null | undefined;
+  /** Une date a déjà été dite par l'humain (texte, choix « Pour quand ? »). */
+  dateHumaine: boolean;
+  statut: string | null | undefined;
+  rdvAVenir: boolean;
+  /** Les échéances (ISO) des relances OUVERTES de la fiche. */
+  relancesOuvertes: string[];
+  now: Date;
+}): { poser: string } | { poser: null; raison: RaisonSansRappel } {
+  if (!declencheRappelAuto(input.outcome)) return { poser: null, raison: "pas_concerne" };
+  if (input.dateHumaine) return { poser: null, raison: "date_humaine" };
+  if (input.statut === "gagne" || input.statut === "perdu") return { poser: null, raison: "fiche_close" };
+  if (input.rdvAVenir) return { poser: null, raison: "rdv_a_venir" };
+  const aujourdhui = maintenantLocal(input.now).ymd;
+  const prevue = input.relancesOuvertes.some((iso) => isoToLocalInput(iso).slice(0, 10) > aujourdhui);
+  if (prevue) return { poser: null, raison: "relance_prevue" };
+  return { poser: rappelAutomatique(input.now) };
 }

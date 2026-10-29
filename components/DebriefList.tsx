@@ -33,7 +33,7 @@ export type DebriefMeeting = {
  * ne l'atteigne.
  *
  * Chaque ligne porte LE MÊME débrief que la carte PROCHAINE ACTION de la fiche
- * (`DebriefRdv`) : l'issue en un tap — à rappeler, proposition, signé, pas
+ * (`DebriefRdv`) : l'issue en un tap — à rappeler, suivi par email, essai, signé, pas
  * intéressé — ou « n'a pas eu lieu ». Optimiste : la ligne quitte la zone au
  * clic, et revient d'elle-même si le serveur refuse.
  *

@@ -198,7 +198,6 @@ export default async function ProspectDetailPage({
     activities: allActivities,
     emails,
     meetings,
-    proposalSentAt: prospect.proposal_sent_at ?? null,
   });
   const verdict = evaluateStatus(status, Boolean(prospect.status_locked), facts);
   const suggestion = verdict.suggest

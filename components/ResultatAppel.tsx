@@ -18,6 +18,8 @@ import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { CallOutcome } from "@/lib/types";
 import type { AnnulationRefus } from "@/lib/crm/perdues";
+import { libelleRelance } from "@/lib/crm/relance";
+import { isoToLocalInput } from "@/lib/time";
 
 /** Ce que « Pas intéressé » fait de la fiche, dit une fois (29/10). */
 const PHRASE_PERDU =
@@ -49,6 +51,13 @@ function fmtJourCourt(jourISO: string): string {
  *     « Perdu » (et disparaît par défaut de la liste et de « À faire » —
  *     lib/crm/perdues.ts). Une seconde pastille juste après DÉFAIT ce passage :
  *     étape et relances d'avant.
+ *
+ * « Pas décroché » et « Barrage » posent TOUT SEULS un rappel (29/10, décision
+ * de Bora) : le prochain jour ouvré, à l'autre moitié de la journée — appelé le
+ * matin → 14h, l'après-midi → 10h (`decisionRappelAuto`, lib/crm/relance.ts).
+ * Jamais par-dessus une relance déjà prévue, un RDV à venir ou une date dite.
+ * La ligne « Rappel posé demain à 14h · Changer » le dit ; « Changer » ouvre
+ * le « Pour quand ? » de la carte.
  *
  * « À rappeler » ne date rien ici : la carte PROCHAINE ACTION porte la ligne
  * « Relancer », et un rappel s'y pose d'un tap. `onRappeler` sert exactement à
@@ -84,6 +93,8 @@ export function ResultatAppel({
   const [activiteId, setActiviteId] = useState<string | null>(null);
   /** Ce que « Pas intéressé » a fait (passage en Perdu) — rendu à la correction. */
   const [annulation, setAnnulation] = useState<AnnulationRefus | null>(null);
+  /** « Pas décroché » / « Barrage » : le rappel posé tout seul (29/10), en clair. */
+  const [rappelPose, setRappelPose] = useState<string | null>(null);
   const [texte, setTexte] = useState("");
   /** Le texte déjà parti au serveur — pour ne pas le renvoyer inchangé. */
   const [texteEnregistre, setTexteEnregistre] = useState("");
@@ -161,6 +172,7 @@ export function ResultatAppel({
           return;
         }
         if (res.annulation !== undefined) setAnnulation(res.annulation);
+        setRappelPose(res.rappelAuto ? libelleRelance(isoToLocalInput(res.rappelAuto), new Date()) : null);
         setTexteEnregistre(texte.trim());
         setNote(
           o === "refus"
@@ -189,6 +201,7 @@ export function ResultatAppel({
       }
       setActiviteId(res.activiteId ?? null);
       setAnnulation(res.annulation ?? null);
+      setRappelPose(res.rappelAuto ? libelleRelance(isoToLocalInput(res.rappelAuto), new Date()) : null);
       setTexteEnregistre(texte.trim());
       setNote(
         [
@@ -366,6 +379,19 @@ export function ResultatAppel({
       )}
 
       {note && !erreur && <p className="text-[11px] text-emerald-300">{note}</p>}
+      {/* Le rappel posé tout seul après « Pas décroché » / « Barrage » : on le
+          DIT, et on le change d'un tap (la carte ouvre « Pour quand ? »). */}
+      {rappelPose && !erreur && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-300">
+          <Icone nom="calendrier" className="h-3.5 w-3.5 text-celya-blue" />
+          <span>Rappel posé {rappelPose}</span>
+          {onRappeler && (
+            <button type="button" onClick={() => onRappeler()} className="btn-link min-h-[44px] text-xs">
+              Changer
+            </button>
+          )}
+        </p>
+      )}
       {erreur && (
         <p role="alert" className="text-[11px] text-rose-300">
           {erreur}

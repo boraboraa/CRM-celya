@@ -60,8 +60,6 @@ export type SaveExchangeInput = {
   outcome?: CallOutcome | null;
   /** Brouillon : versé hors chronologie, ne compte pour aucun fait. */
   isDraft?: boolean;
-  /** Signal explicite : une proposition / un devis vient d'être envoyé. */
-  proposalSent?: boolean;
 };
 
 export type SaveExchangeResult = {
@@ -182,10 +180,6 @@ export async function saveExchangeCore(
   }
   if (input.contactName?.trim()) {
     patch.contact_name = input.contactName.trim().slice(0, 120);
-  }
-  // Le signal explicite d'une proposition — jamais deviné dans le texte.
-  if (input.proposalSent && !isDraft) {
-    patch.proposal_sent_at = new Date().toISOString();
   }
   if (Object.keys(patch).length > 0) {
     const { error } = await supabase

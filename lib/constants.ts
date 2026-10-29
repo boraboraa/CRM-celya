@@ -13,7 +13,6 @@ export const STATUS_ORDER: ProspectStatus[] = [
   "rendez_vous",
   "a_rappeler",
   "suivi_email",
-  "proposition",
   "essai_gratuit",
   "gagne",
   "perdu",
@@ -25,7 +24,6 @@ export const STATUS_LABEL: Record<ProspectStatus, string> = {
   rendez_vous: "Rendez-vous",
   a_rappeler: "À rappeler",
   suivi_email: "Suivi par email",
-  proposition: "Proposition",
   essai_gratuit: "Essai gratuit",
   gagne: "Gagné",
   perdu: "Perdu",
@@ -37,8 +35,8 @@ export const STATUS_LABEL: Record<ProspectStatus, string> = {
  * l'affaire avance — ardoise, cyan, bleu, indigo, ambre — puis le vert/rouge
  * sémantique. « À rappeler » est INDIGO avec la flèche de retour : il ne doit
  * jamais se confondre avec « À appeler » (ardoise, téléphone). « Essai
- * gratuit » (030) est SARCELLE avec le paquet cadeau : entre l'ambre de la
- * proposition et l'émeraude du gagné — l'affaire est presque faite. « Suivi
+ * gratuit » (030) est SARCELLE avec le paquet cadeau : juste avant
+ * l'émeraude du gagné — l'affaire est presque faite. « Suivi
  * par email » (032) est CIEL avec l'arobase : on attend un mail, pas un appel —
  * jamais le bleu du rendez-vous seul, le pictogramme les distingue.
  * Classes Tailwind statiques (pas d'interpolation : le JIT doit les voir).
@@ -49,7 +47,6 @@ export const STATUS_CHIP: Record<ProspectStatus, string> = {
   rendez_vous: "bg-blue-500/15 text-blue-300 ring-blue-400/25",
   a_rappeler: "bg-indigo-500/15 text-indigo-300 ring-indigo-400/30",
   suivi_email: "bg-sky-500/15 text-sky-300 ring-sky-400/30",
-  proposition: "bg-amber-500/15 text-amber-300 ring-amber-400/30",
   essai_gratuit: "bg-teal-500/15 text-teal-300 ring-teal-400/30",
   gagne: "bg-emerald-500/15 text-emerald-300 ring-emerald-400/25",
   perdu: "bg-rose-500/15 text-rose-300 ring-rose-400/25",
@@ -62,7 +59,6 @@ export const STATUS_ICON: Record<ProspectStatus, IconeNom> = {
   rendez_vous: "calendrier",
   a_rappeler: "retour",
   suivi_email: "arobase",
-  proposition: "enveloppe",
   essai_gratuit: "cadeau",
   gagne: "coche",
   perdu: "croix",
@@ -75,7 +71,6 @@ export const STATUS_EDGE: Record<ProspectStatus, string> = {
   rendez_vous: "border-l-blue-400/80",
   a_rappeler: "border-l-indigo-400/80",
   suivi_email: "border-l-sky-400/80",
-  proposition: "border-l-amber-400/80",
   essai_gratuit: "border-l-teal-400/80",
   gagne: "border-l-emerald-400/80",
   perdu: "border-l-rose-400/70",
@@ -83,7 +78,7 @@ export const STATUS_EDGE: Record<ProspectStatus, string> = {
 
 /**
  * Ramène n'importe quelle valeur de statut (y compris les anciennes, encore
- * possibles dans des données pas encore migrées) vers l'une des sept étapes.
+ * possibles dans des données pas encore migrées) vers l'une des huit étapes.
  * Garde-fou permanent : l'affichage ne casse jamais sur un statut inconnu.
  */
 const LEGACY_STATUS: Record<string, ProspectStatus> = {
@@ -93,7 +88,10 @@ const LEGACY_STATUS: Record<string, ProspectStatus> = {
   rdv: "rendez_vous",
   nouveau: "a_appeler",
   qualifie: "rendez_vous",
-  negociation: "proposition",
+  negociation: "a_rappeler",
+  // L'étape « Proposition » est retirée (29/10) : une valeur restée en base
+  // (ou envoyée par un vieil onglet) se lit « À rappeler ».
+  proposition: "a_rappeler",
 };
 
 export function normalizeStatus(raw: string | null | undefined): ProspectStatus {

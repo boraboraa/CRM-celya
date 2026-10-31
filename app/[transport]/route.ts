@@ -1084,7 +1084,7 @@ function register(server: McpServer) {
         .enum(OUTCOME_ORDER as [string, ...string[]])
         .optional()
         .describe(
-          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie, standard automatique — l'étape passe en « À rappeler » : la fiche a été appelée), « rappeler » (à rappeler, y compris une secrétaire qui filtre — précisez-le dans la note ; l'étape passe en « À rappeler »), « interesse » (intéressé — l'étape passe aussi en « À rappeler »), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; posez la relance avec « planifier_relance »), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » pose TOUT SEUL un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie, standard automatique — l'étape passe en « À rappeler » : la fiche a été appelée), « rappeler » (à rappeler, y compris une secrétaire qui filtre — précisez-le dans la note ; l'étape passe en « À rappeler »), « interesse » (intéressé — l'étape passe aussi en « À rappeler »), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; le commercial envoie le mail depuis SA boîte, que le CRM ne voit pas : une relance « Vérifier la réponse au mail » est posée TOUTE SEULE 2 jours ouvrés plus tard à 9h, sauf relance déjà prévue après aujourd'hui, RDV à venir ou fiche gagnée/perdue ; la réponse le dit, et « planifier_relance » la change), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » pose TOUT SEUL un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
         ),
     },
     async (args, extra) => {
@@ -1137,8 +1137,8 @@ function register(server: McpServer) {
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
-      // « Pas décroché » (29/10) : le même rappel automatique
-      // qu'à l'écran — le prochain jour ouvré, à l'autre moitié de la journée.
+      // « Pas décroché » (29/10) et « Suivi par email » (31/10) : la même
+      // relance automatique qu'à l'écran (lib/crm/relance.ts).
       const rappelAuto =
         args.brouillon === true
           ? null
@@ -1159,7 +1159,11 @@ function register(server: McpServer) {
         );
       }
       if (rappelAuto) {
-        bits.push(`Rappel posé automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`);
+        bits.push(
+          args.resultat === "suivi_email"
+            ? `Relance « Vérifier la réponse au mail » posée automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`
+            : `Rappel posé automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`
+        );
       }
       if (r.statusChanged) {
         bits.push(

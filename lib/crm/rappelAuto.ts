@@ -1,5 +1,6 @@
 /**
- * Poser le rappel automatique après « Pas décroché » ou « Barrage » (29/10).
+ * Poser le rappel automatique après « Pas décroché » (29/10) ou « Suivi par
+ * email » (31/10 : « Vérifier la réponse au mail », 2 jours ouvrés plus tard).
  * La RÈGLE est dans `decisionRappelAuto` (lib/crm/relance.ts, pure, testée par
  * `npm run test:relance`) ; ici, on lit ce qu'elle demande et on écrit par le
  * seul chemin qui sait poser une relance, `saveExchangeCore` SANS texte (aucune
@@ -15,7 +16,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { decisionRappelAuto } from "@/lib/crm/relance";
+import { decisionRappelAuto, titreRappelAuto } from "@/lib/crm/relance";
 import { prochainRdvAVenir } from "@/lib/crm/agenda";
 import { saveExchangeCore } from "@/lib/crm/exchange";
 
@@ -25,11 +26,11 @@ export async function poserRappelAuto(
   userId: string,
   prospectId: string,
   outcome: string | null | undefined,
-  options: { dateHumaine?: boolean; now?: Date } = {}
+  options: { dateHumaine?: boolean; now?: Date; remplace?: string | null } = {}
 ): Promise<string | null> {
   try {
     const [{ data: fiche }, { data: taches }, rdv] = await Promise.all([
-      supabase.from("prospects").select("status").eq("id", prospectId).maybeSingle(),
+      supabase.from("prospects").select("status, company_name").eq("id", prospectId).maybeSingle(),
       supabase.from("tasks").select("due_at").eq("prospect_id", prospectId).eq("status", "a_faire"),
       prochainRdvAVenir(supabase, prospectId),
     ]);
@@ -42,6 +43,7 @@ export async function poserRappelAuto(
       relancesOuvertes: ((taches ?? []) as { due_at: string | null }[])
         .map((t) => t.due_at)
         .filter((d): d is string => Boolean(d)),
+      remplace: options.remplace ?? null,
       now: options.now ?? new Date(),
     });
     if (!decision.poser) return null;
@@ -49,6 +51,7 @@ export async function poserRappelAuto(
       prospectId,
       type: "note",
       dateLocale: decision.poser,
+      titreRelance: titreRappelAuto(outcome, (fiche.company_name as string | null) ?? ""),
     });
     return res.error ? null : (res.scheduledAt ?? null);
   } catch {

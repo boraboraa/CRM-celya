@@ -18,7 +18,7 @@ import { Pastille } from "@/components/Pastille";
 import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import type { CallOutcome } from "@/lib/types";
 import type { AnnulationRefus } from "@/lib/crm/perdues";
-import { libelleRelance } from "@/lib/crm/relance";
+import { libelleRelance, phraseRappelAuto } from "@/lib/crm/relance";
 import { isoToLocalInput } from "@/lib/time";
 
 /** Ce que « Pas intéressé » fait de la fiche, dit une fois (29/10). */
@@ -93,8 +93,12 @@ export function ResultatAppel({
   const [activiteId, setActiviteId] = useState<string | null>(null);
   /** Ce que « Pas intéressé » a fait (passage en Perdu) — rendu à la correction. */
   const [annulation, setAnnulation] = useState<AnnulationRefus | null>(null);
-  /** « Pas décroché » : le rappel posé tout seul (29/10), en clair. */
-  const [rappelPose, setRappelPose] = useState<string | null>(null);
+  /**
+   * « Pas décroché » / « Suivi par email » : la relance posée toute seule
+   * (29/10, 31/10). L'instant est gardé pour qu'une correction juste après la
+   * RE-DATE au lieu d'en poser une seconde.
+   */
+  const [rappelPose, setRappelPose] = useState<{ iso: string; outcome: CallOutcome } | null>(null);
   const [texte, setTexte] = useState("");
   /** Le texte déjà parti au serveur — pour ne pas le renvoyer inchangé. */
   const [texteEnregistre, setTexteEnregistre] = useState("");
@@ -165,6 +169,7 @@ export function ResultatAppel({
           outcome: o,
           texte: texte.trim() || null,
           annulation,
+          rappelAutoPrecedent: rappelPose?.iso ?? null,
         });
         if (res.error) {
           setChoisi(avant);
@@ -172,7 +177,7 @@ export function ResultatAppel({
           return;
         }
         if (res.annulation !== undefined) setAnnulation(res.annulation);
-        setRappelPose(res.rappelAuto ? libelleRelance(isoToLocalInput(res.rappelAuto), new Date()) : null);
+        setRappelPose(res.rappelAuto ? { iso: res.rappelAuto, outcome: o } : null);
         setTexteEnregistre(texte.trim());
         setNote(
           o === "refus"
@@ -182,7 +187,9 @@ export function ResultatAppel({
               : "Corrigé."
         );
         // Corrigé EN « à rappeler » : la date manque toujours, la carte le dit.
-        if (o === "rappeler" || o === "suivi_email") onRappeler?.();
+        // « Suivi par email » a sa relance d'office (sauf garde-fou) : la ligne
+        // ci-dessous la dit, « Changer » ouvre « Pour quand ? ».
+        if (o === "rappeler" || (o === "suivi_email" && !res.rappelAuto)) onRappeler?.();
       });
       return;
     }
@@ -201,7 +208,7 @@ export function ResultatAppel({
       }
       setActiviteId(res.activiteId ?? null);
       setAnnulation(res.annulation ?? null);
-      setRappelPose(res.rappelAuto ? libelleRelance(isoToLocalInput(res.rappelAuto), new Date()) : null);
+      setRappelPose(res.rappelAuto ? { iso: res.rappelAuto, outcome: o } : null);
       setTexteEnregistre(texte.trim());
       setNote(
         [
@@ -219,8 +226,9 @@ export function ResultatAppel({
           .join(" ")
       );
       // « À rappeler » : la date se choisit dans la ligne « Relancer » de la
-      // carte, pas ici — on lui passe la main.
-      if (o === "rappeler" || o === "suivi_email") onRappeler?.();
+      // carte, pas ici — on lui passe la main. « Suivi par email » a sa
+      // relance d'office : on ne demande que si elle n'a pas été posée.
+      if (o === "rappeler" || (o === "suivi_email" && !res.rappelAuto)) onRappeler?.();
     });
   }
 
@@ -238,11 +246,15 @@ export function ResultatAppel({
         texte: nouveauTexte,
         ...chargeRaccourcis(),
       });
+      const charge = chargeRaccourcis();
       if (res.error) {
         setErreur(res.error);
         return;
       }
       setTexteEnregistre(nouveauTexte);
+      // La phrase dit sa propre date : la relance posée d'office a été
+      // re-datée, la ligne « … posée … » ne dirait plus vrai.
+      if (charge.dateLocale) setRappelPose(null);
       // Même précision qu'au tap : un rendez-vous auquel il manque le jour ou
       // l'heure n'est pas posé, et le silence laissait croire le contraire.
       setNote(
@@ -379,12 +391,15 @@ export function ResultatAppel({
       )}
 
       {note && !erreur && <p className="text-[11px] text-emerald-300">{note}</p>}
-      {/* Le rappel posé tout seul après « Pas décroché » : on le
+      {/* La relance posée toute seule après « Pas décroché » ou « Suivi par
+          email » : on le
           DIT, et on le change d'un tap (la carte ouvre « Pour quand ? »). */}
       {rappelPose && !erreur && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-300">
           <Icone nom="calendrier" className="h-3.5 w-3.5 text-celya-blue" />
-          <span>Rappel posé {rappelPose}</span>
+          <span>
+            {phraseRappelAuto(rappelPose.outcome, libelleRelance(isoToLocalInput(rappelPose.iso), new Date()))}
+          </span>
           {onRappeler && (
             <button type="button" onClick={() => onRappeler()} className="btn-link min-h-[44px] text-xs">
               Changer

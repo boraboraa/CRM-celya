@@ -606,8 +606,8 @@ export type ResultatAppelState = ActionState & {
    */
   annulation?: AnnulationRefus | null;
   /**
-   * « Pas décroché » : le rappel posé tout seul (ISO UTC, 29/10 —
-   * lib/crm/relance.ts `decisionRappelAuto`), ou null.
+   * « Pas décroché » / « Suivi par email » : la relance posée toute seule
+   * (ISO UTC, 29/10 et 31/10 — lib/crm/relance.ts `decisionRappelAuto`), ou null.
    */
   rappelAuto?: string | null;
   autoStatus?: ProspectStatus | null;
@@ -756,8 +756,9 @@ export async function enregistrerResultatAction(input: {
     annulation = perdu.annulation;
   }
 
-  // « Pas décroché » (29/10) : c'est de toute façon une
-  // relance à faire — le prochain jour ouvré, à l'autre moitié de la journée.
+  // « Pas décroché » (29/10) : c'est de toute façon une relance à faire — le
+  // prochain jour ouvré, à l'autre moitié de la journée. « Suivi par email »
+  // (31/10) : « Vérifier la réponse au mail », 2 jours ouvrés plus tard à 9h.
   // Jamais par-dessus une date dite, une relance déjà prévue ou un RDV.
   const rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, input.outcome, {
     dateHumaine: Boolean(input.dateLocale),
@@ -796,6 +797,8 @@ export async function preciserResultatAction(input: {
   rdvFin?: string | null;
   /** Ce que le « Pas intéressé » corrigé avait fait — pour le défaire. */
   annulation?: unknown;
+  /** La relance posée d'office par le tap corrigé (ISO) : re-datée, pas gardée. */
+  rappelAutoPrecedent?: string | null;
 }): Promise<ActionState & { annulation?: AnnulationRefus | null; rappelAuto?: string | null }> {
   const { supabase, userId } = await currentUserId();
   const texte = input.texte?.trim().slice(0, 300) || null;
@@ -863,8 +866,12 @@ export async function preciserResultatAction(input: {
     if (res.error) return { error: res.error };
     if (input.rendezVous) revalidatePath("/agenda");
   } else if (correction) {
-    // Corrigé EN « Pas décroché » : le même rappel qu'au tap.
-    rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, correction);
+    // Corrigé EN « Pas décroché » ou « Suivi par email » : la même relance
+    // qu'au tap. Celle que le tap corrigé avait posée ne compte pas comme
+    // « déjà prévue » : elle est re-datée (jamais de doublon).
+    rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, correction, {
+      remplace: typeof input.rappelAutoPrecedent === "string" ? input.rappelAutoPrecedent : null,
+    });
   }
 
   revalidateProspect(input.prospectId);

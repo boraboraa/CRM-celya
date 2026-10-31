@@ -31,6 +31,11 @@ export type SaveExchangeInput = {
   motif?: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles). null : pas de relance. */
   dateLocale?: string | null;
+  /**
+   * Le titre de la relance, à la place de « Relancer <société> » — la relance
+   * posée d'office après « Suivi par email » (« Vérifier la réponse au mail »).
+   */
+  titreRelance?: string | null;
   /** Lieu du rendez-vous (type « rendez_vous » seulement) — porté par l'agenda. */
   rdvLieu?: string | null;
   /** Fin du rendez-vous « YYYY-MM-DDTHH:mm » — à défaut, début + 60 min. */
@@ -266,7 +271,7 @@ export async function saveExchangeCore(
       // Une simple relance — jamais de doublon : la tâche ouverte est
       // re-datée, les surnuméraires annulées. Le filtre « RDV » ne protège
       // plus que d'éventuelles tâches héritées d'avant l'agenda.
-      const title = `Relancer ${prospect.company_name}`;
+      const title = input.titreRelance?.trim() || `Relancer ${prospect.company_name}`;
       const reusable = allOpen.filter((t) => !t.title.startsWith("RDV"));
       const reusableIds = reusable.map((t) => t.id);
 

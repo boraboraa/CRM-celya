@@ -46,6 +46,18 @@ l'état du 29/10 au soir ci-dessous dit du Barrage :
   Mechanik Slawek, Braine Pneus, ZZ Test délivrabilité) sont annulées, la
   liste dans `reprise_044`.
 
+- **« Suivi par email » pose sa relance** (31/10, Bora : les étudiants
+  suivent par mail depuis LEUR boîte, que le CRM ne voit pas — sans date, la
+  fiche restait en Suivi par email et ne remontait jamais) : « Vérifier la
+  réponse au mail — <société> », **2 jours ouvrés plus tard à 9h** (fériés
+  belges exclus), mêmes garde-fous que « Pas décroché » (`RESULTATS_RAPPEL_AUTO`,
+  `rappelAutomatique(now, outcome)`, `titreRappelAuto`, `lib/crm/relance.ts` ;
+  `saveExchangeCore` accepte `titreRelance`). Écran : « Vérification du mail
+  posée jeu. 29/10 à 9h · Changer » ; une correction juste après le tap
+  re-date la relance du premier tap (`remplace` / `rappelAutoPrecedent`),
+  jamais de seconde. MCP `ajouter_note(resultat: suivi_email)` idem. Aucune
+  migration.
+
 **Migrations ÉCRITES, PAS appliquées** — ordre : fusion → redéploiement de
 `crm-mail` depuis le dépôt (+ diff) → **`042`** → **`043`** → **`044`**.
 La **042** range aussi les « À appeler » non verrouillées déjà appelées

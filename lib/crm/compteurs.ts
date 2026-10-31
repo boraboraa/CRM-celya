@@ -12,7 +12,7 @@
  *               rendez-vous rattaché (un débrief porte « intéressé » ou
  *               « refus » : ce n'est pas un appel) — à l'auteur ;
  *   réponses    rappeler · intéressé · suivi par email (033) · refus — on a eu le décideur ; un
- *               barrage reste un appel, pas une réponse (Bora, 27/10) ;
+ *               un « pas décroché » (et l'ancien barrage) reste un appel, pas une réponse ;
  *   intéressés  intéressé · rappeler ;
  *   rdv         RDV de prospect créés dans la période, non annulés — à qui
  *               les a posés ;

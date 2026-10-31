@@ -10,6 +10,7 @@
 // Chemin RELATIF avec extension : le test s'exécute tel quel sous node.
 import { lireFiltreRegion, valeurFiltreRegion } from "./regions.ts";
 import { AVEC_PERDUES, LIBELLE_AVEC_PERDUES } from "./perdues.ts";
+import { STATUS_ORDER } from "../constants.ts";
 
 export type ParamsProspects = {
   q?: string;
@@ -63,6 +64,26 @@ export function lireVue(parametre: string | null | undefined, memorise: string |
   if (estVue(parametre)) return parametre;
   if (estVue(memorise)) return memorise;
   return "liste";
+}
+
+/**
+ * L'étape de l'URL, si elle existe encore — sinon rien. Un lien ou un onglet
+ * resté sur une étape RETIRÉE (`?statut=contacte`, `?statut=proposition`,
+ * 29/10) ne doit ni filtrer, ni s'afficher en puce, ni se recopier : il vaut
+ * « toutes les étapes ». `avec_perdues` reste une valeur du menu.
+ */
+export function statutConnu(statut?: string | null): string | undefined {
+  if (!statut || statut === "tous") return undefined;
+  if (statut === AVEC_PERDUES) return statut;
+  return (STATUS_ORDER as string[]).includes(statut) ? statut : undefined;
+}
+
+/** Les paramètres de la page, l'étape inconnue retirée (voir `statutConnu`). */
+export function nettoyerParams<P extends ParamsProspects>(params: P): P {
+  const statut = statutConnu(params.statut);
+  if (statut === params.statut) return params;
+  const { statut: _retire, ...reste } = params;
+  return (statut ? { ...reste, statut } : reste) as P;
 }
 
 /**

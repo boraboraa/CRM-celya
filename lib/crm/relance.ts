@@ -27,7 +27,7 @@
  */
 
 import { isoToLocalInput, localInputToISO } from "../time.ts";
-import { lendemainOuvre } from "../appelsIa/calendrier.ts";
+import { lendemainOuvre, estOuvre } from "../appelsIa/calendrier.ts";
 
 /** Sans heure choisie : 9h. */
 export const HEURE_DEFAUT = "09:00";
@@ -209,17 +209,56 @@ export function choixParDefaut(now: Date): { ymd: string; hm: string } {
 // `poserRappelAuto` (lib/crm/rappelAuto.ts) la joue pour l'écran ET le MCP.
 // ---------------------------------------------------------------------------
 
-/** Les résultats d'appel qui posent un rappel tout seuls. */
-export const RESULTATS_RAPPEL_AUTO = ["sans_reponse", "barrage"] as const;
+/** Les résultats d'appel qui posent un rappel tout seuls (« Barrage » est
+ *  retiré le 31/10 : une secrétaire qui filtre, c'est « À rappeler »).
+ *
+ *  « Suivi par email » (31/10, décision de Bora) : le commercial suit par
+ *  mail DEPUIS SA BOÎTE, que le CRM ne voit pas. Sans date, la fiche restait
+ *  en « Suivi par email » sans relance et ne remontait plus jamais. D'office :
+ *  « Vérifier la réponse au mail », 2 jours ouvrés plus tard à 9h — le temps
+ *  qu'une réponse arrive. Mêmes garde-fous que « Pas décroché ». */
+export const RESULTATS_RAPPEL_AUTO = ["sans_reponse", "suivi_email"] as const;
+
+/** Jours ouvrés d'attente d'une réponse par mail. */
+export const DELAI_SUIVI_EMAIL_JOURS_OUVRES = 2;
 
 export function declencheRappelAuto(outcome: string | null | undefined): boolean {
   return (RESULTATS_RAPPEL_AUTO as readonly string[]).includes(outcome ?? "");
 }
 
-/** « YYYY-MM-DDTHH:mm » : le prochain jour ouvré, l'autre moitié de journée. */
-export function rappelAutomatique(now: Date): string {
+/** Le n-ième jour ouvré APRÈS celui de `now` (Bruxelles, fériés belges exclus). */
+export function jourOuvreApres(now: Date, n: number): string {
+  let ymd = lendemainOuvre(now);
+  for (let k = 1; k < n; k++) {
+    let i = 0;
+    do {
+      ymd = ajouterJours(ymd, 1);
+      i++;
+    } while (!estOuvre(ymd) && i < 20);
+  }
+  return ymd;
+}
+
+/**
+ * « YYYY-MM-DDTHH:mm ». « Pas décroché » : le prochain jour ouvré, l'autre
+ * moitié de journée. « Suivi par email » : 2 jours ouvrés plus tard, à 9h.
+ */
+export function rappelAutomatique(now: Date, outcome: string | null | undefined = "sans_reponse"): string {
+  if (outcome === "suivi_email") {
+    return valeurRelance(jourOuvreApres(now, DELAI_SUIVI_EMAIL_JOURS_OUVRES), HEURE_DEFAUT);
+  }
   const { hm } = maintenantLocal(now);
   return valeurRelance(lendemainOuvre(now), hm < "13:00" ? "14:00" : "10:00");
+}
+
+/** Le titre de la relance posée d'office (null : le titre habituel « Relancer … »). */
+export function titreRappelAuto(outcome: string | null | undefined, societe: string): string | null {
+  return outcome === "suivi_email" ? `Vérifier la réponse au mail — ${societe}` : null;
+}
+
+/** Ce que dit l'écran sous les pastilles : « Rappel posé demain à 14h ». */
+export function phraseRappelAuto(outcome: string | null | undefined, quand: string): string {
+  return outcome === "suivi_email" ? `Vérification du mail posée ${quand}` : `Rappel posé ${quand}`;
 }
 
 export type RaisonSansRappel =
@@ -238,6 +277,12 @@ export function decisionRappelAuto(input: {
   rdvAVenir: boolean;
   /** Les échéances (ISO) des relances OUVERTES de la fiche. */
   relancesOuvertes: string[];
+  /**
+   * Le rappel posé d'office par le tap PRÉCÉDENT, quand on corrige le résultat
+   * juste après (« Pas décroché » → « Suivi par email ») : il ne compte pas
+   * comme une relance prévue, il est re-daté.
+   */
+  remplace?: string | null;
   now: Date;
 }): { poser: string } | { poser: null; raison: RaisonSansRappel } {
   if (!declencheRappelAuto(input.outcome)) return { poser: null, raison: "pas_concerne" };
@@ -245,7 +290,10 @@ export function decisionRappelAuto(input: {
   if (input.statut === "gagne" || input.statut === "perdu") return { poser: null, raison: "fiche_close" };
   if (input.rdvAVenir) return { poser: null, raison: "rdv_a_venir" };
   const aujourdhui = maintenantLocal(input.now).ymd;
-  const prevue = input.relancesOuvertes.some((iso) => isoToLocalInput(iso).slice(0, 10) > aujourdhui);
+  const remplace = input.remplace ? new Date(input.remplace).getTime() : NaN;
+  const prevue = input.relancesOuvertes.some(
+    (iso) => new Date(iso).getTime() !== remplace && isoToLocalInput(iso).slice(0, 10) > aujourdhui
+  );
   if (prevue) return { poser: null, raison: "relance_prevue" };
-  return { poser: rappelAutomatique(input.now) };
+  return { poser: rappelAutomatique(input.now, input.outcome) };
 }

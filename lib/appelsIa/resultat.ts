@@ -5,9 +5,8 @@
  *   1. ce que Janet a FAIT : un rendez-vous posé → « intéressé » ; une
  *      opposition → « refus » ;
  *   2. personne au bout du fil : répondeur, pas de réponse, occupé → « pas de
- *      réponse » (pas un échange) ; standard automatique → « barrage », mais
- *      SANS compter comme un échange (dans le CRM, un barrage est un humain
- *      qui filtre : la fiche passerait sinon en « Contacté ») ;
+ *      réponse » (pas un échange) ; standard automatique aussi, avec le sujet
+ *      « Standard automatique » (31/10 : « Barrage » n'existe plus) ;
  *   3. ce que Janet DÉCLARE par `noter_resultat` ;
  *   4. à défaut, « à rappeler ». Une fin illisible n'arrive jamais ici : elle
  *      est un échec neutre, rien n'est écrit (lib/appelsIa/fin.ts).
@@ -15,10 +14,10 @@
 
 import type { Classement } from "../../supabase/functions/_shared/appels/classement.ts";
 
-export type ResultatAppel = "sans_reponse" | "barrage" | "rappeler" | "interesse" | "refus";
+export type ResultatAppel = "sans_reponse" | "rappeler" | "interesse" | "refus";
 
 export type Declaration = {
-  resultat: "interesse" | "rappeler" | "refus" | "barrage";
+  resultat: "interesse" | "rappeler" | "refus";
   resume: string;
   interlocuteur: string | null;
   /** Janet a-t-elle eu le DÉCIDEUR (pas une secrétaire) ? */
@@ -82,7 +81,7 @@ export function ecritureFiche(
     };
   }
   if (classement === "standard_ivr") {
-    return { resultat: "barrage", isExchange: false, sujet: SUJET_MACHINE.standard_ivr, contact: null, motifRefus: null };
+    return { resultat: "sans_reponse", isExchange: false, sujet: SUJET_MACHINE.standard_ivr, contact: null, motifRefus: null };
   }
   if (classement !== "repondu_humain") {
     return { resultat: "sans_reponse", isExchange: false, sujet: SUJET_MACHINE[classement] ?? "Pas de réponse", contact: null, motifRefus: null };
@@ -106,8 +105,11 @@ export function ecritureFiche(
 export function lireDeclaration(brut: unknown): Declaration | null {
   if (!brut || typeof brut !== "object") return null;
   const a = brut as Record<string, unknown>;
-  const r = String(a.resultat ?? "");
-  if (r !== "interesse" && r !== "rappeler" && r !== "refus" && r !== "barrage") return null;
+  // « barrage » n'est plus proposé à Janet (31/10) ; s'il arrive quand même,
+  // c'est quelqu'un qui a filtré : il faut rappeler.
+  const lu = String(a.resultat ?? "");
+  const r = lu === "barrage" ? "rappeler" : lu;
+  if (r !== "interesse" && r !== "rappeler" && r !== "refus") return null;
   const texte = (v: unknown, max: number) => {
     const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
     return s ? s.slice(0, max) : null;

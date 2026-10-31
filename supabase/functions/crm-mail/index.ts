@@ -1233,7 +1233,7 @@ async function matchProspect(
 //  3. réponse automatique (en-têtes) non classée absence → on ne touche à
 //     rien : un robot ne compte jamais comme une réponse ;
 //  4. vraie réponse (ni auto, ni absence, ni hors-sujet) → la fiche est
-//     tenue à jour : last_contact_at, a_appeler → contacte, relance
+//     tenue à jour : last_contact_at, a_appeler → suivi_email, relance
 //     annulée — la carte remonte dans « À faire » avec l'action proposée.
 // Les tâches « RDV … » ne sont jamais touchées.
 // ---------------------------------------------------------------------------
@@ -1346,7 +1346,8 @@ function isAutoReply(parsed: {
 
 /**
  * Une vraie réponse d'un prospect : last_contact_at mis à jour, un prospect
- * « À appeler » passe « Contacté », et la relance en attente est annulée —
+ * « À appeler » passe « Suivi par email » (29/10 : « Contacté » est
+ * retirée), et la relance en attente est annulée —
  * la carte « Réponses reçues » remonte dans À faire avec l'action suivante
  * proposée. Les tâches « RDV … » ne sont jamais touchées.
  */
@@ -1373,8 +1374,11 @@ async function handleRealReply(
   // main, son choix prime : on ne la réécrit jamais par-dessus (la fiche
   // affichera une suggestion). Même règle que lib/crm/status.ts, appliquée
   // ici parce que l'edge function (Deno) ne partage pas le code Next.
+  // Depuis le 29/10, l'étape « Contacté » n'existe plus (contrainte 043) :
+  // une réponse par mail, c'est « Suivi par email » — comme un email dans
+  // lib/crm/status.ts (le fait « email », faute de plus précis).
   if (prospect.status === "a_appeler" && !prospect.status_locked) {
-    patch.status = "contacte";
+    patch.status = "suivi_email";
     patch.status_auto_reason = "une réponse est arrivée par email";
     patch.status_auto_at = new Date().toISOString();
   }

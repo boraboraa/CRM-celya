@@ -8,7 +8,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dateInputToISO } from "@/lib/time";
-import { STATUS_ORDER, isCallOutcome } from "@/lib/constants";
+import { STATUS_ORDER, estResultatSaisissable } from "@/lib/constants";
+import { relanceRefuseeSurPerdue } from "@/lib/crm/perdues";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { poserRendezVous, type MeetingConflit } from "@/lib/crm/agenda";
@@ -30,6 +31,11 @@ export type SaveExchangeInput = {
   motif?: string | null;
   /** « YYYY-MM-DD » ou « YYYY-MM-DDTHH:mm » (Bruxelles). null : pas de relance. */
   dateLocale?: string | null;
+  /**
+   * Le titre de la relance, à la place de « Relancer <société> » — la relance
+   * posée d'office après « Suivi par email » (« Vérifier la réponse au mail »).
+   */
+  titreRelance?: string | null;
   /** Lieu du rendez-vous (type « rendez_vous » seulement) — porté par l'agenda. */
   rdvLieu?: string | null;
   /** Fin du rendez-vous « YYYY-MM-DDTHH:mm » — à défaut, début + 60 min. */
@@ -38,7 +44,8 @@ export type SaveExchangeInput = {
    * Cette note atteste-t-elle d'un échange réel avec le prospect ?
    * Défaut true (la saisie humaine passe par « Noter un échange ») ; le
    * connecteur MCP doit le déclarer explicitement. Sans attestation, une
-   * note de repérage ne fait pas passer la fiche en « Contacté ».
+   * note de repérage ne fait pas bouger l'étape (une note attestée sans
+   * résultat d'appel la fait passer en « À rappeler », 29/10).
    */
   isExchange?: boolean;
   /**
@@ -105,6 +112,15 @@ export async function saveExchangeCore(
   const dueAt = dateInputToISO(input.dateLocale ?? null);
   if (input.dateLocale && !dueAt) return { error: "Date invalide." };
 
+  // PERDU L'EMPORTE (31/10, lib/crm/perdues.ts) : on ne pose pas de relance
+  // sur une fiche qui RESTE perdue — il faut d'abord la sortir de « Perdu ».
+  // (Une fiche qui DEVIENT perdue ignore la date, comme avant.) La base le
+  // refuse aussi (migration 044) ; on le dit ici en clair, avant elle.
+  if (dueAt && input.type !== "rendez_vous" && input.isDraft !== true && !statusChanged) {
+    const refus = relanceRefuseeSurPerdue(prospect.status);
+    if (refus) return { error: refus };
+  }
+
   // AUCUN rendez-vous sans date — le garde-fou vit à l'ÉCRITURE, pas
   // seulement dans la proposition du modèle (analyzeNoteAction) : c'est par
   // ici que passait l'humain pressé, et l'heure du rendez-vous se perdait.
@@ -132,9 +148,10 @@ export async function saveExchangeCore(
   // Le résultat d'appel — borné en base par activities_outcome_connu (019) ;
   // une valeur inconnue est ignorée ici plutôt que refusée par Postgres. Un
   // email n'a pas de « résultat d'appel » ; une note et un rendez-vous en ont
-  // un (on décroche, et on cale le rendez-vous dans la foulée).
+  // un (on décroche, et on cale le rendez-vous dans la foulée). « barrage »
+  // n'est plus saisissable depuis le 31/10 : il est ignoré ici.
   const outcome: CallOutcome | null =
-    !isDraft && input.type !== "email" && isCallOutcome(input.outcome)
+    !isDraft && input.type !== "email" && estResultatSaisissable(input.outcome)
       ? input.outcome
       : null;
   // Un appel sans réponse n'est pas un échange — mais c'est un résultat.
@@ -254,7 +271,7 @@ export async function saveExchangeCore(
       // Une simple relance — jamais de doublon : la tâche ouverte est
       // re-datée, les surnuméraires annulées. Le filtre « RDV » ne protège
       // plus que d'éventuelles tâches héritées d'avant l'agenda.
-      const title = `Relancer ${prospect.company_name}`;
+      const title = input.titreRelance?.trim() || `Relancer ${prospect.company_name}`;
       const reusable = allOpen.filter((t) => !t.title.startsWith("RDV"));
       const reusableIds = reusable.map((t) => t.id);
 

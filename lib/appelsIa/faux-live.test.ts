@@ -148,7 +148,7 @@ function executeur(m: Memoire, horloge: () => Date) {
         return { ok: true, consigne: "C'est noté. Excusez-vous en une phrase, saluez, puis appelez fin_appel." };
       case "noter_resultat": {
         const d = lireDeclaration(lu.args);
-        if (!d) return { ok: false, erreur: "Il faut resultat (interesse, rappeler, refus ou barrage), resume et decideur." };
+        if (!d) return { ok: false, erreur: "Il faut resultat (interesse, rappeler ou refus), resume et decideur." };
         m.declarations.push(d);
         return { ok: true, consigne: "Noté. Saluez la personne, puis appelez fin_appel avec le motif conversation_terminee." };
       }
@@ -503,7 +503,7 @@ try {
   }
 
   // =========================================================================
-  // 3. Un standard automatique : raccroché, barrage SANS échange, stop
+  // 3. Un standard automatique : raccroché, « pas décroché » SANS échange, stop
   // =========================================================================
   const standard = await appeler(faux, {
     nom: "standard",
@@ -521,7 +521,7 @@ try {
     verifie("raccroché par l'annexe : serveur vocal reconnu en direct", [r.raccrochePar, r.machineEnDirect, i.session!.raccroches.length], ["serveur_machine", "standard_ivr", 1]);
     const plan = planifierFin(contexte(i));
     verifie("classement : standard automatique", plan.appel.classement, "standard_ivr");
-    verifie("journal : barrage SANS échange (la fiche ne passe pas en Contacté)", plan.journal && [plan.journal.outcome, plan.journal.isExchange, plan.journal.sujet], ["barrage", false, "Standard automatique"]);
+    verifie("journal : « pas décroché » SANS échange, sujet « Standard automatique »", plan.journal && [plan.journal.outcome, plan.journal.isExchange, plan.journal.sujet], ["sans_reponse", false, "Standard automatique"]);
     verifie("file : cycle terminé, « standard automatique »", plan.file && plan.file.statut !== "en_attente" ? [plan.file.statut, plan.file.motif, plan.file.essais] : plan.file, ["termine", "standard automatique", 1]);
     verifie(
       "relance le lendemain ouvré à 9h : « Janet : standard automatique, à contacter autrement »",

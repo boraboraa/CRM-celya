@@ -4,7 +4,7 @@ import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
 import { type LigneListe } from "@/components/ListeProspects";
 import { optionsPerimetre } from "@/components/PerimetreSwitcher";
 import { AffichageProspects } from "@/components/AffichageProspects";
-import { lireVue, VUE_COOKIE } from "@/lib/crm/filtresProspects";
+import { lireVue, nettoyerParams, VUE_COOKIE } from "@/lib/crm/filtresProspects";
 import { ETAPES_MASQUEES, masquerPerdues } from "@/lib/crm/perdues";
 import { filtreRecherche } from "@/lib/crm/recherche";
 import { type BoardProspect } from "@/components/PipelineBoard";
@@ -59,7 +59,9 @@ export default async function ProspectsPage({
 }: {
   searchParams: Promise<Search>;
 }) {
-  const params = await searchParams;
+  // Une étape retirée restée dans un lien (`?statut=contacte`, 29/10) est
+  // ignorée partout : filtre, menu, puces, liens recopiés.
+  const params = nettoyerParams(await searchParams);
   const { q, statut, tri, vue, filtre } = params;
   const supabase = await createClient();
   const session = await getSession();

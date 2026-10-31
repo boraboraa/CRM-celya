@@ -104,7 +104,7 @@ const rep2humain = suiteDuCycle(
 );
 verifie("deux répondeurs mais un humain a déjà décroché → on continue", rep2humain.type, "nouvel_essai");
 
-const std = suiteDuCycle(base({ classement: "standard_ivr", resultat: "barrage" }));
+const std = suiteDuCycle(base({ classement: "standard_ivr", resultat: "sans_reponse" }));
 verifie(
   "standard automatique → stop immédiat, relance le lendemain ouvré",
   std.type === "fin" ? [std.motif, std.relance?.jour, std.relance?.titre] : std,
@@ -150,8 +150,8 @@ verifie(
 const rappelerPasse = suiteDuCycle(base({ classement: "repondu_humain", resultat: "rappeler", rappelerLe: "2026-10-01" }));
 verifie("date de rappel dans le passé → lendemain ouvré, jamais dans le passé", rappelerPasse.type === "fin" ? rappelerPasse.relance?.jour : rappelerPasse, "2026-10-08");
 
-const barrage = suiteDuCycle(base({ classement: "repondu_humain", resultat: "barrage", resume: "Secrétaire : envoyer un mail" }));
-verifie("barrage humain → relance le lendemain ouvré", barrage.type === "fin" ? barrage.relance?.titre : barrage, "Janet : barrage — Secrétaire : envoyer un mail");
+const filtre = suiteDuCycle(base({ classement: "repondu_humain", resultat: "rappeler", resume: "Secrétaire : envoyer un mail" }));
+verifie("une secrétaire qui filtre (« à rappeler », plus de barrage depuis le 31/10) → relance le lendemain ouvré", filtre.type === "fin" ? filtre.relance?.titre : filtre, "Janet : à rappeler — Secrétaire : envoyer un mail");
 
 verifie("jourDeRelance : aujourd'hui avant 9h → aujourd'hui", jourDeRelance("2026-10-08", at("2026-10-08", "08:00")), "2026-10-08");
 verifie("jourDeRelance : aujourd'hui après 9h → lendemain ouvré", jourDeRelance("2026-10-08", at("2026-10-08", "11:00")), "2026-10-09");

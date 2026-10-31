@@ -1,6 +1,6 @@
 export type UserRole = "admin" | "commercial";
 
-/** Les huit étapes d'un prospect, du panier d'entrée au client signé.
+/** Les sept étapes d'un prospect, du panier d'entrée au client signé.
  *  « À appeler » est une colonne (la liste des entreprises à démarcher),
  *  pas une mécanique : la relance est pilotée par la date, jamais par l'étape.
  *  « À rappeler » (migration 026) : le rendez-vous a eu lieu, il faut
@@ -11,10 +11,12 @@ export type UserRole = "admin" | "commercial";
  *  par mail — on y entre par le FAIT (le résultat d'appel ou le débrief).
  *  « Proposition » est RETIRÉE (29/10, décision de Bora : une étape de trop,
  *  jamais servie) ; la valeur reste dans l'enum Postgres, refusée par la
- *  contrainte de la 040, et `normalizeStatus` la lit « À rappeler ». */
+ *  contrainte de la 040, et `normalizeStatus` la lit « À rappeler ».
+ *  « Contacté » est RETIRÉE aussi (29/10, décision de Bora : ce n'était
+ *  jamais une prochaine action) ; même sort : valeur d'enum inerte, refusée
+ *  par la contrainte de la 043, lue « À rappeler ». */
 export type ProspectStatus =
   | "a_appeler"
-  | "contacte"
   | "rendez_vous"
   | "a_rappeler"
   | "suivi_email"
@@ -120,8 +122,10 @@ export type ConfidenceLevel = "chaud" | "tiede" | "froid";
  * pas une de plus : au-delà, personne ne choisit sur un téléphone après un
  * appel. `null` = aucune tentative d'appel consignée sur cette entrée.
  *
- * ⚠ « sans_reponse » n'est PAS un échange (la fiche reste « À appeler ») ;
- * les quatre autres le sont. La règle vit dans lib/crm/exchange.ts.
+ * ⚠ « sans_reponse » n'est PAS un échange ; les autres le sont. La règle vit
+ * dans lib/crm/exchange.ts. Depuis le 31/10, tout appel fait quitter
+ * « À appeler » (lib/crm/status.ts) et « barrage » n'est plus proposé : il
+ * reste dans le type pour LIRE les anciennes entrées.
  */
 export type CallOutcome =
   | "sans_reponse"

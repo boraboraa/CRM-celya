@@ -186,7 +186,7 @@ async function sendAndFollowUp(
   const cadence = await applyEmailSentCadence(supabase, userId, prospectId);
 
   // Un email réellement envoyé est un fait fort : l'étape peut avancer
-  // (« À appeler » → « Contacté »).
+  // (« À appeler » → « Suivi par email »).
   // applyAutoStatus n'avance jamais à rebours et respecte le verrou.
   const auto = await applyAutoStatus(supabase, prospectId);
   // Et c'est un événement : la confiance se recalcule (jamais bloquant).
@@ -399,7 +399,7 @@ export async function triageAcceptAction(emailId: string): Promise<ActionState> 
   };
 
   // L'étape n'est plus forcée ici : la réponse reçue est déjà un fait, et
-  // c'est applyAutoStatus (appelé plus bas) qui en tire « Contacté » — sans
+  // c'est applyAutoStatus (appelé plus bas) qui en tire « Suivi par email » — sans
   // jamais reculer une fiche déjà plus avancée, ni écraser un choix humain.
   // Seul « Perdu » est écrit directement : c'est une décision humaine
   // irréversible, jamais automatique — le clic « Accepter » la vaut, et

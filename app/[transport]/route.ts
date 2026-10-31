@@ -124,7 +124,7 @@ import {
   ACTIVITY_LABEL,
   STATUS_ORDER,
   OUTCOME_ORDER,
-  isCallOutcome,
+  estResultatSaisissable,
   fmtDate,
   fmtDateTime,
 } from "@/lib/constants";
@@ -998,7 +998,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler, contacte, rendez_vous, a_rappeler (le rendez-vous a eu lieu, il faut rappeler la personne — ne pas confondre avec a_appeler), suivi_email (on a eu la personne, qui veut l'information par mail — l'étape suit d'elle-même un résultat « suivi_email » d'« ajouter_note »), essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler (la fiche n'a JAMAIS été appelée), rendez_vous, a_rappeler (la fiche a été appelée et il faut la rappeler : « sans_reponse », « rappeler » ou « interesse », échange noté, rendez-vous débriefé — ne pas confondre avec a_appeler), suivi_email (on a eu la personne, qui veut l'information par mail — l'étape suit d'elle-même un résultat « suivi_email » d'« ajouter_note »), essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1064,7 +1064,7 @@ function register(server: McpServer) {
         .boolean()
         .optional()
         .describe(
-          "true UNIQUEMENT si un échange a réellement eu lieu avec le prospect (appel passé, visite). Défaut false : une note de repérage ou de préparation ne fait pas passer la fiche en « Contacté »."
+          "true UNIQUEMENT si un échange a réellement eu lieu avec le prospect (appel passé, visite). Défaut false : une note de repérage ou de préparation ne fait pas bouger l'étape. Un échange attesté SANS résultat fait passer la fiche en « À rappeler »."
         ),
       brouillon: z
         .boolean()
@@ -1084,7 +1084,7 @@ function register(server: McpServer) {
         .enum(OUTCOME_ORDER as [string, ...string[]])
         .optional()
         .describe(
-          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie), « barrage » (secrétariat, standard), « rappeler » (à rappeler — l'étape passe en « À rappeler »), « interesse » (intéressé), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; posez la relance avec « planifier_relance »), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » et « barrage » posent TOUT SEULS un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie, standard automatique — l'étape passe en « À rappeler » : la fiche a été appelée), « rappeler » (à rappeler, y compris une secrétaire qui filtre — précisez-le dans la note ; l'étape passe en « À rappeler »), « interesse » (intéressé — l'étape passe aussi en « À rappeler »), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; le commercial envoie le mail depuis SA boîte, que le CRM ne voit pas : une relance « Vérifier la réponse au mail » est posée TOUTE SEULE 2 jours ouvrés plus tard à 9h, sauf relance déjà prévue après aujourd'hui, RDV à venir ou fiche gagnée/perdue ; la réponse le dit, et « planifier_relance » la change), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » pose TOUT SEUL un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
         ),
     },
     async (args, extra) => {
@@ -1133,12 +1133,12 @@ function register(server: McpServer) {
         // quelqu'un — la même règle que l'écran (enregistrerResultatAction).
         isExchange: args.resultat ? args.resultat !== "sans_reponse" : args.echange === true,
         isDraft: args.brouillon === true,
-        outcome: isCallOutcome(args.resultat) ? args.resultat : null,
+        outcome: estResultatSaisissable(args.resultat) ? args.resultat : null,
       });
       if (r.error) return fail(`Erreur : ${r.error}`);
 
-      // « Pas décroché » / « Barrage » (29/10) : le même rappel automatique
-      // qu'à l'écran — le prochain jour ouvré, à l'autre moitié de la journée.
+      // « Pas décroché » (29/10) et « Suivi par email » (31/10) : la même
+      // relance automatique qu'à l'écran (lib/crm/relance.ts).
       const rappelAuto =
         args.brouillon === true
           ? null
@@ -1159,7 +1159,11 @@ function register(server: McpServer) {
         );
       }
       if (rappelAuto) {
-        bits.push(`Rappel posé automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`);
+        bits.push(
+          args.resultat === "suivi_email"
+            ? `Relance « Vérifier la réponse au mail » posée automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`
+            : `Rappel posé automatiquement le ${fmtDateTime(rappelAuto)} (une autre date ? « planifier_relance »).`
+        );
       }
       if (r.statusChanged) {
         bits.push(
@@ -1362,7 +1366,7 @@ function register(server: McpServer) {
         note: args.note ?? null,
         dateLocale: args.date,
         // Planifier n'est pas échanger : poser une relance ne fait pas passer
-        // la fiche en « Contacté ». Un rendez-vous daté, lui, est un fait —
+        // la fiche en « À rappeler ». Un rendez-vous daté, lui, est un fait —
         // le cœur partagé le pose dans l'agenda (meetings).
         isExchange: false,
       });
@@ -2383,7 +2387,7 @@ function register(server: McpServer) {
   // --- mes_objectifs (031) -------------------------------------------------
   server.tool(
     "mes_objectifs",
-    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « pas intéressé » — on a eu le décideur ; un barrage est un appel, pas une réponse), intéressés, rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
+    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « pas intéressé » — on a eu le décideur ; un « pas décroché » est un appel, pas une réponse), intéressés, rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
     {},
     async (_args, extra) => {
       const ctx = await context(extra);

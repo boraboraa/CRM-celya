@@ -5,6 +5,116 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 31 octobre 2026 — plus de « Barrage », « À appeler » = jamais appelée, Perdu l'emporte
+
+Trois décisions de Bora (29/10 au soir et 31/10), **même PR que le retrait de
+« Contacté »** (#30, branche `claude/sans-contacte`) — elles REMPLACENT ce que
+l'état du 29/10 au soir ci-dessous dit du Barrage :
+
+- **« Barrage » n'est plus proposé** (« ça met beaucoup d'options, ça porte à
+  confusion ») : cinq résultats d'appel — Pas décroché · À rappeler ·
+  Intéressé · Suivi par email · Pas intéressé. Une secrétaire qui filtre,
+  c'est « À rappeler » avec un mot. `OUTCOME_ORDER` (ce qu'on PROPOSE) n'a
+  plus `barrage` ; `OUTCOME_CONNUS` / `isCallOutcome` le LISENT encore (9
+  anciennes entrées, 8 fiches, affichées « Barrage ») ; les écrivains passent
+  par `estResultatSaisissable` (écran, MCP `ajouter_note`, `saveExchangeCore`).
+  La valeur reste admise en base (contraintes 019/033), plus aucun code n'en
+  pose. Janet : un standard automatique s'écrit « Pas décroché », sujet
+  « Standard automatique » ; `noter_resultat` n'a plus `barrage` (lu
+  « rappeler » s'il arrive quand même). Le rappel automatique : « Pas
+  décroché » seul.
+- **« À appeler », c'est uniquement les fiches JAMAIS appelées** : tout
+  appel fait quitter l'étape — « Pas décroché » (et l'ancien barrage) est un
+  fait `facts.echange` (`lib/crm/status.ts`), en concurrence avec l'email par
+  la date : le plus récent dit la suite (appel → À rappeler, mail → Suivi par
+  email). Import CSV : « sans réponse », « pas décroché », « barrage » → À
+  rappeler ; `normalizeStatus("sans_reponse")` aussi.
+- **Perdu l'emporte** : une fiche perdue n'a AUCUNE relance ouverte. Le
+  29/10, passer en Perdu par le menu, le glisser-déposer ou le formulaire
+  laissait la relance ouverte (Carrosserie Jans, Mechanik Slawek), et Braine
+  Pneus reçut une relance 51 s APRÈS son « Pas intéressé » (le « Valider ·
+  demain à 9h » de la carte). Désormais : migration **`044`** — trigger
+  `prospects_perdu_annule_relances` (tout passage en Perdu annule les
+  relances ouvertes, quel que soit le chemin) et `tasks_pas_sur_perdue` (on
+  ne pose ni ne rouvre une relance sur une fiche perdue, P0001, la phrase de
+  `REFUS_RELANCE_PERDUE`, `lib/crm/perdues.ts`) ; `saveExchangeCore` et
+  `createTaskAction` refusent avant la base ; la carte PROCHAINE ACTION et
+  « Planifier une relance » ne le proposent plus (`perdue`). Défaire un « Pas
+  intéressé » reste possible (la fiche sort de Perdu, PUIS ses relances
+  rouvrent). **Ceci remplace la règle 023 « une perdue garde ses relances
+  (vivier) ».** Reprise : les relances ouvertes de **4** fiches perdues (Jans,
+  Mechanik Slawek, Braine Pneus, ZZ Test délivrabilité) sont annulées, la
+  liste dans `reprise_044`.
+
+- **« Suivi par email » pose sa relance** (31/10, Bora : les étudiants
+  suivent par mail depuis LEUR boîte, que le CRM ne voit pas — sans date, la
+  fiche restait en Suivi par email et ne remontait jamais) : « Vérifier la
+  réponse au mail — <société> », **2 jours ouvrés plus tard à 9h** (fériés
+  belges exclus), mêmes garde-fous que « Pas décroché » (`RESULTATS_RAPPEL_AUTO`,
+  `rappelAutomatique(now, outcome)`, `titreRappelAuto`, `lib/crm/relance.ts` ;
+  `saveExchangeCore` accepte `titreRelance`). Écran : « Vérification du mail
+  posée jeu. 29/10 à 9h · Changer » ; une correction juste après le tap
+  re-date la relance du premier tap (`remplace` / `rappelAutoPrecedent`),
+  jamais de seconde. MCP `ajouter_note(resultat: suivi_email)` idem. Aucune
+  migration.
+
+**Migrations ÉCRITES, PAS appliquées** — ordre : fusion → redéploiement de
+`crm-mail` depuis le dépôt (+ diff) → **`042`** → **`043`** → **`044`**.
+La **042** range aussi les « À appeler » non verrouillées déjà appelées
+(3 fiches : KEYCARPROG, Garage mécanique, Garage De Plecker-Pauwels) et les 6
+anciens Barrages en « À rappeler » ; motif stocké en clair (« déjà appelée, il
+faut la rappeler », « la suite se joue par email », « jamais appelée »).
+Recettes rejouées le 31/10 contre la production, en transaction annulée :
+**`042_assembler.sh` 21 OK, 0 faute** (29 fiches : 1 → À appeler, 7 → Suivi
+par email, 21 → À rappeler ; sondes du jeu commun jouées depuis « Contacté »
+ET depuis « À appeler ») ; **`044_assembler.sh` 15 OK, 0 faute**.
+Tests : `test:etapes` (26 cas communs), `test:perdues` (la phrase de la base
+= celle de l'écran), `test:debrief`, `test:relance`, `test:appels`,
+`test:appels-live` étendus.
+
+## État au 29 octobre 2026, soir — l'étape « Contacté » retirée
+
+⚠ Ce qui suit sur le Barrage (« reste À appeler ») est REMPLACÉ par l'état
+du 31/10 ci-dessus.
+
+Décision de Bora : « Contacté, ça ne sera jamais une prochaine action ».
+**Sept étapes** : À appeler → Rendez-vous → À rappeler → Suivi par email →
+Essai gratuit → Gagné / Perdu. Chaque fait dit la suite
+(`statusFromFacts`, `lib/crm/status.ts`) :
+- **Barrage** (compté comme échange à l'écran) et **Pas décroché** ne sont
+  JAMAIS un fait d'étape : la fiche reste **À appeler** (on n'a pas eu le
+  décideur ; le rappel auto de la PR #28 est posé) ;
+- **Intéressé**, **À rappeler**, débrief « à rappeler » → **À rappeler** ;
+- entre une **note attestée sans résultat** (`facts.echange`) et un **email**
+  envoyé ou reçu (`facts.email`), **le plus récent** dit la suite : note →
+  À rappeler, email → Suivi par email (« déjà appelé, à contacter par mail »
+  puis quatre mails = Suivi par email) ; le fait email passe APRÈS le
+  rendez-vous (un mail de confirmation ne sort jamais une fiche de RDV) ;
+- `FactRows.activities[].outcome` est désormais **obligatoire** : sans lui,
+  un Barrage passerait pour une note attestée.
+`normalizeStatus` lit `contacte` « À rappeler » (et `sans_reponse` « À
+appeler ») ; l'import CSV idem ; l'extraction IA propose `a_rappeler` au lieu
+de `contacte` ; une étape retirée restée dans l'URL (`?statut=contacte`) est
+ignorée (`statutConnu` / `nettoyerParams`, `lib/crm/filtresProspects.ts`) ;
+`crm-mail` : une réponse reçue fait passer `a_appeler` → **`suivi_email`**.
+Jeu de cas COMMUN `lib/crm/etapes.cas.json` (21 cas) : `test:etapes` (règle
+TS) ET la recette SQL de la 042 (même résultat exigé).
+
+**Migrations ÉCRITES, PAS appliquées** — dans cet ordre : fusion de la PR →
+**redéploiement de `crm-mail` depuis le dépôt** (+ diff de contrôle) →
+**`042`** (données : chaque fiche « Contacté » rangée par la recopie SQL de la
+règle, copie d'avant dans `reprise_042` — RLS fermée, à supprimer une fois
+validée —, verrou et motif des verrouillées gardés, `updated_at` et prochaine
+action inchangés via `session_replication_role = replica` le temps de la
+transaction) → **`043`** (contrainte `prospects_sans_contacte`). Recette
+`supabase/recettes/042_assembler.sh` (+ `042_corps.sql`,
+`042_attendus.json`) : **19 OK, 0 faute** le 29/10 au soir — 26 fiches : 7 en
+À appeler (6 barrages + AUTOLUB), 7 en Suivi par email (Baradent,
+Prekelinden, Dufranne, Keller, MSimmo, The Lodge, Thom-immo), 12 en À
+rappeler (dont Catius et Croon, verrouillées). Une fiche hors tableau ou
+rangée ailleurs = FAUTE : à rejouer juste avant d'appliquer (la base grossit).
+Branche `claude/sans-contacte`.
+
 ## État au 29 octobre 2026, 16h — « À rappeler » range la fiche dans l'étape
 
 Retour de Bora : après le résultat d'appel « À rappeler », la carte disait
@@ -778,9 +888,9 @@ au préalable.
 
 ### Les étapes — et la règle qui remplace la mécanique
 
-⚠ **Depuis le 29/10, « Proposition » n'existe plus** (huit étapes) : voir
-l'état du 29/10 en fin d'après-midi. Ce qui suit la mentionne encore, pour
-mémoire.
+⚠ **Depuis le 29/10, « Proposition » n'existe plus**, ni **« Contacté »**
+(sept étapes) : voir les états du 29/10. Ce qui suit les mentionne encore,
+pour mémoire.
 
 Statuts (`prospect_status`) : `a_appeler` → `contacte` → `rendez_vous` →
 `a_rappeler` (migration `026`, 18/10 : le RDV a eu lieu, il faut rappeler la
@@ -1074,7 +1184,8 @@ permanence « À débriefer — RDV du 02/09 ».
   aussi de **vivier** — l'enum n'a pas d'étape « à rappeler plus tard » :
   supprimer ses relances effacerait des rappels volontaires. La zone
   « À appeler / à rappeler » ne filtre donc RIEN (ZZ Test délivrabilité, perdu,
-  y reste avec sa relance du 15/09).
+  y reste avec sa relance du 15/09). ⚠ **REMPLACÉ le 31/10 (migration 044,
+  « Perdu l'emporte ») : une fiche perdue n'a plus aucune relance ouverte.**
 - « Passé » = **a commencé** (`starts_at <= now()`), partout, SQL comme TS.
 
 Trois pièces SQL : **`prochaine_action_de`** (la règle, une seule fois — seule
@@ -3299,7 +3410,7 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 **Vérifications avant de livrer** : `npx tsc --noEmit`, puis
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
-`npm run test:debrief`, `npm run test:recherche`, `npm run test:fiche-suivante`,
+`npm run test:debrief`, `npm run test:etapes`, `npm run test:recherche`, `npm run test:fiche-suivante`,
 `npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
 `npm run test:relance`,
 `npm run test:secteurs`, `npm run test:regions`, `npm run test:suppression`, `npm run test:perdues`, `npm run test:doublons`, `npm run test:ma-liste`,

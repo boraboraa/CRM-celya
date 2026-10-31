@@ -28,7 +28,6 @@ import { communeAffichee } from "@/lib/crm/regions";
  */
 const COLUMN_BANNER: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-500/20 text-slate-100 ring-slate-400/30",
-  contacte: "bg-cyan-500/20 text-cyan-100 ring-cyan-400/30",
   rendez_vous: "bg-blue-500/20 text-blue-100 ring-blue-400/30",
   a_rappeler: "bg-indigo-500/20 text-indigo-100 ring-indigo-400/30",
   suivi_email: "bg-sky-500/20 text-sky-100 ring-sky-400/30",
@@ -39,7 +38,6 @@ const COLUMN_BANNER: Record<ProspectStatus, string> = {
 
 const COLUMN_COUNT: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-400/25 text-slate-100",
-  contacte: "bg-cyan-400/25 text-cyan-100",
   rendez_vous: "bg-blue-400/25 text-blue-100",
   a_rappeler: "bg-indigo-400/25 text-indigo-100",
   suivi_email: "bg-sky-400/25 text-sky-100",
@@ -51,7 +49,6 @@ const COLUMN_COUNT: Record<ProspectStatus, string> = {
 /** La colonne cible s'illumine dans SA teinte pendant le drag. */
 const COLUMN_TARGET: Record<ProspectStatus, string> = {
   a_appeler: "bg-slate-500/[0.08] ring-slate-400/40",
-  contacte: "bg-cyan-500/[0.08] ring-cyan-400/40",
   rendez_vous: "bg-blue-500/[0.08] ring-blue-400/40",
   a_rappeler: "bg-indigo-500/[0.08] ring-indigo-400/40",
   suivi_email: "bg-sky-500/[0.08] ring-sky-400/40",
@@ -62,7 +59,6 @@ const COLUMN_TARGET: Record<ProspectStatus, string> = {
 
 const COLUMN_DROP: Record<ProspectStatus, string> = {
   a_appeler: "border-slate-400/50 bg-slate-500/[0.07] text-slate-300",
-  contacte: "border-cyan-400/50 bg-cyan-500/[0.07] text-cyan-300",
   rendez_vous: "border-blue-400/50 bg-blue-500/[0.07] text-blue-300",
   a_rappeler: "border-indigo-400/50 bg-indigo-500/[0.07] text-indigo-300",
   suivi_email: "border-sky-400/50 bg-sky-500/[0.07] text-sky-300",

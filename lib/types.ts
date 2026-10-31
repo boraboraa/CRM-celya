@@ -122,8 +122,10 @@ export type ConfidenceLevel = "chaud" | "tiede" | "froid";
  * pas une de plus : au-delà, personne ne choisit sur un téléphone après un
  * appel. `null` = aucune tentative d'appel consignée sur cette entrée.
  *
- * ⚠ « sans_reponse » n'est PAS un échange (la fiche reste « À appeler ») ;
- * les quatre autres le sont. La règle vit dans lib/crm/exchange.ts.
+ * ⚠ « sans_reponse » n'est PAS un échange ; les autres le sont. La règle vit
+ * dans lib/crm/exchange.ts. Depuis le 31/10, tout appel fait quitter
+ * « À appeler » (lib/crm/status.ts) et « barrage » n'est plus proposé : il
+ * reste dans le type pour LIRE les anciennes entrées.
  */
 export type CallOutcome =
   | "sans_reponse"

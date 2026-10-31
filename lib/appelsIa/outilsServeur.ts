@@ -138,7 +138,7 @@ export async function executerOutilServeur(
 
     case "noter_resultat": {
       const d = lireDeclaration(lu.args);
-      if (!d) return { ok: false, erreur: "Il faut resultat (interesse, rappeler, refus ou barrage), resume et decideur." };
+      if (!d) return { ok: false, erreur: "Il faut resultat (interesse, rappeler ou refus), resume et decideur." };
       // Pas de rappel dans le passé : une date passée est ignorée, et on le dit.
       const aujourdhui = partiesBruxelles(new Date()).ymd;
       const datePassee = Boolean(d.rappelerLe && d.rappelerLe < aujourdhui);

@@ -8,7 +8,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dateInputToISO } from "@/lib/time";
-import { STATUS_ORDER, isCallOutcome } from "@/lib/constants";
+import { STATUS_ORDER, estResultatSaisissable } from "@/lib/constants";
+import { relanceRefuseeSurPerdue } from "@/lib/crm/perdues";
 import { applyAutoStatus, manualStatusPatch } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { poserRendezVous, type MeetingConflit } from "@/lib/crm/agenda";
@@ -106,6 +107,15 @@ export async function saveExchangeCore(
   const dueAt = dateInputToISO(input.dateLocale ?? null);
   if (input.dateLocale && !dueAt) return { error: "Date invalide." };
 
+  // PERDU L'EMPORTE (31/10, lib/crm/perdues.ts) : on ne pose pas de relance
+  // sur une fiche qui RESTE perdue — il faut d'abord la sortir de « Perdu ».
+  // (Une fiche qui DEVIENT perdue ignore la date, comme avant.) La base le
+  // refuse aussi (migration 044) ; on le dit ici en clair, avant elle.
+  if (dueAt && input.type !== "rendez_vous" && input.isDraft !== true && !statusChanged) {
+    const refus = relanceRefuseeSurPerdue(prospect.status);
+    if (refus) return { error: refus };
+  }
+
   // AUCUN rendez-vous sans date — le garde-fou vit à l'ÉCRITURE, pas
   // seulement dans la proposition du modèle (analyzeNoteAction) : c'est par
   // ici que passait l'humain pressé, et l'heure du rendez-vous se perdait.
@@ -133,9 +143,10 @@ export async function saveExchangeCore(
   // Le résultat d'appel — borné en base par activities_outcome_connu (019) ;
   // une valeur inconnue est ignorée ici plutôt que refusée par Postgres. Un
   // email n'a pas de « résultat d'appel » ; une note et un rendez-vous en ont
-  // un (on décroche, et on cale le rendez-vous dans la foulée).
+  // un (on décroche, et on cale le rendez-vous dans la foulée). « barrage »
+  // n'est plus saisissable depuis le 31/10 : il est ignoré ici.
   const outcome: CallOutcome | null =
-    !isDraft && input.type !== "email" && isCallOutcome(input.outcome)
+    !isDraft && input.type !== "email" && estResultatSaisissable(input.outcome)
       ? input.outcome
       : null;
   // Un appel sans réponse n'est pas un échange — mais c'est un résultat.

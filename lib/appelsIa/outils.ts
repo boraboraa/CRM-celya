@@ -88,9 +88,9 @@ export const OUTILS: Record<NomOutil, DefinitionOutil> = {
       properties: {
         resultat: {
           type: "string",
-          enum: ["interesse", "rappeler", "refus", "barrage"],
+          enum: ["interesse", "rappeler", "refus"],
           description:
-            "interesse : intérêt réel ; rappeler : il faut rappeler (le décideur absent, pas le moment) ; refus : pas intéressé ; barrage : quelqu'un a filtré sans vous passer le décideur.",
+            "interesse : intérêt réel ; rappeler : il faut rappeler (le décideur absent, pas le moment, ou quelqu'un a filtré sans vous le passer — dites-le dans le résumé) ; refus : pas intéressé.",
         },
         resume: { type: "string", description: "Ce qui s'est dit, en une phrase." },
         interlocuteur: { type: "string", description: "Qui vous avez eu : nom et fonction si connus (« Marie, secrétaire »)." },

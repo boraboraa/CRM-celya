@@ -5,8 +5,11 @@ import {
   estPerdue,
   lireAnnulation,
   masquerPerdues,
+  REFUS_RELANCE_PERDUE,
+  relanceRefuseeSurPerdue,
   sansPerdues,
 } from "./perdues.ts";
+import { readFileSync } from "node:fs";
 
 let ok = 0;
 function cas(nom: string, f: () => void) {
@@ -72,6 +75,18 @@ cas("défaire : seuls des identifiants propres passent, vingt au plus", () => {
   assert.equal(a?.verrou, false);
   assert.equal(a?.relances.length, 20);
   assert.ok(a?.relances.every((r) => r === id));
+});
+
+cas("Perdu l'emporte (31/10) : pas de relance sur une fiche perdue, et seulement sur elle", () => {
+  assert.equal(relanceRefuseeSurPerdue("perdu"), REFUS_RELANCE_PERDUE);
+  for (const e of ["a_appeler", "a_rappeler", "rendez_vous", "suivi_email", "essai_gratuit", "gagne", null, undefined]) {
+    assert.equal(relanceRefuseeSurPerdue(e), null, String(e));
+  }
+});
+
+cas("la base dit la MÊME phrase que l'écran (migration 044)", () => {
+  const sql = readFileSync(new URL("../../supabase/migrations/044_perdu_l_emporte.sql", import.meta.url), "utf8");
+  assert.ok(sql.includes(REFUS_RELANCE_PERDUE.replace(/'/g, "''")), "la phrase de tasks_pas_sur_perdue = REFUS_RELANCE_PERDUE");
 });
 
 console.log(`\n${ok} cas — tout passe.`);

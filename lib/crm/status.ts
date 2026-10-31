@@ -5,14 +5,16 @@
  * (c'est ainsi qu'une fiche s'est retrouvée en « Rendez-vous » sans qu'aucun
  * rendez-vous ne soit posé). Elle se déduit de faits vérifiables :
  *
- *   a_appeler    défaut — personne n'a encore été eu : jamais appelé, pas
- *                décroché, ou un barrage (on n'a pas eu le décideur)
+ *   a_appeler    défaut — la fiche n'a JAMAIS été appelée (31/10, décision
+ *                de Bora : « À appeler, c'est uniquement les fiches qui n'ont
+ *                jamais été appelées »)
  *   rendez_vous  UNIQUEMENT une activité « rendez_vous » réellement
  *                enregistrée, ou un rendez-vous (non annulé) dans l'agenda
  *   a_rappeler   un résultat d'appel « À rappeler » ou « Intéressé »
- *                (activities.outcome, 29/10), une note attestée sans
- *                résultat (« j'ai réellement eu cet échange ») plus récente
- *                que le dernier email, ou un
+ *                (activities.outcome, 29/10), un APPEL quel qu'il soit
+ *                (« Pas décroché », et l'ancien « Barrage ») ou une note
+ *                attestée sans résultat, plus récents que le dernier email,
+ *                ou un
  *                rendez-vous débriefé « intéressé, à
  *                rappeler » (meetings.debrief_issue, migration 027) — par
  *                le débrief explicite, ou par un résultat « À rappeler » /
@@ -89,8 +91,9 @@ export type ProspectFacts = {
   /** Une suite à donner par téléphone : résultat « À rappeler » ou
    *  « Intéressé », débrief « intéressé, à rappeler » (027). */
   rappel: Fact | null;
-  /** Dernière note attestée SANS résultat d'appel (« j'ai réellement eu cet
-   *  échange ») — mène à « À rappeler », sauf si un email est plus récent. */
+  /** Dernier APPEL ou échange noté : « Pas décroché » (et l'ancien
+   *  « Barrage »), ou une note attestée SANS résultat (« j'ai réellement eu
+   *  cet échange ») — mène à « À rappeler », sauf si un email est plus récent. */
   echange: Fact | null;
   /** Un « Suivi par email » : résultat d'appel ou issue de débrief (033). */
   suiviEmail: Fact | null;
@@ -176,6 +179,19 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
       });
     }
 
+    // Un appel sans personne au bout (31/10) : la fiche a été appelée, elle
+    // quitte « À appeler » — le rappel automatique est posé (PR #28).
+    // « barrage » n'est plus proposé, mais les anciennes entrées comptent.
+    if (outcome === "sans_reponse" || outcome === "barrage") {
+      facts.echange = latest(facts.echange, {
+        at: a.occurred_at,
+        label:
+          outcome === "sans_reponse"
+            ? `appelée le ${fmtDate(a.occurred_at)}, sans réponse`
+            : `appelée le ${fmtDate(a.occurred_at)} (barrage)`,
+      });
+    }
+
     if (outcome === "suivi_email") {
       facts.suiviEmail = latest(facts.suiviEmail, {
         at: a.occurred_at,
@@ -196,10 +212,8 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
     } else if (a.is_exchange !== false && outcome === null) {
       // Note attestée SANS résultat d'appel (« j'ai réellement eu cet
       // échange ») : on a eu quelqu'un, la suite se donne en rappelant.
-      // ⚠ Un résultat n'entre jamais par ici : « Barrage » est compté comme
-      // un échange (saveExchangeCore) mais n'est PAS un fait d'étape — on n'a
-      // pas eu le décideur, la fiche reste « À appeler » ; « Pas décroché »
-      // et « Pas intéressé » non plus.
+      // Un résultat n'entre jamais par ici : chacun a sa branche ci-dessus
+      // (« Pas intéressé » n'en a pas — Perdu se pose à part).
       facts.echange = latest(facts.echange, {
         at: a.occurred_at,
         label: `un échange a été noté le ${fmtDate(a.occurred_at)}`,

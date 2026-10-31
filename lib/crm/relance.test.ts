@@ -116,10 +116,10 @@ verifie("jeudi à 11h, une heure avant le RDV : signalée",
   relanceAvantRdv("2026-10-29T11:00", RDV_JEUDI_12H), true);
 verifie("sans RDV : rien", relanceAvantRdv("2026-10-28T09:00", null), false);
 
-console.log("\n— le rappel automatique après « Pas décroché » / « Barrage » (29/10) —");
-verifie("seuls « Pas décroché » et « Barrage » le déclenchent",
+console.log("\n— le rappel automatique après « Pas décroché » (29/10 ; plus de barrage depuis le 31/10) —");
+verifie("seul « Pas décroché » le déclenche (« Barrage » est retiré le 31/10)",
   ["sans_reponse", "barrage", "rappeler", "interesse", "suivi_email", "refus", null].map(declencheRappelAuto),
-  [true, true, false, false, false, false, false]);
+  [true, false, false, false, false, false, false]);
 verifie("appelé mardi matin (10h20) → mercredi 14h", rappelAutomatique(MARDI_10H20), "2026-10-28T14:00");
 verifie("appelé mardi après-midi (15h10) → mercredi 10h", rappelAutomatique(MARDI_15H10), "2026-10-28T10:00");
 verifie("13h pile, c'est l'après-midi → lendemain 10h",
@@ -132,7 +132,7 @@ verifie("heure d'été : vendredi 23/10 à 10h → lundi 26/10 14h", rappelAutom
 
 const base = { outcome: "sans_reponse", dateHumaine: false, statut: "a_appeler", rdvAVenir: false, relancesOuvertes: [] as string[], now: MARDI_10H20 };
 verifie("fiche sans relance : rappel posé", decisionRappelAuto(base), { poser: "2026-10-28T14:00" });
-verifie("« Barrage » : pareil", decisionRappelAuto({ ...base, outcome: "barrage" }), { poser: "2026-10-28T14:00" });
+verifie("un ancien « Barrage » ne déclenche plus rien", decisionRappelAuto({ ...base, outcome: "barrage" }), { poser: null, raison: "pas_concerne" });
 verifie("relance d'aujourd'hui (9h, en cours) : re-datée",
   decisionRappelAuto({ ...base, relancesOuvertes: ["2026-10-27T08:00:00Z"] }), { poser: "2026-10-28T14:00" });
 verifie("relance en retard (lundi) : re-datée",

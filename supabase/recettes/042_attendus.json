@@ -1,11 +1,11 @@
 {
   "AD Carrosserie AUTOLUB GARIBALDI": "a_appeler",
-  "Carroserie Corzani": "a_appeler",
-  "Doct auto garage": "a_appeler",
-  "Euromaster Lyon Berthelot": "a_appeler",
-  "Garage Bert smets": "a_appeler",
-  "Garage Coquard Philippe": "a_appeler",
-  "Garage Nima": "a_appeler",
+  "Carroserie Corzani": "a_rappeler",
+  "Doct auto garage": "a_rappeler",
+  "Euromaster Lyon Berthelot": "a_rappeler",
+  "Garage Bert smets": "a_rappeler",
+  "Garage Coquard Philippe": "a_rappeler",
+  "Garage Nima": "a_rappeler",
   "Baradent": "suivi_email",
   "Cabinet Prekelinden": "suivi_email",
   "Chauffage Dufranne": "suivi_email",
@@ -24,5 +24,8 @@
   "JC Van Herpe": "a_rappeler",
   "Le candide restaurant": "a_rappeler",
   "Salon Helene hair": "a_rappeler",
-  "Van Ingelgem & Fils": "a_rappeler"
+  "Van Ingelgem & Fils": "a_rappeler",
+  "KEYCARPROG": "a_rappeler",
+  "Garage mécanique": "a_rappeler",
+  "Garage De Plecker-Pauwels": "a_rappeler"
 }

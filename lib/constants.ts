@@ -81,8 +81,9 @@ const LEGACY_STATUS: Record<string, ProspectStatus> = {
   // L'étape « Contacté » est retirée (29/10) : une valeur restée en base se
   // lit « À rappeler » (on a eu quelqu'un, il y a une suite à donner).
   contacte: "a_rappeler",
-  // Les plus anciennes (007) : « sans réponse » n'a eu personne.
-  sans_reponse: "a_appeler",
+  // Les plus anciennes (007) : « sans réponse » a été appelée (31/10 : « À
+  // appeler », c'est jamais appelée).
+  sans_reponse: "a_rappeler",
   contact_etabli: "a_rappeler",
   rappel_programme: "a_rappeler",
   rdv: "rendez_vous",
@@ -101,7 +102,7 @@ export function normalizeStatus(raw: string | null | undefined): ProspectStatus 
 }
 
 // ---------------------------------------------------------------------------
-// Résultat d'appel — six issues, deux taps
+// Résultat d'appel — cinq issues, deux taps
 // ---------------------------------------------------------------------------
 
 /**
@@ -110,7 +111,10 @@ export function normalizeStatus(raw: string | null | undefined): ProspectStatus 
  */
 export const OUTCOME_ORDER: CallOutcome[] = [
   "sans_reponse",
-  "barrage",
+  // (« Barrage » est retiré le 31/10, décision de Bora : une option de trop,
+  //  source de confusion. Une secrétaire qui filtre, c'est « À rappeler »
+  //  avec un mot. Les anciennes entrées gardent leur libellé — voir
+  //  OUTCOME_CONNUS — mais aucun écrivain n'en pose plus.)
   "rappeler",
   "interesse",
   "suivi_email",
@@ -163,8 +167,18 @@ export const OUTCOME_TEXT: Record<CallOutcome, string> = {
   refus: "text-rose-300",
 };
 
-/** Une valeur inconnue (donnée ancienne) ne casse jamais l'affichage. */
+/** Tout ce qu'on peut LIRE au journal, l'historique compris (« barrage »). */
+export const OUTCOME_CONNUS: CallOutcome[] = [...OUTCOME_ORDER, "barrage"];
+
+/** Une valeur inconnue (donnée ancienne) ne casse jamais l'affichage : sert à
+ *  LIRE, historique compris. Pour écrire, `estResultatSaisissable`. */
 export function isCallOutcome(raw: unknown): raw is CallOutcome {
+  return typeof raw === "string" && (OUTCOME_CONNUS as string[]).includes(raw);
+}
+
+/** Ce qu'un écrivain a le droit de POSER aujourd'hui (31/10 : plus de
+ *  « barrage ») — écran, connecteur MCP, cœur partagé. */
+export function estResultatSaisissable(raw: unknown): raw is CallOutcome {
   return typeof raw === "string" && (OUTCOME_ORDER as string[]).includes(raw);
 }
 

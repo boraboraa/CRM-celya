@@ -209,8 +209,9 @@ export function choixParDefaut(now: Date): { ymd: string; hm: string } {
 // `poserRappelAuto` (lib/crm/rappelAuto.ts) la joue pour l'écran ET le MCP.
 // ---------------------------------------------------------------------------
 
-/** Les résultats d'appel qui posent un rappel tout seuls. */
-export const RESULTATS_RAPPEL_AUTO = ["sans_reponse", "barrage"] as const;
+/** Les résultats d'appel qui posent un rappel tout seuls (« Barrage » est
+ *  retiré le 31/10 : une secrétaire qui filtre, c'est « À rappeler »). */
+export const RESULTATS_RAPPEL_AUTO = ["sans_reponse"] as const;
 
 export function declencheRappelAuto(outcome: string | null | undefined): boolean {
   return (RESULTATS_RAPPEL_AUTO as readonly string[]).includes(outcome ?? "");

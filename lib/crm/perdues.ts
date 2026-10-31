@@ -77,3 +77,26 @@ export function lireAnnulation(
     : [];
   return { etape: a.etape, verrou: a.verrou === true, relances };
 }
+
+/**
+ * PERDU L'EMPORTE (31/10, décision de Bora : « quand le commercial marque que
+ * c'est perdu, c'est le perdu qui l'emporte sur les autres, par exemple à
+ * rappeler »). Une fiche perdue n'a AUCUNE relance ouverte :
+ *   • tout passage en Perdu annule ses relances ouvertes — en base
+ *     (migration 044, trigger `prospects_perdu_annule_relances`), quel que
+ *     soit le chemin : étape, glisser-déposer, formulaire, « Pas intéressé »,
+ *     débrief, tri d'un mail, MCP ;
+ *   • on ne pose plus de relance sur une fiche perdue — l'écran ne le propose
+ *     pas, le serveur le refuse avec cette phrase, et la base aussi (trigger
+ *     `tasks_pas_sur_perdue`, même phrase). Pour la rappeler, on la sort
+ *     d'abord de « Perdu ».
+ * (Avant le 31/10, une fiche perdue gardait ses relances — un « vivier » à
+ * rappeler plus tard, 023. C'est retiré.)
+ */
+export const REFUS_RELANCE_PERDUE =
+  "Cette fiche est perdue : choisissez d'abord une autre étape pour la relancer.";
+
+/** Peut-on poser (ou rouvrir) une relance sur une fiche à cette étape ? */
+export function relanceRefuseeSurPerdue(statut: string | null | undefined): string | null {
+  return estPerdue(statut) ? REFUS_RELANCE_PERDUE : null;
+}

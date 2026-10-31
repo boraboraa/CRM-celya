@@ -39,6 +39,7 @@ export function RelancesSection({
   lectureSeule = false,
   premiereDansLaCarte = true,
   rdvAVenir = null,
+  perdue = false,
 }: {
   prospectId: string;
   openTasks: TaskWithProspect[];
@@ -58,6 +59,9 @@ export function RelancesSection({
    * fiche déplace MON « À faire ».
    */
   lectureSeule?: boolean;
+  /** Fiche PERDUE (31/10) : « Planifier une relance » n'est plus proposé —
+   *  Perdu l'emporte (lib/crm/perdues.ts). */
+  perdue?: boolean;
 }) {
   const { vue, erreur, setErreur, enCours, geste } = useOptimisticTasks(openTasks);
   const [provisoires, setProvisoires] = useState<Set<string>>(new Set());
@@ -128,7 +132,7 @@ export function RelancesSection({
         </ul>
       )}
 
-      <details className={`group mt-3 ${lectureSeule ? "hidden" : ""}`}>
+      <details className={`group mt-3 ${lectureSeule || perdue ? "hidden" : ""}`}>
         <summary className="btn-link cursor-pointer list-none text-xs">
           {/* Le ＋ pivote en ✕ une fois le formulaire ouvert : l'état du bloc
               se lit sur son propre bouton. */}

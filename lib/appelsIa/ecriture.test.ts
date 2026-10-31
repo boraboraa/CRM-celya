@@ -34,8 +34,8 @@ verifie("pas décroché → pas de réponse", [e4.resultat, e4.isExchange, e4.su
 const e5 = ecritureFiche("occupe_echec", sans, null);
 verifie("occupé → pas de réponse", [e5.resultat, e5.isExchange], ["sans_reponse", false]);
 const e6 = ecritureFiche("standard_ivr", sans, null);
-verifie("standard automatique → barrage SANS échange (la fiche reste À appeler)", [e6.resultat, e6.isExchange, e6.sujet], ["barrage", false, "Standard automatique"]);
-for (const r of ["interesse", "rappeler", "refus", "barrage"] as const) {
+verifie("standard automatique → « pas décroché » SANS échange, sujet « Standard automatique » (plus de barrage depuis le 31/10)", [e6.resultat, e6.isExchange, e6.sujet], ["sans_reponse", false, "Standard automatique"]);
+for (const r of ["interesse", "rappeler", "refus"] as const) {
   const e = ecritureFiche("repondu_humain", sans, decl({ resultat: r, resume: `Cas ${r}`, motif_refus: r === "refus" ? "Déjà équipé" : undefined }));
   verifie(`humain qui déclare « ${r} » → ${r}, échange réel`, [e.resultat, e.isExchange, e.sujet], [r, true, `Cas ${r}`]);
 }
@@ -52,10 +52,11 @@ verifie(
 );
 verifie(
   "secrétaire → son nom n'est JAMAIS écrit comme contact",
-  ecritureFiche("repondu_humain", sans, decl({ resultat: "barrage", interlocuteur: "Julie, secrétaire", decideur: false })).contact,
+  ecritureFiche("repondu_humain", sans, decl({ resultat: "rappeler", interlocuteur: "Julie, secrétaire", decideur: false })).contact,
   null
 );
 verifie("déclaration avec un résultat inconnu → rien n'est deviné", lireDeclaration({ resultat: "peut-etre", resume: "x" }), null);
+verifie("« barrage » déclaré quand même (retiré le 31/10) → lu « à rappeler »", lireDeclaration({ resultat: "barrage", resume: "Secrétaire", decideur: false })?.resultat, "rappeler");
 verifie("déclaration : date de rappel illisible ignorée", decl({ resultat: "rappeler", rappeler_le: "jeudi" })?.rappelerLe, null);
 
 // ---------------------------------------------------------------- les gardes avant de composer

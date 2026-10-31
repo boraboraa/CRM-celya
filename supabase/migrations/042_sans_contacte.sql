@@ -1,18 +1,23 @@
 -- 042 — L'étape « Contacté » est retirée (29/10/2026, décision de Bora :
 -- « Contacté, ça ne sera jamais une prochaine action »). Données seulement.
 --
--- Chaque fiche encore en « Contacté » va dans l'étape que son JOURNAL
--- justifie — la règle de `statusFromFacts` (lib/crm/status.ts), recopiée ici
--- une fois, sans liste d'identifiants écrite à la main :
+-- Et (31/10, décision de Bora) « À appeler, c'est uniquement les fiches qui
+-- n'ont jamais été appelées » : une fiche « À appeler » non verrouillée qui
+-- a DÉJÀ été appelée (un « Pas décroché ») la quitte aussi.
+--
+-- Chaque fiche concernée va dans l'étape que son JOURNAL justifie — la règle
+-- de `statusFromFacts` (lib/crm/status.ts), recopiée ici une fois, sans liste
+-- d'identifiants écrite à la main :
 --   1. un résultat « Suivi par email », ou un RDV débriefé ainsi → suivi_email
 --   2. un résultat « À rappeler » / « Intéressé », ou un RDV débriefé
 --      « à rappeler »                                            → a_rappeler
 --   3. un rendez-vous (activité, ou agenda non annulé)          → rendez_vous
---   4. entre le dernier email (envoyé ou reçu) et la dernière note attestée
---      SANS résultat, le plus récent : email → suivi_email, note → a_rappeler
---   5. rien de tout cela (un barrage, rien au journal)          → a_appeler
--- « Barrage » et « Pas décroché » ne sont jamais un fait d'étape : on n'a pas
--- eu le décideur. Les brouillons ne comptent pas.
+--   4. entre le dernier email (envoyé ou reçu) et le dernier APPEL ou échange
+--      noté (« Pas décroché », ancien « Barrage », note attestée SANS
+--      résultat), le plus récent : email → suivi_email, appel → a_rappeler
+--   5. rien de tout cela (jamais appelée)                       → a_appeler
+-- « Barrage » n'est plus proposé (31/10) ; ses anciennes entrées comptent
+-- comme un appel. Les brouillons ne comptent pas.
 --
 -- Garde-fous :
 --   • la copie d'AVANT est gardée dans `reprise_042` (RLS fermée, aucune
@@ -33,21 +38,9 @@
 -- À appliquer APRÈS la fusion du code (l'ancien code renverrait un barrage en
 -- « Contacté » au premier geste) et APRÈS le redéploiement de `crm-mail`.
 
-create table public.reprise_042 as
-select p.id, p.status, p.status_locked, p.status_auto_reason, p.status_auto_at,
-       p.updated_at, p.next_action_at, p.next_action_kind, now() as repris_le
-  from public.prospects p
- where p.status = 'contacte';
-
-alter table public.reprise_042 add primary key (id);
-alter table public.reprise_042 enable row level security;
-revoke all on public.reprise_042 from anon, authenticated;
-comment on table public.reprise_042 is
-  'Copie des fiches en « Contacté » avant la 042 (29/10/2026). RLS fermée. À supprimer une fois validée par Bora.';
-
 create temp table vers_042 on commit drop as
 with f as (
-  select p.id,
+  select p.id, p.status,
     exists (select 1 from public.activities a
              where a.prospect_id = p.id and not coalesce(a.is_draft, false) and a.outcome = 'suivi_email')
     or exists (select 1 from public.meetings m
@@ -70,21 +63,37 @@ with f as (
     ) as dernier_email,
     (select max(a.occurred_at) from public.activities a
       where a.prospect_id = p.id and not coalesce(a.is_draft, false)
-        and a.type = 'note' and coalesce(a.is_exchange, true) and a.outcome is null) as dernier_echange
+        and (a.outcome in ('sans_reponse', 'barrage')
+             or (a.type = 'note' and coalesce(a.is_exchange, true) and a.outcome is null))) as dernier_echange
   from public.prospects p
   where p.status = 'contacte'
+     or (p.status = 'a_appeler' and not coalesce(p.status_locked, false))
+), r as (
+  select f.id, f.status,
+    case
+      when f.suivi then 'suivi_email'
+      when f.rappel then 'a_rappeler'
+      when f.rdv then 'rendez_vous'
+      when f.dernier_email is not null
+       and (f.dernier_echange is null or f.dernier_email >= f.dernier_echange) then 'suivi_email'
+      when f.dernier_echange is not null then 'a_rappeler'
+      else 'a_appeler'
+    end::public.prospect_status as vers
+  from f
 )
-select f.id,
-  case
-    when f.suivi then 'suivi_email'
-    when f.rappel then 'a_rappeler'
-    when f.rdv then 'rendez_vous'
-    when f.dernier_email is not null
-     and (f.dernier_echange is null or f.dernier_email >= f.dernier_echange) then 'suivi_email'
-    when f.dernier_echange is not null then 'a_rappeler'
-    else 'a_appeler'
-  end::public.prospect_status as vers
-from f;
+select r.id, r.vers from r where r.vers::text <> r.status::text;
+
+create table public.reprise_042 as
+select p.id, p.status, p.status_locked, p.status_auto_reason, p.status_auto_at,
+       p.updated_at, p.next_action_at, p.next_action_kind, now() as repris_le
+  from public.prospects p
+ where p.id in (select id from vers_042);
+
+alter table public.reprise_042 add primary key (id);
+alter table public.reprise_042 enable row level security;
+revoke all on public.reprise_042 from anon, authenticated;
+comment on table public.reprise_042 is
+  'Copie des fiches déplacées par la 042 (« Contacté » retirée, « À appeler » = jamais appelée), avant le déplacement. RLS fermée. À supprimer une fois validée par Bora.';
 
 set local session_replication_role = replica;
 
@@ -92,9 +101,9 @@ update public.prospects p
    set status = v.vers,
        status_auto_at = case when coalesce(p.status_locked, false) then p.status_auto_at else now() end,
        status_auto_reason = case when coalesce(p.status_locked, false) then p.status_auto_reason
-         else 'étape « Contacté » retirée : ' || case v.vers::text
-           when 'a_appeler'   then 'on n''a pas encore eu le décideur'
-           when 'a_rappeler'  then 'on a eu la personne, il faut la rappeler'
+         else case v.vers::text
+           when 'a_appeler'   then 'jamais appelée'
+           when 'a_rappeler'  then 'déjà appelée, il faut la rappeler'
            when 'suivi_email' then 'la suite se joue par email'
            else 'un rendez-vous est enregistré'
          end end

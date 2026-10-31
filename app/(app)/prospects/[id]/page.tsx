@@ -24,6 +24,7 @@ import { DraftsSection } from "@/components/DraftsSection";
 import { type TaskWithProspect } from "@/components/TaskRow";
 import { TaskList } from "@/components/TaskList";
 import { RelancesSection } from "@/components/RelancesSection";
+import { estPerdue } from "@/lib/crm/perdues";
 import { AppelerAvecJanet } from "@/components/appelsIa/AppelerAvecJanet";
 import { BriefAppel } from "@/components/appelsIa/BriefAppel";
 import { lireBrief, lireSuiviFiche } from "@/lib/appelsIa/lectures";
@@ -509,6 +510,7 @@ export default async function ProspectDetailPage({
           canEmail={Boolean(prospect.email)}
           lectureSeule={lectureSeule}
           contactName={prospect.contact_name}
+          perdue={estPerdue(status)}
         />
       </div>
 
@@ -657,6 +659,7 @@ export default async function ProspectDetailPage({
               lectureSeule={lectureSeule}
               premiereDansLaCarte={Boolean(nextAction.task)}
               rdvAVenir={prochainRdv?.starts_at ?? null}
+              perdue={estPerdue(status)}
             />
 
             {doneTasks.length > 0 && (

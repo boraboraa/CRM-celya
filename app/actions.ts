@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/env";
 import { localInputToISO, dateInputToISO, inDaysAt9 } from "@/lib/time";
-import { normalizeStatus, isCallOutcome, STATUS_ORDER } from "@/lib/constants";
-import { estPerdue, lireAnnulation, type AnnulationRefus } from "@/lib/crm/perdues";
+import { normalizeStatus, estResultatSaisissable, STATUS_ORDER } from "@/lib/constants";
+import { estPerdue, lireAnnulation, relanceRefuseeSurPerdue, type AnnulationRefus } from "@/lib/crm/perdues";
 import type { ProspectStatus } from "@/lib/types";
 import {
   manualStatusPatch,
@@ -606,7 +606,7 @@ export type ResultatAppelState = ActionState & {
    */
   annulation?: AnnulationRefus | null;
   /**
-   * « Pas décroché » / « Barrage » : le rappel posé tout seul (ISO UTC, 29/10 —
+   * « Pas décroché » : le rappel posé tout seul (ISO UTC, 29/10 —
    * lib/crm/relance.ts `decisionRappelAuto`), ou null.
    */
   rappelAuto?: string | null;
@@ -694,8 +694,8 @@ async function defairePerdu(
 }
 
 /**
- * Consigner ce qu'a donné un appel, en un geste : 📵 pas de réponse, 🚧
- * barrage, ↩︎ à rappeler, 👍 intéressé, ✕ pas intéressé.
+ * Consigner ce qu'a donné un appel, en un geste : 📵 pas décroché,
+ * ↩︎ à rappeler, 👍 intéressé, 📧 suivi par email, ✕ pas intéressé (plus de barrage, 31/10).
  *
  * Mesuré le 02/09 : `outcome` n'était renseigné que sur 2 lignes sur 85, parce
  * que le noter demandait CINQ décisions dans QuickNote. Ici il en faut une.
@@ -723,7 +723,7 @@ export async function enregistrerResultatAction(input: {
 }): Promise<ResultatAppelState> {
   const { supabase, userId } = await currentUserId();
 
-  if (!isCallOutcome(input.outcome)) return { error: "Résultat inconnu." };
+  if (!estResultatSaisissable(input.outcome)) return { error: "Résultat inconnu." };
   const texte = input.texte?.trim() || null;
 
   // Le seul résultat qui EXIGE une raison : « pas intéressé » sans pourquoi
@@ -756,7 +756,7 @@ export async function enregistrerResultatAction(input: {
     annulation = perdu.annulation;
   }
 
-  // « Pas décroché » / « Barrage » (29/10) : c'est de toute façon une
+  // « Pas décroché » (29/10) : c'est de toute façon une
   // relance à faire — le prochain jour ouvré, à l'autre moitié de la journée.
   // Jamais par-dessus une date dite, une relance déjà prévue ou un RDV.
   const rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, input.outcome, {
@@ -799,7 +799,7 @@ export async function preciserResultatAction(input: {
 }): Promise<ActionState & { annulation?: AnnulationRefus | null; rappelAuto?: string | null }> {
   const { supabase, userId } = await currentUserId();
   const texte = input.texte?.trim().slice(0, 300) || null;
-  const correction = isCallOutcome(input.outcome) ? input.outcome : null;
+  const correction = estResultatSaisissable(input.outcome) ? input.outcome : null;
   let annulation: AnnulationRefus | null | undefined = undefined;
   let rappelAuto: string | null = null;
 
@@ -863,7 +863,7 @@ export async function preciserResultatAction(input: {
     if (res.error) return { error: res.error };
     if (input.rendezVous) revalidatePath("/agenda");
   } else if (correction) {
-    // Corrigé EN « Pas décroché » / « Barrage » : le même rappel qu'au tap.
+    // Corrigé EN « Pas décroché » : le même rappel qu'au tap.
     rappelAuto = await poserRappelAuto(supabase, userId, input.prospectId, correction);
   }
 
@@ -961,6 +961,15 @@ export async function createTaskAction(fd: FormData): Promise<ActionState> {
     inDaysAt9(1);
 
   const assignee = str(fd, "assignee_id");
+
+  // Perdu l'emporte (31/10) : pas de relance sur une fiche perdue.
+  const { data: fiche } = await supabase
+    .from("prospects")
+    .select("status")
+    .eq("id", str(fd, "prospect_id"))
+    .maybeSingle();
+  const refusPerdue = relanceRefuseeSurPerdue(fiche?.status);
+  if (refusPerdue) return { error: refusPerdue };
 
   const { error } = await supabase.from("tasks").insert({
     prospect_id: str(fd, "prospect_id"),

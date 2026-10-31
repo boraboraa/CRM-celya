@@ -20,6 +20,7 @@ import { Icone } from "@/components/ui";
 import { ResultatAppel } from "@/components/ResultatAppel";
 import { DebriefRdv } from "@/components/DebriefRdv";
 import { ChoixRelance } from "@/components/ChoixRelance";
+import { REFUS_RELANCE_PERDUE } from "@/lib/crm/perdues";
 
 /**
  * PROCHAINE ACTION — c'est ici qu'on arrive en raccrochant.
@@ -42,6 +43,7 @@ export function NextActionCard({
   canEmail = false,
   lectureSeule = false,
   contactName = null,
+  perdue = false,
 }: {
   action: NextAction;
   prospectId: string;
@@ -76,6 +78,12 @@ export function NextActionCard({
   lectureSeule?: boolean;
   /** Le contact de la fiche — la pastille « Contact → … » ne l'écrase jamais en silence. */
   contactName?: string | null;
+  /**
+   * Fiche PERDUE (31/10, « Perdu l'emporte » — lib/crm/perdues.ts) : on ne
+   * propose plus de relance ; la carte dit comment la rappeler quand même
+   * (choisir d'abord une autre étape).
+   */
+  perdue?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [erreur, setErreur] = useState<string>();
@@ -369,7 +377,9 @@ export function NextActionCard({
             rendez-vous : on informe, on ne bloque pas (024). Elle remontera
             dans « À appeler » le jour venu ; la fiche, elle, dira toujours le
             RDV. */}
-        {aDebriefer && !relanceDepliee ? (
+        {perdue ? (
+          <p className="min-w-0 basis-full text-xs text-slate-400">{REFUS_RELANCE_PERDUE}</p>
+        ) : aDebriefer && !relanceDepliee ? (
           <button
             type="button"
             onClick={() => setRelanceDepliee(true)}

@@ -244,8 +244,8 @@ verifie("rang : rendez_vous < a_rappeler < suivi_email < essai < gagné = perdu"
   [true, true, true, true, true]);
 verifie("une « proposition » restée en base se lit « À rappeler »", normalizeStatus("proposition"), "a_rappeler");
 verifie("un « contacte » resté en base se lit « À rappeler »", normalizeStatus("contacte"), "a_rappeler");
-verifie("les plus anciennes : « sans_reponse » → À appeler, « contact_etabli » / « rappel_programme » → À rappeler",
-  ["sans_reponse", "contact_etabli", "rappel_programme"].map(normalizeStatus), ["a_appeler", "a_rappeler", "a_rappeler"]);
+verifie("les plus anciennes : « sans_reponse », « contact_etabli », « rappel_programme » → À rappeler (appelées)",
+  ["sans_reponse", "contact_etabli", "rappel_programme"].map(normalizeStatus), ["a_rappeler", "a_rappeler", "a_rappeler"]);
 verifie("« négociation » (ancienne valeur) se lit « À rappeler »", normalizeStatus("negociation"), "a_rappeler");
 verifie("normalizeStatus reconnaît « suivi_email »", normalizeStatus("suivi_email"), "suivi_email");
 verifie("normalizeStatus reconnaît la nouvelle valeur", normalizeStatus("a_rappeler"), "a_rappeler");
@@ -307,11 +307,13 @@ const etapeDe = (activities: ReturnType<typeof note>[], emails: { direction: str
 verifie("« Intéressé » → « À rappeler »", etapeDe([note("interesse")]), "a_rappeler");
 verifie("…avec son motif en clair", factsFromRows({ ...sansRien, activities: [note("interesse")] }).rappel?.label,
   "la personne s'est montrée intéressée le 29 oct. 2026");
-verifie("« Barrage » seul (compté comme échange à l'écran) → reste « À appeler »", etapeDe([note("barrage", true)]), "a_appeler");
-verifie("« Barrage » de Janet (sans échange) → « À appeler »", etapeDe([note("barrage", false)]), "a_appeler");
-verifie("« Pas décroché » → « À appeler »", etapeDe([note("sans_reponse", false)]), "a_appeler");
-verifie("trois barrages d'affilée → toujours « À appeler »",
-  etapeDe([note("barrage", true, "2026-10-01T08:00:00Z"), note("barrage", true, "2026-10-08T08:00:00Z"), note("barrage", true, "2026-10-15T08:00:00Z")]), "a_appeler");
+verifie("ancien « Barrage » seul → « À rappeler » (appelée : elle quitte « À appeler », 31/10)", etapeDe([note("barrage", true)]), "a_rappeler");
+verifie("ancien « Barrage » de Janet (sans échange) → « À rappeler »", etapeDe([note("barrage", false)]), "a_rappeler");
+verifie("« Pas décroché » → « À rappeler » : « À appeler », c'est jamais appelée (31/10)", etapeDe([note("sans_reponse", false)]), "a_rappeler");
+verifie("…avec son motif en clair", factReason("a_rappeler", factsFromRows({ ...sansRien, activities: [note("sans_reponse", false)] })), "appelée le 29 oct. 2026, sans réponse");
+verifie("un brouillon « Pas décroché » n'est pas un appel", etapeDe([{ ...note("sans_reponse", false), is_draft: true }]), "a_appeler");
+verifie("trois anciens barrages d'affilée → « À rappeler »",
+  etapeDe([note("barrage", true, "2026-10-01T08:00:00Z"), note("barrage", true, "2026-10-08T08:00:00Z"), note("barrage", true, "2026-10-15T08:00:00Z")]), "a_rappeler");
 verifie("« Pas intéressé » n'est pas un fait d'étape (Perdu se pose à la main)", etapeDe([note("refus")]), "a_appeler");
 verifie("note attestée SANS résultat (« j'ai réellement eu cet échange ») → « À rappeler »", etapeDe([note(null, true)]), "a_rappeler");
 verifie("…avec son motif en clair", factReason("a_rappeler", factsFromRows({ ...sansRien, activities: [note(null, true)] })),
@@ -332,8 +334,10 @@ verifie("réponse reçue → « Suivi par email », motif en clair",
   [etapeDe([], [{ direction: "entrant", received_at: "2026-10-02T08:00:00Z" }]),
    factReason("suivi_email", factsFromRows({ ...sansRien, emails: [{ direction: "entrant", received_at: "2026-10-02T08:00:00Z" }] }))],
   ["suivi_email", "une réponse est arrivée le 02 oct. 2026"]);
-verifie("Barrage + email → « Suivi par email »",
-  etapeDe([note("barrage", true)], [{ direction: "sortant", received_at: "2026-10-01T08:00:00Z" }]), "suivi_email");
+verifie("mail puis « Pas décroché » plus récent → « À rappeler » (le plus récent dit la suite)",
+  etapeDe([note("sans_reponse", false)], [{ direction: "sortant", received_at: "2026-10-01T08:00:00Z" }]), "a_rappeler");
+verifie("« Pas décroché » puis un mail plus récent → « Suivi par email »",
+  etapeDe([note("sans_reponse", false, "2026-09-01T08:00:00Z")], [{ direction: "sortant", received_at: "2026-10-01T08:00:00Z" }]), "suivi_email");
 verifie("RDV + email de confirmation → reste « Rendez-vous »",
   etapeDe([], [{ direction: "sortant", received_at: "2026-10-01T08:00:00Z" }], [{ starts_at: FUTUR, status: "prevu" }]), "rendez_vous");
 verifie("À rappeler + email → « À rappeler » (le rappel est plus précis que le mail)",
@@ -345,8 +349,8 @@ verifie("aucun fait ne mène plus à « Contacté »",
     .includes("contacte" as never), false);
 v = evaluateStatus("a_appeler", true, factsFromRows({ ...sansRien, activities: [note("interesse")] }));
 verifie("VERROU : « Intéressé » sur une fiche verrouillée → suggestion seulement", [v.apply, v.suggest], [false, true]);
-v = evaluateStatus("a_rappeler", false, factsFromRows({ ...sansRien, activities: [note("barrage")] }));
-verifie("NE RECULE JAMAIS : un barrage ne ramène pas « À rappeler » en « À appeler »", [v.derived, v.apply], ["a_appeler", false]);
+v = evaluateStatus("suivi_email", false, factsFromRows({ ...sansRien, activities: [note("sans_reponse", false)] }));
+verifie("NE RECULE JAMAIS : un « Pas décroché » ne ramène pas « Suivi par email » en « À rappeler »", [v.derived, v.apply], ["a_rappeler", false]);
 
 // --- « Suivi par email » : on y entre par le FAIT ---------------------------
 const appelSuivi = factsFromRows({

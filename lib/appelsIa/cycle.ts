@@ -12,8 +12,8 @@
  *   · deux réponses de machine (répondeur ou standard) à deux heures
  *     différentes, sans jamais un humain : stop, « à contacter autrement » ;
  *   · un standard automatique : stop immédiat (ancien code) ;
- *   · un humain : le cycle s'arrête. Rappeler, intéressé sans rendez-vous ou
- *     barrage : une relance pour le propriétaire, à la date donnée par le
+ *   · un humain : le cycle s'arrête. À rappeler ou intéressé sans
+ *     rendez-vous : une relance pour le propriétaire, à la date donnée par le
  *     prospect, sinon le lendemain ouvré à 9h. Janet ne rappelle jamais
  *     d'elle-même. Rien après un refus, rien quand un rendez-vous est à venir ;
  *   · aucune relance orpheline : un nouvel essai n'est programmé que si la
@@ -73,7 +73,7 @@ export function prochainEssai(essai: 2 | 3, finPrecedent: Date, f: Fenetre = FEN
   return instantBruxelles(lendemainOuvre(finPrecedent), debutC);
 }
 
-export type ResultatFiche = "sans_reponse" | "barrage" | "rappeler" | "interesse" | "refus";
+export type ResultatFiche = "sans_reponse" | "rappeler" | "interesse" | "refus";
 
 export type Relance = {
   /** « YYYY-MM-DD », heure de Bruxelles. */
@@ -151,9 +151,7 @@ export function suiteDuCycle(e: EntreeCycle): SuiteCycle {
     const libelle =
       e.resultat === "interesse"
         ? "Janet : intéressé, sans rendez-vous"
-        : e.resultat === "barrage"
-          ? "Janet : barrage"
-          : "Janet : à rappeler";
+        : "Janet : à rappeler";
     return {
       type: "fin",
       motif: `décroché : ${e.resultat}`,

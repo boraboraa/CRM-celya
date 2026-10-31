@@ -52,7 +52,7 @@ function fmtJourCourt(jourISO: string): string {
  *     lib/crm/perdues.ts). Une seconde pastille juste après DÉFAIT ce passage :
  *     étape et relances d'avant.
  *
- * « Pas décroché » et « Barrage » posent TOUT SEULS un rappel (29/10, décision
+ * « Pas décroché » pose TOUT SEUL un rappel (29/10, décision
  * de Bora) : le prochain jour ouvré, à l'autre moitié de la journée — appelé le
  * matin → 14h, l'après-midi → 10h (`decisionRappelAuto`, lib/crm/relance.ts).
  * Jamais par-dessus une relance déjà prévue, un RDV à venir ou une date dite.
@@ -93,7 +93,7 @@ export function ResultatAppel({
   const [activiteId, setActiviteId] = useState<string | null>(null);
   /** Ce que « Pas intéressé » a fait (passage en Perdu) — rendu à la correction. */
   const [annulation, setAnnulation] = useState<AnnulationRefus | null>(null);
-  /** « Pas décroché » / « Barrage » : le rappel posé tout seul (29/10), en clair. */
+  /** « Pas décroché » : le rappel posé tout seul (29/10), en clair. */
   const [rappelPose, setRappelPose] = useState<string | null>(null);
   const [texte, setTexte] = useState("");
   /** Le texte déjà parti au serveur — pour ne pas le renvoyer inchangé. */
@@ -262,7 +262,7 @@ export function ResultatAppel({
 
   return (
     <div className={`space-y-2.5 ${className}`} aria-label="Résultat de l'appel">
-      {/* Six cibles LARGES : c'est un pouce qui vise, pas une souris. */}
+      {/* Cinq cibles LARGES (plus de « Barrage » depuis le 31/10) : c'est un pouce qui vise, pas une souris. */}
       <div className="flex flex-wrap gap-1.5">
         {OUTCOME_ORDER.map((o) => {
           const actif = choisi === o;
@@ -339,7 +339,7 @@ export function ResultatAppel({
         prospectId={prospectId}
         texte={texte}
         contactActuel={contactActuel}
-        demander={enregistre && choisi !== null && choisi !== "sans_reponse" && choisi !== "barrage"}
+        demander={enregistre && choisi !== null && choisi !== "sans_reponse"}
       />
 
       {besoinRaison && (
@@ -379,7 +379,7 @@ export function ResultatAppel({
       )}
 
       {note && !erreur && <p className="text-[11px] text-emerald-300">{note}</p>}
-      {/* Le rappel posé tout seul après « Pas décroché » / « Barrage » : on le
+      {/* Le rappel posé tout seul après « Pas décroché » : on le
           DIT, et on le change d'un tap (la carte ouvre « Pour quand ? »). */}
       {rappelPose && !erreur && (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-300">

@@ -163,18 +163,21 @@ const STATUS_ALIASES: Record<string, ProspectStatus> = {
   nouveau: "a_appeler",
   new: "a_appeler",
   // L'étape « Contacté » est retirée (29/10) : un CSV qui la dit entre en
-  // « À rappeler » (on a eu quelqu'un, il y a une suite) ; « sans réponse »
-  // et « barrage » n'ont eu personne, ils restent « À appeler ».
+  // « À rappeler ». Et « À appeler », c'est JAMAIS appelée (31/10) : « sans
+  // réponse » et « barrage » ont été appelées, elles aussi vont en « À
+  // rappeler ».
   contacte: "a_rappeler",
   contacté: "a_rappeler",
   contacted: "a_rappeler",
   contact_etabli: "a_rappeler",
   "contact établi": "a_rappeler",
   "contact etabli": "a_rappeler",
-  sans_reponse: "a_appeler",
-  "sans réponse": "a_appeler",
-  "sans reponse": "a_appeler",
-  barrage: "a_appeler",
+  sans_reponse: "a_rappeler",
+  "sans réponse": "a_rappeler",
+  "sans reponse": "a_rappeler",
+  "pas décroché": "a_rappeler",
+  "pas decroche": "a_rappeler",
+  barrage: "a_rappeler",
   rappel_programme: "a_rappeler",
   "rappel programmé": "a_rappeler",
   "rappel programme": "a_rappeler",

@@ -4,7 +4,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../../lib/env";
 import { controlerCadres } from "./cadres";
 
 export type Role = "commercial" | "admin";
-export type Appareil = "iphone" | "android" | "ordinateur";
+export type Appareil = "iphone" | "android" | "ipad-portrait" | "ipad-paysage" | "ordinateur";
 
 export function identifiants(role: Role): { email: string; password: string } {
   const prefixe = role === "admin" ? "E2E_ADMIN" : "E2E_COMMERCIAL";
@@ -16,10 +16,80 @@ export function identifiants(role: Role): { email: string; password: string } {
   return { email, password };
 }
 
-/** Le projet courant : quel appareil, quel rôle. */
-export function contexte(info: TestInfo): { appareil: Appareil; role: Role; mobile: boolean } {
+/**
+ * Le projet courant : quel appareil, quel rôle — et deux questions qu'on ne
+ * confond plus (3/11) :
+ * - `mobile` : la mise en page ÉTROITE (sous `lg`, 1024 px) — barre du bas,
+ *   cartes, feuilles. L'iPad en portrait l'a, l'iPad en paysage non ;
+ * - `tactile` : un DOIGT — cibles de 44 px, pas de glisser-déposer. Tout
+ *   sauf l'ordinateur.
+ */
+export function contexte(info: TestInfo): {
+  appareil: Appareil;
+  role: Role;
+  mobile: boolean;
+  tactile: boolean;
+  ipad: boolean;
+  /** Un TÉLÉPHONE (sous `sm`, agent mobile) : vue Jour de l'agenda, recherche plein écran. */
+  telephone: boolean;
+} {
   const m = info.project.metadata as { appareil: Appareil; role: Role };
-  return { ...m, mobile: m.appareil !== "ordinateur" };
+  const ipad = m.appareil === "ipad-portrait" || m.appareil === "ipad-paysage";
+  return {
+    ...m,
+    mobile: m.appareil !== "ordinateur" && m.appareil !== "ipad-paysage",
+    tactile: m.appareil !== "ordinateur",
+    ipad,
+    telephone: m.appareil === "iphone" || m.appareil === "android",
+  };
+}
+
+/**
+ * Au DOIGT, toute cible du conteneur a une ZONE d'au moins `min` × `min` px :
+ * sa boîte, élargie de sa pseudo-zone `::after` (le filet de globals.css).
+ * Renvoie la liste des fautes (« libellé (l×h) »).
+ */
+export async function zonesTactiles(conteneur: Locator, min = 44): Promise<void> {
+  const fautes = await conteneur.evaluate((racine, min) => {
+    const sel = 'a[href], button, [role="button"], summary, select, label[for]';
+    const els = Array.from(racine.querySelectorAll<HTMLElement>(sel));
+    for (const l of Array.from(racine.querySelectorAll<HTMLElement>("label"))) {
+      if (Array.from(l.children).some((c) => c.tagName === "INPUT")) els.push(l);
+    }
+    const out: string[] = [];
+    const px = (v: string) => (v.endsWith("px") ? parseFloat(v) : 0);
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const s = getComputedStyle(el);
+      if (s.visibility === "hidden" || s.display === "none") continue;
+      // Hors champ visuel (texte pour lecteur d'écran seulement).
+      if (s.clip === "rect(0px, 0px, 0px, 0px)" || (r.width <= 1 && r.height <= 1)) continue;
+      // Caché par un ancêtre (bloc replié, onglet fermé).
+      if (!el.checkVisibility?.({ checkOpacity: false, checkVisibilityCSS: true })) continue;
+      const a = getComputedStyle(el, "::after");
+      let l = r.width;
+      let h = r.height;
+      if (a.content && a.content !== "none" && a.position === "absolute") {
+        l = Math.max(l, r.width - Math.min(0, px(a.left)) - Math.min(0, px(a.right)));
+        h = Math.max(h, r.height - Math.min(0, px(a.top)) - Math.min(0, px(a.bottom)));
+      }
+      // Un lien ÉTIRÉ (`before:absolute inset-0`, la ligne d'une liste) répond
+      // sur toute sa ligne : sa zone est celle de son bloc conteneur.
+      const avant = getComputedStyle(el, "::before");
+      if (avant.content && avant.content !== "none" && avant.position === "absolute" && el.offsetParent) {
+        const c = (el.offsetParent as HTMLElement).getBoundingClientRect();
+        l = Math.max(l, c.width);
+        h = Math.max(h, c.height);
+      }
+      if (l < min - 0.5 || h < min - 0.5) {
+        const nom = (el.getAttribute("aria-label") ?? el.textContent ?? el.tagName).trim().replace(/\s+/g, " ").slice(0, 30);
+        out.push(`${nom} (${Math.round(l)}×${Math.round(h)})`);
+      }
+    }
+    return out;
+  }, min);
+  expect(fautes, `zones tactiles de moins de ${min} px`).toEqual([]);
 }
 
 /** Échec automatique : la page ne doit jamais être plus large que l'écran. */

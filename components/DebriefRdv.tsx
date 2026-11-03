@@ -17,6 +17,8 @@ import {
   manqueDebrief,
   type IssueDebrief,
 } from "@/lib/crm/debrief";
+import { lancerUneFois } from "@/lib/unSeulEnvoi";
+import { useUnSeulEnvoi } from "@/components/useUnSeulEnvoi";
 
 /** Les issues qui attendent un complément avant de partir. */
 type IssueDepliee = "a_rappeler" | "suivi_email" | "pas_interesse" | "pas_decroche";
@@ -67,6 +69,8 @@ export function DebriefRdv({
   apres?: (r: IssueEnvoyee) => void;
 }) {
   const [pending, startTransition] = useTransition();
+  /** Un envoi ne part jamais deux fois (3/11, lib/unSeulEnvoi.ts). */
+  const verrou = useUnSeulEnvoi();
   /** Ce qui manque (ambre) ou ce que le serveur a refusé (rose). */
   const [erreur, setErreur] = useState<{ texte: string; serveur: boolean }>();
   const [compteRendu, setCompteRendu] = useState("");
@@ -84,7 +88,7 @@ export function DebriefRdv({
       return;
     }
     setErreur(undefined);
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       pendant?.();
       const res = await cloturerRendezVousAction({
         id: meetingId,
@@ -105,7 +109,7 @@ export function DebriefRdv({
   function reporter(local: string) {
     if (!local || local.length < 16) return;
     setErreur(undefined);
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       pendant?.();
       const res = await deplacerRendezVousAction({
         id: meetingId,

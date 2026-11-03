@@ -60,6 +60,8 @@
  */
 
 import { lireFiltreRegion, REGIONS } from "@/lib/crm/regions";
+import { secteurConnu } from "@/lib/crm/filtresProspects";
+import { SECTEURS } from "@/lib/crm/secteurs";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -543,7 +545,7 @@ function register(server: McpServer) {
   // --- lister_prospects -----------------------------------------------------
   server.tool(
     "lister_prospects",
-    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Filtres : par étape, par région (la commune à Bruxelles, la province ailleurs), par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
+    "Liste les prospects du CRM avec un retour compact (nom, contact, téléphone, étape, prochaine action). Par DÉFAUT, seules les fiches de l'appelant (périmètre « moi ») ; un administrateur, ou un commercial qui « travaille en équipe », peut passer perimetre: « equipe ». Filtres : par étape, par région (la commune à Bruxelles, la province ailleurs), par métier (secteur, une des quinze valeurs fixes), par « à relancer » (relances en retard ou du jour), et par recherche texte (société, contact, email, téléphone).",
     {
       statut: z.enum(STATUS_ENUM).optional().describe("Filtrer sur une étape précise."),
       region: z
@@ -551,6 +553,12 @@ function register(server: McpServer) {
         .optional()
         .describe(
           "Filtrer sur une région : une des 19 communes de Bruxelles (« Ixelles », « Anderlecht »…), « Bruxelles (commune à préciser) », une province (« Namur », « Hainaut », « Brabant wallon »…), « Hors Belgique » ; ou un groupe « g:bruxelles », « g:wallonie », « g:flandre » ; ou « aucune » pour les fiches dont la région est inconnue."
+        ),
+      secteur: z
+        .string()
+        .optional()
+        .describe(
+          `Filtrer sur un métier — EXACTEMENT une de ces valeurs : ${SECTEURS.map((s) => `« ${s} »`).join(", ")}.`
         ),
       a_relancer: z
         .boolean()
@@ -581,7 +589,7 @@ function register(server: McpServer) {
           admin
             .from("prospects")
             .select(
-              "id, company_name, contact_name, phone, email, city, region, status, next_action_at, next_action_kind, owner_id"
+              "id, company_name, contact_name, phone, email, city, region, sector, status, next_action_at, next_action_kind, owner_id"
             ),
           viewer
         ),
@@ -596,6 +604,12 @@ function register(server: McpServer) {
         const fr = lireFiltreRegion(args.region);
         if (!fr) return fail(`Région inconnue : « ${args.region} ». Valeurs possibles : ${REGIONS.join(", ")}, g:bruxelles, g:wallonie, g:flandre, aucune.`);
         q = fr.type === "aucune" ? q.is("region", null) : q.in("region", fr.regions);
+      }
+      if (args.secteur !== undefined) {
+        // La même validation que l'URL de l'écran (lib/crm/filtresProspects.ts).
+        const secteur = secteurConnu(args.secteur);
+        if (!secteur) return fail(`Métier inconnu : « ${args.secteur} ». Valeurs possibles : ${SECTEURS.join(", ")}.`);
+        q = q.eq("sector", secteur);
       }
       if (args.a_relancer) {
         const { end } = todayBounds();
@@ -624,6 +638,7 @@ function register(server: McpServer) {
           telephone: r.phone,
           commune: r.city,
           region: r.region,
+          metier: r.sector ?? null,
           etape: STATUS_LABEL[r.status as keyof typeof STATUS_LABEL] ?? r.status,
           ...prochaineActionPourClaude(r.next_action_at, r.next_action_kind, r.status),
         }))

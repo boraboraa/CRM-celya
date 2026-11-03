@@ -9,9 +9,11 @@ import { Icone } from "@/components/ui";
  * rendez-vous, ajout rapide. Elle monte depuis le bord, sous le pouce.
  *
  * Trois choses qu'on oublierait en la refaisant à chaque écran :
- *  - le PORTAIL vers `body` : un `.card` porte un `backdrop-filter`, qui fait
- *    de lui le repère des `position: fixed` qu'il contient — une feuille ouverte
- *    depuis une ligne de « À faire » se serait collée dans la carte ;
+ *  - le PORTAIL vers `body` : un ancêtre qui porte un `backdrop-filter`, un
+ *    `transform` (l'apparition `animate-rise`) ou un `content-visibility`
+ *    devient le repère des `position: fixed` qu'il contient — une feuille
+ *    ouverte depuis une ligne de « À faire » se serait collée dans la carte
+ *    (le `.card`, lui, n'a plus de flou depuis le 3/11) ;
  *  - le CLAVIER : sur iPhone, il recouvre le bas de l'écran sans réduire la
  *    fenêtre. La feuille suit `visualViewport` pour que son bouton reste
  *    au-dessus des touches ;
@@ -86,6 +88,7 @@ export function FeuilleBas({
         aria-label="Fermer"
         tabIndex={-1}
         onClick={() => fermer.current()}
+        // Flou GARDÉ (3/11) : l'écran entier passe réellement dessous.
         className="absolute inset-0 h-full w-full cursor-default bg-black/60 backdrop-blur-[2px]"
       />
       <div

@@ -104,7 +104,7 @@ export function AppelTest({
         </summary>
         <fieldset className="mt-3 min-w-0 space-y-2">
           <legend className="sr-only">Janet lit le brief de</legend>
-          <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-300 sm:min-h-0">
+          <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-300 sm:souris:min-h-0">
             <input
               type="radio"
               name="source-test"
@@ -114,7 +114,7 @@ export function AppelTest({
             />
             une fiche fictive
           </label>
-          <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-300 sm:min-h-0">
+          <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-300 sm:souris:min-h-0">
             <input
               type="radio"
               name="source-test"

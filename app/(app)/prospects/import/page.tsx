@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
+import { lienListeServeur } from "@/lib/crm/lienListeServeur";
 import { ImportWizard } from "@/components/ImportWizard";
 import type { Profile } from "@/lib/types";
 
@@ -30,7 +31,7 @@ export default async function ImportPage() {
         title="Importer des prospects"
         subtitle="Chargez une liste d'entreprises depuis un fichier CSV."
         action={
-          <Link href="/prospects" className="btn-ghost">
+          <Link href={await lienListeServeur()} className="btn-ghost">
             Annuler
           </Link>
         }

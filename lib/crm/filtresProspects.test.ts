@@ -1,7 +1,13 @@
 // npm run test:filtres — l'URL de /prospects et les puces des filtres actifs.
 import assert from "node:assert/strict";
-import { depuisValeurEtape, filtresActifs, hrefProspects, lireVue, nettoyerParams, statutConnu, valeurEtape, VUES } from "./filtresProspects.ts";
+import { depuisValeurEtape, filtresActifs, hrefProspects, lireVue, nettoyerParams, secteurConnu, statutConnu, valeurEtape, VUES } from "./filtresProspects.ts";
+import { SECTEURS } from "./secteurs.ts";
+import { comptesParSecteur, libelleSecteur } from "./comptesSecteurs.ts";
 import { echeance, etoileesDabord, ordonnerProspects, rangPriorite } from "./ordreProspects.ts";
+
+// Une liste vide VOULUE porte le marqueur (3/11) : `/prospects` nu reprendrait
+// les filtres retenus (cookie `celya_filtres`).
+const VIDE = "/prospects?filtres=aucun";
 
 let ok = 0;
 function cas(nom: string, f: () => void) {
@@ -13,18 +19,18 @@ function cas(nom: string, f: () => void) {
 const ETAPES = { a_appeler: "À appeler", a_rappeler: "À rappeler", perdu: "Perdu" };
 
 cas("sans rien : /prospects nu", () => {
-  assert.equal(hrefProspects({}), "/prospects");
+  assert.equal(hrefProspects({}), VIDE);
   assert.deepEqual(filtresActifs({}, ETAPES), []);
 });
 
 cas("les valeurs par défaut ne s'écrivent pas (tous, priorite)", () => {
-  assert.equal(hrefProspects({ statut: "tous", tri: "priorite" }), "/prospects");
+  assert.equal(hrefProspects({ statut: "tous", tri: "priorite" }), VIDE);
 });
 
 cas("l'affichage : « Liste » s'écrit aussi (il doit l'emporter sur un Pipeline retenu)", () => {
   assert.equal(hrefProspects({ vue: "liste" }), "/prospects?vue=liste");
   assert.equal(hrefProspects({ vue: "colonnes" }), "/prospects?vue=colonnes");
-  assert.equal(hrefProspects({ vue: "constructor" }), "/prospects");
+  assert.equal(hrefProspects({ vue: "constructor" }), VIDE);
   assert.deepEqual(Object.values(VUES), ["Liste", "Pipeline"]);
 });
 
@@ -57,7 +63,7 @@ cas("« Toutes, perdues comprises » : s'écrit dans l'URL, se lit dans le menu,
   assert.deepEqual(depuisValeurEtape("avec_perdues"), { statut: "avec_perdues", filtre: null });
   const puces = filtresActifs({ statut: "avec_perdues" }, ETAPES);
   assert.deepEqual(puces.map((f) => f.label), ["Toutes, perdues comprises"]);
-  assert.equal(puces[0].retirer, "/prospects");
+  assert.equal(puces[0].retirer, VIDE);
 });
 
 cas("« Activité récente » n'est plus le défaut : elle s'écrit, et devient une puce", () => {
@@ -66,7 +72,7 @@ cas("« Activité récente » n'est plus le défaut : elle s'écrit, et devient 
 });
 
 cas("un tri inconnu (URL trafiquée) n'est pas recopié", () => {
-  assert.equal(hrefProspects({ tri: "constructor" }), "/prospects");
+  assert.equal(hrefProspects({ tri: "constructor" }), VIDE);
 });
 
 cas("tout est conservé, dans un ordre fixe", () => {
@@ -83,8 +89,8 @@ cas("over remplace ou retire un seul paramètre", () => {
 });
 
 cas("un filtre inconnu (URL trafiquée) est ignoré, pas recopié", () => {
-  assert.equal(hrefProspects({ filtre: "toString" }), "/prospects");
-  assert.equal(hrefProspects({ filtre: "<script>" }), "/prospects");
+  assert.equal(hrefProspects({ filtre: "toString" }), VIDE);
+  assert.equal(hrefProspects({ filtre: "<script>" }), VIDE);
   assert.deepEqual(filtresActifs({ filtre: "constructor" }, ETAPES), []);
 });
 
@@ -199,7 +205,7 @@ cas("région : une commune, un groupe ou « aucune » s'écrivent dans l'URL", (
 
 cas("région inconnue ou trafiquée : jamais recopiée dans une URL ni montrée", () => {
   for (const r of ["Lyon", "g:paris", "g:", "constructor", "<script>", "ixelles"]) {
-    assert.equal(hrefProspects({ region: r }), "/prospects", r);
+    assert.equal(hrefProspects({ region: r }), VIDE, r);
     assert.deepEqual(filtresActifs({ region: r }, ETAPES), [], r);
   }
 });
@@ -234,5 +240,129 @@ cas("une étape RETIRÉE dans l'URL (?statut=contacte, ?statut=proposition) vaut
   const intact = { statut: "suivi_email" };
   assert.equal(nettoyerParams(intact), intact, "une étape connue : les paramètres ne sont pas recopiés");
 });
+
+cas("métier (3/11) : seules les quinze valeurs de SECTEURS passent", () => {
+  for (const s of SECTEURS) assert.equal(secteurConnu(s), s, s);
+  for (const faux of ["garage", "Garage", "GARAGE / CARROSSERIE", "constructor", "<script>", "", " Autre", "Autre "]) {
+    assert.equal(secteurConnu(faux), undefined, JSON.stringify(faux));
+  }
+  assert.equal(secteurConnu(null), undefined);
+  assert.equal(secteurConnu(undefined), undefined);
+});
+
+cas("métier : dans l'URL (encodé), combiné aux autres filtres, à sa place", () => {
+  assert.equal(
+    hrefProspects({ secteur: "Garage / carrosserie" }),
+    "/prospects?secteur=Garage+%2F+carrosserie"
+  );
+  assert.equal(
+    hrefProspects({ q: "dupont", statut: "a_rappeler", tri: "nom", vue: "colonnes", perimetre: "moi", region: "Namur", secteur: "Kiné / paramédical" }),
+    "/prospects?q=dupont&statut=a_rappeler&tri=nom&vue=colonnes&perimetre=moi&region=Namur&secteur=Kin%C3%A9+%2F+param%C3%A9dical"
+  );
+  // Changer un autre filtre GARDE le métier ; le retirer garde les autres.
+  assert.equal(hrefProspects({ secteur: "Auto-école" }, { statut: "a_appeler" }), "/prospects?statut=a_appeler&secteur=Auto-%C3%A9cole");
+  assert.equal(hrefProspects({ secteur: "Auto-école", statut: "a_appeler" }, { secteur: null }), "/prospects?statut=a_appeler");
+});
+
+cas("métier inconnu dans l'URL : ni filtre, ni puce, ni recopie", () => {
+  assert.equal(hrefProspects({ secteur: "Boulangerie" }), VIDE);
+  assert.equal(hrefProspects({ secteur: "garage", statut: "a_appeler" }), "/prospects?statut=a_appeler");
+  assert.deepEqual(filtresActifs({ secteur: "Boulangerie" }, ETAPES), []);
+  const p = nettoyerParams({ secteur: "Boulangerie", statut: "contacte", q: "x" });
+  assert.deepEqual(p, { q: "x" });
+  assert.deepEqual(nettoyerParams({ secteur: "Autre", region: "Namur" }), { secteur: "Autre", region: "Namur" });
+});
+
+cas("métier : la puce « Garage / carrosserie ✕ » et son retrait", () => {
+  const a = filtresActifs({ secteur: "Garage / carrosserie", region: "Namur", statut: "a_appeler" }, ETAPES);
+  const m = a.find((f) => f.cle === "secteur")!;
+  assert.equal(m.label, "Garage / carrosserie");
+  assert.equal(m.retirer, "/prospects?statut=a_appeler&region=Namur");
+  // L'ordre de lecture : étape, région, métier.
+  assert.deepEqual(a.map((f) => f.cle), ["statut", "region", "secteur"]);
+  // La dernière puce retirée : la liste vide VOULUE porte le marqueur.
+  assert.equal(filtresActifs({ secteur: "Autre" }, ETAPES)[0].retirer, VIDE);
+});
+
+// ─── Le nombre de fiches par métier (le menu « Métier ») ──────────────────
+// Un FAUX client qui enregistre chaque requête : on vérifie qu'aucune fiche
+// n'est rapatriée (head: true, count exact), que les quinze comptages partent
+// ensemble, et que CHACUN passe par le périmètre de la liste.
+type Appel = { colonnes: string; options: unknown; filtres: [string, string, string][] };
+function fauxClient(comptes: Record<string, number>, erreurSur?: string) {
+  const appels: Appel[] = [];
+  let enVol = 0;
+  let maxEnVol = 0;
+  const client = {
+    from(table: "prospects") {
+      assert.equal(table, "prospects");
+      return {
+        select(colonnes: string, options: { count: "exact"; head: true }) {
+          const appel: Appel = { colonnes, options, filtres: [] };
+          appels.push(appel);
+          const requete = {
+            eq(col: string, val: string) {
+              appel.filtres.push(["eq", col, val]);
+              if (col !== "sector") return requete;
+              enVol++;
+              maxEnVol = Math.max(maxEnVol, enVol);
+              return new Promise<{ count: number | null; error: unknown }>((ok) =>
+                setTimeout(() => {
+                  enVol--;
+                  ok(val === erreurSur ? { count: null, error: { message: "refus" } } : { count: comptes[val] ?? 0, error: null });
+                }, 1)
+              );
+            },
+            not(col: string, op: string, val: string) {
+              appel.filtres.push(["not", col, `${op} ${val}`]);
+              return requete;
+            },
+          };
+          return requete;
+        },
+      };
+    },
+  };
+  return { client, appels, maxEnVol: () => maxEnVol };
+}
+
+await (async () => {
+  const { client, appels, maxEnVol } = fauxClient({ "Garage / carrosserie": 1234, "Autre": 3 });
+  // Le périmètre d'un commercial : ses fiches seules (filtrerProspects pose owner_id).
+  const borner = <Q extends { eq(c: string, v: string): unknown }>(q: Q) => q.eq("owner_id", "uid-colin") as Q;
+  const comptes = await comptesParSecteur(client as never, borner as never);
+  assert.equal(appels.length, SECTEURS.length, "quinze comptages, un par métier");
+  for (const a of appels) {
+    assert.equal(a.colonnes, "id");
+    assert.deepEqual(a.options, { count: "exact", head: true }, "jamais une fiche rapatriée");
+    assert.deepEqual(a.filtres[0], ["eq", "owner_id", "uid-colin"], "le périmètre du commercial, sur CHAQUE comptage");
+  }
+  assert.deepEqual(appels.map((a) => a.filtres.at(-1)![2]), [...SECTEURS]);
+  assert.equal(maxEnVol(), SECTEURS.length, "les quinze partent en parallèle");
+  assert.equal(comptes!["Garage / carrosserie"], 1234, "au-delà de 1 000 : le compte de la base, pas une liste tronquée");
+  assert.equal(comptes!["Auto-école"], 0);
+  assert.equal(libelleSecteur("Garage / carrosserie", comptes), "Garage / carrosserie (1234)");
+  ok++;
+  console.log("  ✓ métier : quinze comptages head:true en parallèle, bornés au périmètre");
+})();
+
+await (async () => {
+  const { client } = fauxClient({}, "Vétérinaire");
+  const comptes = await comptesParSecteur(client as never, ((q: unknown) => q) as never);
+  assert.equal(comptes, null, "un comptage refusé : pas de chiffres plutôt que des faux");
+  assert.equal(libelleSecteur("Vétérinaire", comptes), "Vétérinaire");
+  ok++;
+  console.log("  ✓ métier : un comptage en échec → menu sans chiffres");
+})();
+
+await (async () => {
+  // Les perdues masquées en liste : le même `borner` que la liste.
+  const { client, appels } = fauxClient({});
+  const borner = <Q extends { not(c: string, o: string, v: string): unknown }>(q: Q) => q.not("status", "in", "(perdu)") as Q;
+  await comptesParSecteur(client as never, borner as never, ["Autre"]);
+  assert.deepEqual(appels[0].filtres, [["not", "status", "in (perdu)"], ["eq", "sector", "Autre"]]);
+  ok++;
+  console.log("  ✓ métier : les comptes suivent le même bornage que la liste");
+})();
 
 console.log(`\n${ok} OK`);

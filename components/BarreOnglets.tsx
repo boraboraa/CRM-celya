@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ongletActif, type NavItem, type OngletMobile } from "@/lib/nav";
+import { lienOnglet, ongletActif, type NavItem, type OngletMobile } from "@/lib/nav";
+import { useLienListe } from "@/components/useLienListe";
 import { Icone } from "@/components/ui";
 import { FeuilleBas } from "@/components/FeuilleBas";
 import { OUVRIR_AJOUT } from "@/lib/crm/ajoutRapide";
@@ -23,11 +24,14 @@ const ONGLET =
 export function BarreOnglets({ onglets }: { onglets: OngletMobile[] }) {
   const pathname = usePathname();
   const [plusOuvert, setPlusOuvert] = useState(false);
+  /** L'onglet Prospects rouvre la liste retenue (3/11). */
+  const lienListe = useLienListe();
 
   return (
     <>
       <nav
         aria-label="Navigation principale"
+        // Flou GARDÉ (3/11) : la liste défile réellement sous la barre fixe.
         className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.08] bg-space/95 backdrop-blur lg:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
@@ -70,7 +74,7 @@ export function BarreOnglets({ onglets }: { onglets: OngletMobile[] }) {
             return (
               <Link
                 key={o.item.href}
-                href={o.item.href}
+                href={lienOnglet(o.item.href, lienListe)}
                 aria-current={actif ? "page" : undefined}
                 className={`${ONGLET} ${actif ? "text-slate-50" : "text-slate-400"}`}
               >

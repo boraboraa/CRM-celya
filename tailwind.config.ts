@@ -1,6 +1,11 @@
 import type { Config } from "tailwindcss";
+// La requête du pointeur n'est écrite qu'une fois (lib/pointeur.ts).
+import { REQUETE_SOURIS } from "./lib/pointeur";
 
 const config: Config = {
+  // Le survol n'existe qu'avec une souris : au doigt, un `hover:` restait
+  // collé après le tap, et Safari demandait parfois deux taps (3/11).
+  future: { hoverOnlyWhenSupported: true },
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -8,6 +13,12 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // `souris:` — les CIBLES compactes (case de 20 px, liens fins, croix)
+      // n'existent qu'avec une souris. La mise en page, elle, reste à la
+      // largeur (`lg:`). Un iPad en paysage : mise en page large, cibles de doigt.
+      screens: {
+        souris: { raw: REQUETE_SOURIS },
+      },
       colors: {
         space: {
           DEFAULT: "#0A0E1A",

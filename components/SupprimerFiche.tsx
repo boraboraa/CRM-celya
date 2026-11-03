@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Icone } from "@/components/ui";
 import { supprimerProspectsAction } from "@/app/actions";
 import { questionSuppression } from "@/lib/crm/suppression";
+import { useLienListe } from "@/components/useLienListe";
 
 /**
  * « Supprimer la fiche » (28/10) — en deux temps : un clic montre la question
@@ -18,6 +19,8 @@ export function SupprimerFiche({ prospectId, nom }: { prospectId: string; nom: s
   const [ouvert, setOuvert] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  /** Après la suppression, la liste qu'on avait (filtres retenus, 3/11). */
+  const lienListe = useLienListe();
 
   function supprimer() {
     setErreur(null);
@@ -27,7 +30,7 @@ export function SupprimerFiche({ prospectId, nom }: { prospectId: string; nom: s
         setErreur(res.error ?? res.texte ?? "La fiche n'a pas pu être supprimée.");
         return;
       }
-      router.push("/prospects");
+      router.push(lienListe);
     });
   }
 

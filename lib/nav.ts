@@ -12,6 +12,15 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/prospects", label: "Prospects", icon: "dossier" },
 ];
 
+/**
+ * L'onglet « Prospects » rouvre la liste QU'ON AVAIT (3/11) — filtres, tri et
+ * métier retenus jusqu'à minuit (`lienListeProspects`, lib/crm/
+ * filtresProspects.ts). Les autres onglets gardent leur lien.
+ */
+export function lienOnglet(href: string, lienListe: string): string {
+  return href === "/prospects" ? lienListe : href;
+}
+
 export const ADMIN_ITEM: NavItem = { href: "/equipe", label: "Équipe", icon: "equipe" };
 /** Les appels de Janet — admin seul, comme « Équipe » (la page le revérifie). */
 export const APPELS_IA_ITEM: NavItem = { href: "/appels-ia", label: "Appels IA", icon: "telephone" };

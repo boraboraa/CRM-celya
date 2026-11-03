@@ -14,6 +14,8 @@ type Fiche = {
   tel: string;
   ville?: string;
   adresse?: string;
+  /** Le métier (3/11 — le filtre « Métier » et les filtres gardés au retour). */
+  secteur?: string;
   notes?: number;
   relance?: number;
   relanceTitre?: string;
@@ -23,9 +25,9 @@ type Fiche = {
 
 export const FICHES: Record<Role, Fiche[]> = {
   commercial: [
-    { nom: "ZZ Test mobile — Garage Alpha", contact: "Jean Testeur", tel: "+32 000 10 00 01", ville: "Namur", adresse: "Rue de l'Essai 1, 5000 Namur", notes: 7, relance: -2, rdv: -3 },
-    { nom: "ZZ Test mobile — Garage Beta", contact: "Marie Essai", tel: "+32 000 10 00 02", ville: "Liège", relance: 0 },
-    { nom: "ZZ Test mobile — Carrosserie Gamma", contact: "Paul Fictif", tel: "+32 000 10 00 03", rdv: -5, rdvHeure: 14 },
+    { nom: "ZZ Test mobile — Garage Alpha", contact: "Jean Testeur", tel: "+32 000 10 00 01", ville: "Namur", secteur: "Garage / carrosserie", adresse: "Rue de l'Essai 1, 5000 Namur", notes: 7, relance: -2, rdv: -3 },
+    { nom: "ZZ Test mobile — Garage Beta", contact: "Marie Essai", tel: "+32 000 10 00 02", ville: "Liège", secteur: "Garage / carrosserie", relance: 0 },
+    { nom: "ZZ Test mobile — Carrosserie Gamma", contact: "Paul Fictif", tel: "+32 000 10 00 03", ville: "Namur", secteur: "Autre", rdv: -5, rdvHeure: 14 },
     { nom: "ZZ Test mobile — Pneus Delta", contact: "Luc Banc", tel: "+32 000 10 00 04", rdv: -6, rdvHeure: 10 },
     { nom: "ZZ Test mobile — Auto Epsilon", contact: "Anne Sonde", tel: "+32 000 10 00 05", rdv: -8, rdvHeure: 15, relance: -1, relanceTitre: "Relancer Anne Sonde : devis à confirmer avant la fin du mois, sinon proposer une visite" },
     { nom: "ZZ Test mobile — Garage Zêta", contact: "Hugo Maquette", tel: "+32 000 10 00 06", rdv: 0, rdvHeure: 16, adresse: "Chaussée de Test 12, 1000 Bruxelles" },
@@ -76,7 +78,7 @@ export async function peupler(role: Role): Promise<void> {
     const p = await verifier(
       c
         .from("prospects")
-        .insert({ company_name: f.nom, contact_name: f.contact, phone: f.tel, city: f.ville ?? null, address: f.adresse ?? null, status: "a_appeler" })
+        .insert({ company_name: f.nom, contact_name: f.contact, phone: f.tel, city: f.ville ?? null, address: f.adresse ?? null, sector: f.secteur ?? null, status: "a_appeler" })
         .select("id")
         .single(),
       f.nom

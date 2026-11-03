@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
+import { lienListeServeur } from "@/lib/crm/lienListeServeur";
 import { NewProspectAssist } from "@/components/NewProspectAssist";
 import type { Profile } from "@/lib/types";
 
@@ -24,7 +25,7 @@ export default async function NewProspectPage() {
         title="Nouveau prospect"
         subtitle="Collez ce que vous avez trouvé — la fiche se pré-remplit, vous validez."
         action={
-          <Link href="/prospects" className="btn-ghost">
+          <Link href={await lienListeServeur()} className="btn-ghost">
             Annuler
           </Link>
         }

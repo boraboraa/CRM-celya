@@ -15,6 +15,8 @@ import { phraseAnnulees } from "@/lib/crm/prochaineAction";
 import { fmtDateTime } from "@/lib/constants";
 import { lienTel } from "@/lib/crm/telephone";
 import { Icone } from "@/components/ui";
+import { balayage, deplacable } from "@/lib/pointeur";
+import { useSouris } from "@/components/useSouris";
 
 export type AgendaProspect = {
   id: string;
@@ -122,6 +124,8 @@ export function AgendaGrid({
       )
   );
   const router = useRouter();
+  /** Glisser un RDV pour le reporter : à la souris seulement (lib/pointeur.ts). */
+  const souris = useSouris();
   /** Sous `sm` : les panneaux passent dans la feuille du bas. */
   const [telephone, setTelephone] = useState(false);
   useEffect(() => {
@@ -394,7 +398,7 @@ export function AgendaGrid({
                     <button
                       type="button"
                       onClick={() => setChoisi(null)}
-                      className="min-h-[44px] text-xs text-slate-500 hover:text-slate-300 sm:min-h-0"
+                      className="min-h-[44px] text-xs text-slate-500 hover:text-slate-300 sm:souris:min-h-0"
                     >
                       changer
                     </button>
@@ -414,7 +418,7 @@ export function AgendaGrid({
                           key={p.id}
                           type="button"
                           onClick={() => setChoisi(p)}
-                          className="min-h-[44px] rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.09] hover:text-slate-100 sm:min-h-0"
+                          className="min-h-[44px] rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-xs text-slate-300 ring-1 ring-white/10 transition hover:bg-white/[0.09] hover:text-slate-100 sm:souris:min-h-0"
                         >
                           {p.company_name}
                           {p.contact_name ? ` · ${p.contact_name}` : ""}
@@ -452,7 +456,7 @@ export function AgendaGrid({
                     onChange={(e) =>
                       setCreation({ local: `${e.target.value}T${creation.local.slice(11, 16)}` })
                     }
-                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:min-h-0"
+                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:souris:min-h-0"
                   />
                 </div>
                 <div>
@@ -467,7 +471,7 @@ export function AgendaGrid({
                     onChange={(e) =>
                       setCreation({ local: `${creation.local.slice(0, 10)}T${e.target.value}` })
                     }
-                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:min-h-0"
+                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:souris:min-h-0"
                   />
                 </div>
                 <div>
@@ -478,7 +482,7 @@ export function AgendaGrid({
                     id="rdv-duree"
                     value={duree}
                     onChange={(e) => setDuree(Number(e.target.value))}
-                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:min-h-0"
+                    className="input min-h-[44px] w-auto py-1.5 text-xs sm:souris:min-h-0"
                   >
                     {[30, 60, 90, 120].map((d) => (
                       <option key={d} value={d}>
@@ -500,7 +504,7 @@ export function AgendaGrid({
                         ? "Adresse, visio… (vide : l'adresse de la fiche)"
                         : "Adresse, visio…"
                     }
-                    className="input min-h-[44px] py-1.5 text-xs sm:min-h-0"
+                    className="input min-h-[44px] py-1.5 text-xs sm:souris:min-h-0"
                   />
                 </div>
                 <button
@@ -511,7 +515,7 @@ export function AgendaGrid({
                     creation.local.length < 16 ||
                     (mode === "prospect" && !choisi)
                   }
-                  className="btn-primary min-h-[48px] w-full sm:min-h-0 sm:w-auto"
+                  className="btn-primary min-h-[48px] w-full sm:souris:min-h-0 sm:w-auto"
                 >
                   {pending ? "Enregistrement…" : "Poser le rendez-vous"}
                 </button>
@@ -580,9 +584,11 @@ export function AgendaGrid({
             toucher.current = null;
             if (!debut) return;
             const t = e.changedTouches[0];
-            const dx = t.clientX - debut.x;
-            if (Math.abs(dx) < 60 || Math.abs(t.clientY - debut.y) > 40) return;
-            router.push(dx < 0 ? navigation.suivant : navigation.precedent);
+            // Un geste FRANCHEMENT horizontal (lib/pointeur.ts) : un défilement
+            // vertical un peu de travers ne change plus de jour.
+            const sens = balayage(t.clientX - debut.x, t.clientY - debut.y);
+            if (sens === 0) return;
+            router.push(sens > 0 ? navigation.suivant : navigation.precedent);
           }}
         >
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -847,8 +853,13 @@ export function AgendaGrid({
                     const chevauche =
                       i > 0 &&
                       isoToLocalInput(duJour[i - 1].ends_at) > local;
-                    const draggable =
-                      m.canEdit && m.status !== "annule" && m.status !== "honore";
+                    // Reporter en glissant : à la SOURIS seulement (3/11). Au
+                    // doigt, un appui long sur un RDV ne le déplace plus — on
+                    // le touche, et sa feuille offre « Reporter ».
+                    const draggable = deplacable(
+                      souris,
+                      m.canEdit && m.status !== "annule" && m.status !== "honore"
+                    );
 
                     return (
                       <article
@@ -856,6 +867,10 @@ export function AgendaGrid({
                         draggable={draggable}
                         onClick={(e) => e.stopPropagation()}
                         onDragStart={(e) => {
+                          if (!draggable) {
+                            e.preventDefault();
+                            return;
+                          }
                           setDragId(m.id);
                           e.dataTransfer.effectAllowed = "move";
                           e.dataTransfer.setData("text/plain", m.id);
@@ -869,7 +884,7 @@ export function AgendaGrid({
                         }}
                         className={`absolute z-10 overflow-hidden rounded-lg px-2 py-1 ring-1 transition ${classesCarte(
                           m
-                        )} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${
+                        )} ${draggable ? "cursor-grab active:cursor-grabbing [-webkit-touch-callout:none]" : ""} ${
                           dragId === m.id ? "opacity-50" : ""
                         }`}
                       >

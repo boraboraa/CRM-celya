@@ -256,9 +256,11 @@ export function ListeProspects({
                         sous le nom plus étroit. */}
                     <PastilleRegion region={p.region} className="hidden min-w-0 max-w-[11rem] shrink-[0.2] xl:inline-flex" />
                     {qui && (
-                      // Sur la ligne du nom à partir de `xl` seulement : plus étroit, le nom,
-                      // l'étiquette Janet et l'avatar ne laissent pas de quoi lire.
-                      <span className="hidden min-w-[3rem] max-w-[45%] truncate text-xs text-slate-400 xl:inline" title={qui}>
+                      // Sur la ligne du nom à partir de `2xl` seulement (3/11) : à
+                      // `xl` (1280), la colonne du nom ne tient pas le nom, la
+                      // région ET le contact — le contact sortait de 15 px et la
+                      // région était écrasée. Il passe sous le nom jusqu'à 1536.
+                      <span className="hidden min-w-[3rem] max-w-[45%] truncate text-xs text-slate-400 2xl:inline" title={qui}>
                         {qui}
                       </span>
                     )}
@@ -269,8 +271,8 @@ export function ListeProspects({
                       </span>
                     )}
                   </p>
-                  <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400 xl:hidden">
-                    <PastilleRegion region={p.region} className="max-w-[60%] shrink-0" />
+                  <p className={`mt-0.5 min-w-0 items-center gap-1.5 text-xs text-slate-400 ${qui ? "flex 2xl:hidden" : "flex xl:hidden"}`}>
+                    <PastilleRegion region={p.region} className="max-w-[60%] shrink-0 xl:hidden" />
                     {qui && (
                       <span className="min-w-[3rem] truncate" title={qui}>
                         {qui}
@@ -321,7 +323,9 @@ export function ListeProspects({
                         disabled={pending}
                         aria-label={`Étape de ${p.company_name}`}
                         title="Changer l'étape — ce choix est alors verrouillé"
-                        className="absolute inset-0 h-full min-h-[36px] w-full cursor-pointer appearance-none opacity-0"
+                        // 44 px de haut au doigt, centrés sur la puce (3/11) : la
+                        // zone déborde de la puce, pas de la ligne.
+                        className="absolute inset-x-0 top-1/2 h-full min-h-[36px] w-full -translate-y-1/2 cursor-pointer appearance-none opacity-0 [@media(pointer:coarse)]:min-h-[44px]"
                       >
                         {STATUS_ORDER.map((s) => (
                           <option key={s} value={s} className="bg-[#121829] text-slate-100">

@@ -258,7 +258,7 @@ export default async function AgendaPage({
             <Link
               key={v}
               href={href({ vue: v })}
-              className={`inline-flex min-h-[44px] items-center rounded-lg px-3.5 py-1.5 text-xs font-medium transition sm:min-h-0 ${
+              className={`inline-flex min-h-[44px] items-center rounded-lg px-3.5 py-1.5 text-xs font-medium transition sm:souris:min-h-0 ${
                 (v === "jour") === vueJour
                   ? "bg-white/[0.09] text-slate-100 ring-1 ring-white/15"
                   : "text-slate-400 hover:text-slate-200"
@@ -273,7 +273,7 @@ export default async function AgendaPage({
           <Link
             href={href({ ref: vueJour ? decale(jour, -1) : decale(lundi, -7) })}
             aria-label={vueJour ? "Jour précédent" : "Semaine précédente"}
-            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 sm:min-h-0 sm:min-w-0"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 sm:souris:min-h-0 sm:min-w-0"
           >
             <Icone nom="chevron" className="h-4 w-4 rotate-90" />
           </Link>
@@ -283,13 +283,13 @@ export default async function AgendaPage({
           <Link
             href={href({ ref: vueJour ? decale(jour, 1) : decale(lundi, 7) })}
             aria-label={vueJour ? "Jour suivant" : "Semaine suivante"}
-            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 sm:min-h-0 sm:min-w-0"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 sm:souris:min-h-0 sm:min-w-0"
           >
             <Icone nom="chevron" className="h-4 w-4 -rotate-90" />
           </Link>
           <Link
             href={href({ ref: vueJour ? aujourdHui : lundiDe(aujourdHui) })}
-            className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 sm:min-h-0"
+            className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 py-1.5 text-xs text-slate-400 ring-1 ring-white/10 transition hover:bg-white/[0.06] hover:text-slate-200 sm:souris:min-h-0"
           >
             Aujourd&apos;hui
           </Link>

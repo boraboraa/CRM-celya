@@ -20,6 +20,8 @@ import type { CallOutcome } from "@/lib/types";
 import type { AnnulationRefus } from "@/lib/crm/perdues";
 import { libelleRelance, phraseRappelAuto } from "@/lib/crm/relance";
 import { isoToLocalInput } from "@/lib/time";
+import { lancerUneFois } from "@/lib/unSeulEnvoi";
+import { useUnSeulEnvoi } from "@/components/useUnSeulEnvoi";
 
 /** Ce que « Pas intéressé » fait de la fiche, dit une fois (29/10). */
 const PHRASE_PERDU =
@@ -106,6 +108,8 @@ export function ResultatAppel({
   const [erreur, setErreur] = useState<string>();
   const [note, setNote] = useState<string>();
   const [pending, startTransition] = useTransition();
+  /** Un envoi ne part jamais deux fois (3/11, lib/unSeulEnvoi.ts). */
+  const verrou = useUnSeulEnvoi();
   const champRef = useRef<HTMLInputElement>(null);
 
   // Les raccourcis, lus à la frappe (150 ms, aucun réseau) — même parseur que
@@ -142,6 +146,9 @@ export function ResultatAppel({
   }
 
   function tap(o: CallOutcome) {
+    // Un doigt qui rebondit : le second tap est ignoré AVANT de toucher à
+    // l'écran (lib/unSeulEnvoi.ts) — jamais une pastille affichée sans envoi.
+    if (!verrou.peut(Date.now())) return;
     setErreur(undefined);
     setNote(undefined);
 
@@ -162,7 +169,7 @@ export function ResultatAppel({
     // seconde pastille corrige la première au lieu de s'empiler.
     if (activiteId) {
       if (avant === o && texte.trim() === texteEnregistre) return; // rien à dire
-      startTransition(async () => {
+      lancerUneFois(verrou, startTransition, async () => {
         const res = await preciserResultatAction({
           prospectId,
           activiteId,
@@ -194,7 +201,7 @@ export function ResultatAppel({
       return;
     }
 
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       const res = await enregistrerResultatAction({
         prospectId,
         outcome: o,
@@ -234,12 +241,13 @@ export function ResultatAppel({
 
   /** La phrase dictée après le tap — avec ce que ses raccourcis ajoutent. */
   function preciser() {
+    if (!verrou.peut(Date.now())) return;
     if (!activiteId) return;
     const nouveauTexte = texte.trim();
     if (nouveauTexte === texteEnregistre) return;
     setErreur(undefined);
 
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       const res = await preciserResultatAction({
         prospectId,
         activiteId,

@@ -10,6 +10,7 @@ import { BoutonRecherche, RechercheGlobale } from "@/components/RechercheGlobale
 import { MA_LISTE_ITEM, navOrdinateur, ongletsMobiles } from "@/lib/nav";
 import { Suspense } from "react";
 import { MemoirePerimetre } from "@/components/MemoirePerimetre";
+import { MemoireApparition } from "@/components/MemoireApparition";
 
 function SignOutButton() {
   return (
@@ -82,6 +83,7 @@ export default async function AppLayout({
             qui mène au compte. La navigation est descendue sous le pouce
             (BarreOnglets) ; « Se déconnecter » ne prend plus la meilleure
             place de l'écran, il vit dans « Compte » (et « Plus » pour l'admin). */}
+        {/* Flou GARDÉ (3/11) : la page défile réellement sous l'en-tête collant. */}
         <header className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-white/[0.06] bg-space/85 px-4 py-1.5 backdrop-blur lg:hidden">
           <Link href="/dashboard" className="py-1.5">
             <Logo />
@@ -109,6 +111,8 @@ export default async function AppLayout({
         <Suspense fallback={null}>
           <MemoirePerimetre />
         </Suspense>
+        {/* Une page déjà vue ne rejoue pas son apparition au retour (3/11). */}
+        <MemoireApparition />
         {/* La fenêtre de recherche, UNE fois : les deux boutons l'ouvrent. */}
         <RechercheGlobale />
       </div>

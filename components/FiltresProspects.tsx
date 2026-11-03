@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { TRIS, depuisValeurEtape } from "@/lib/crm/filtresProspects";
+import { MARQUEUR_SANS_FILTRE, TRIS, depuisValeurEtape } from "@/lib/crm/filtresProspects";
 
 /**
  * La ligne de filtres de /prospects (27/10, au soir) : la recherche, puis UNE
  * ligne de listes déroulantes — QUI (le périmètre, pour qui peut élargir) ·
  * ÉTAPE (avec les raccourcis « À débriefer » et « Emails envoyés ») · RÉGION
- * (28/10 — la commune à Bruxelles, la province ailleurs) · TRI (en liste). Plus de rangée de puces d'étape.
+ * (28/10 — la commune à Bruxelles, la province ailleurs) · MÉTIER (3/11 —
+ * les quinze secteurs fixes, avec leur nombre de fiches) · TRI (en liste). Plus de rangée de puces d'étape.
  *
  * Recherche, étape et tri — À LA FRAPPE (18/10). Il fallait
  * taper puis cliquer « Filtrer » : la liste ne réagissait à rien.
@@ -27,6 +28,8 @@ export function FiltresProspects({
   raccourcis = [],
   region = "",
   regions = [],
+  secteur = "",
+  secteurs = [],
   qui = null,
   avecTri,
   seulementRecherche = false,
@@ -45,6 +48,10 @@ export function FiltresProspects({
   region?: string;
   /** [groupe, [valeur, libellé][]][] — optionsFiltreRegion() ; vide : pas de menu. */
   regions?: [string, [string, string][]][];
+  /** La valeur du menu « Métier » (`?secteur=`, 3/11), vide : tous. */
+  secteur?: string;
+  /** [valeur, libellé avec le nombre de fiches] — les quinze SECTEURS ; vide : pas de menu. */
+  secteurs?: [string, string][];
   /** Le périmètre : des liens tout faits (optionsPerimetre) — null : pas de menu. */
   qui?: { href: string; label: string; actif: boolean }[] | null;
   avecTri: boolean;
@@ -70,11 +77,14 @@ export function FiltresProspects({
 
   function aller(maj: Record<string, string | null>) {
     const sp = new URLSearchParams(params.toString());
+    sp.delete(MARQUEUR_SANS_FILTRE);
     for (const [k, v] of Object.entries(maj)) {
       if (v) sp.set(k, v);
       else sp.delete(k);
     }
-    const qs = sp.toString();
+    // Plus aucun paramètre : la liste vide est VOULUE — sans le marqueur,
+    // `/prospects` nu reprendrait les filtres retenus (3/11).
+    const qs = sp.toString() || `${MARQUEUR_SANS_FILTRE}=aucun`;
     startTransition(() => {
       router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
     });
@@ -112,7 +122,8 @@ export function FiltresProspects({
   }
 
   const quiActif = qui?.find((o) => o.actif)?.href ?? "";
-  const menu = "input min-h-[40px] w-auto py-1.5 text-xs";
+  // 40 px à la souris, 44 au doigt (3/11 — un iPad en paysage a cette ligne).
+  const menu = "input min-h-[44px] w-auto py-1.5 text-xs souris:min-h-[40px]";
 
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -122,7 +133,7 @@ export function FiltresProspects({
           type="search"
           value={texte}
           onChange={(e) => setTexte(e.target.value)}
-          className="input min-h-[40px] py-1.5"
+          className="input min-h-[44px] py-1.5 souris:min-h-[40px]"
           placeholder="Rechercher : société, contact, téléphone, ville…"
           aria-label="Rechercher une fiche"
           autoComplete="off"
@@ -187,6 +198,22 @@ export function FiltresProspects({
                 </option>
               ))}
             </optgroup>
+          ))}
+        </select>
+      )}
+
+      {secteurs.length > 0 && (
+        <select
+          value={secteur}
+          onChange={(e) => aller({ secteur: e.target.value || null })}
+          aria-label="Métier"
+          className={`${menu} max-w-[14rem]`}
+        >
+          <option value="">Tous les métiers</option>
+          {secteurs.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
           ))}
         </select>
       )}

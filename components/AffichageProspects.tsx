@@ -18,6 +18,11 @@ import {
 } from "@/lib/crm/filtresProspects";
 import { optionsFiltreRegion, valeurFiltreRegion } from "@/lib/crm/regions";
 import { AVEC_PERDUES, LIBELLE_AVEC_PERDUES, LIBELLE_SANS_PERDUES } from "@/lib/crm/perdues";
+import { SECTEURS, type SecteurFixe } from "@/lib/crm/secteurs";
+import { libelleSecteur } from "@/lib/crm/comptesSecteurs";
+import { lienToutEffacer, secteurConnu } from "@/lib/crm/filtresProspects";
+import { MemoireFiltres } from "@/components/MemoireFiltres";
+import { ToutEffacer } from "@/components/ToutEffacer";
 
 /**
  * L'écran /prospects, sans ses lectures (27/10, au soir) : la page charge, ce
@@ -40,6 +45,7 @@ export function AffichageProspects({
   admin,
   membresAttribution,
   tri,
+  comptesSecteurs = null,
 }: {
   params: ParamsProspects;
   vue: Vue;
@@ -53,6 +59,8 @@ export function AffichageProspects({
   /** [id, nom] — l'admin seul en reçoit (attribution). */
   membresAttribution: [string, string][];
   tri: string;
+  /** Le nombre de fiches par métier (quinze comptages en base) — null : sans chiffres. */
+  comptesSecteurs?: Partial<Record<SecteurFixe, number>> | null;
 }) {
   const filtreEmails = params.filtre === "emails";
   const filtreDebrief = params.filtre === "a_debriefer";
@@ -90,6 +98,14 @@ export function AffichageProspects({
       ([g, opts]) => [g, opts.map(([v, l]) => lien({ region: v }, l, regionActive === v))] as [string, ReturnType<typeof lien>[]]
     ),
   };
+  // Le métier (3/11) : les quinze valeurs fixes, avec leur nombre de fiches.
+  const secteurActif = secteurConnu(params.secteur) ?? "";
+  const metiers: [string, string][] = SECTEURS.map((s) => [s, libelleSecteur(s, comptesSecteurs)]);
+  const menuMetier = {
+    tous: lien({ secteur: null }, "Tous les métiers", !secteurActif),
+    liens: SECTEURS.map((s) => lien({ secteur: s }, libelleSecteur(s, comptesSecteurs), secteurActif === s)),
+  };
+  const pucesVisibles = actifs.filter((f) => f.cle !== "q");
   const nbFiches = `${total} fiche${total > 1 ? "s" : ""}`;
 
   return (
@@ -141,6 +157,7 @@ export function AffichageProspects({
             )}
             etapes={etapesLiens}
             regions={menuRegion}
+            metiers={menuMetier}
             tris={
               vue === "liste"
                 ? (Object.keys(TRIS) as (keyof typeof TRIS)[]).map((t) =>
@@ -150,25 +167,6 @@ export function AffichageProspects({
             }
           />
         </div>
-        {actifs.some((f) => f.cle !== "q") && (
-          <ul className="flex flex-wrap gap-1.5" aria-label="Filtres actifs">
-            {actifs
-              .filter((f) => f.cle !== "q")
-              .map((f) => (
-                <li key={f.cle}>
-                  <Link
-                    href={f.retirer}
-                    prefetch={false}
-                    aria-label={`Retirer le filtre ${f.label}`}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full bg-celya-blue/10 px-3 text-xs text-blue-100 ring-1 ring-celya-blue/30"
-                  >
-                    {f.label}
-                    <Icone nom="croix" className="h-3 w-3" />
-                  </Link>
-                </li>
-              ))}
-          </ul>
-        )}
       </div>
 
       {/* Ordinateur : Liste | Pipeline, puis UNE ligne de filtres. */}
@@ -182,12 +180,42 @@ export function AffichageProspects({
           raccourcis={raccourcis}
           region={regionActive}
           regions={regions}
+          secteur={secteurActif}
+          secteurs={metiers}
           qui={qui}
           avecTri={vue === "liste"}
           libelleTous={libelleTous}
           avecPerdues={avecPerdues}
         />
       </div>
+
+      {/* Les filtres posés, visibles sur TOUS les écrans (3/11) — chacun
+          retirable d'un tap, et « Tout effacer ». Ils sont retenus jusqu'à
+          minuit : revenir d'une fiche rend cette liste-ci. */}
+      {(pucesVisibles.length > 0 || params.q?.trim()) && (
+        <div className="-mt-1 mb-3 flex min-w-0 flex-wrap items-center gap-1.5 lg:mb-4">
+          {pucesVisibles.length > 0 && (
+            <ul className="flex min-w-0 flex-wrap gap-1.5" aria-label="Filtres actifs">
+              {pucesVisibles.map((f) => (
+                <li key={f.cle} className="min-w-0">
+                  <Link
+                    href={f.retirer}
+                    prefetch={false}
+                    title={f.label}
+                    aria-label={`Retirer le filtre ${f.label}`}
+                    className="inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-full bg-celya-blue/10 px-3 text-xs text-blue-100 ring-1 ring-celya-blue/30"
+                  >
+                    <span className="min-w-0 truncate">{f.label}</span>
+                    <Icone nom="croix" className="h-3 w-3 shrink-0" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          <ToutEffacer href={lienToutEffacer(params)} />
+        </div>
+      )}
+      <MemoireFiltres />
 
       {erreur && (
         <p className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{erreur}</p>
@@ -200,7 +228,7 @@ export function AffichageProspects({
               ? "Aucun email envoyé"
               : filtreDebrief
                 ? "Aucun rendez-vous à débriefer"
-                : params.q || params.statut
+                : params.q || params.statut || params.secteur || params.region
                   ? "Aucun résultat"
                   : "Aucun prospect pour l'instant"
           }
@@ -209,8 +237,8 @@ export function AffichageProspects({
               ? "Aucun mail n'est encore parti vers ces prospects — le filtre ne montre que les fiches déjà démarchées par email."
               : filtreDebrief
                 ? "Aucun rendez-vous passé n'attend son issue dans ce périmètre."
-                : params.q || params.statut
-                  ? "Essayez d'élargir la recherche ou de retirer le filtre d'étape."
+                : params.q || params.statut || params.secteur || params.region
+                  ? "Essayez d'élargir la recherche ou de retirer un filtre (étape, région, métier)."
                   : "Collez votre liste (« Coller ma liste »), importez un CSV, ou créez une première fiche."
           }
           href="/prospects/ma-liste"

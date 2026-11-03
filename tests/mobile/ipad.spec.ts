@@ -108,8 +108,8 @@ test.describe("écrit", () => {
     await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
 
     // La ligne reste à sa place, barrée, avec « Annuler » ; la suivante n'a pas bougé.
-    await expect(ligne1.getByText("Faite")).toBeVisible();
-    await expect(ligne1.getByRole("button", { name: "Annuler" })).toBeVisible();
+    await expect(ligne1.getByText("Faite").filter({ visible: true })).toBeVisible();
+    await expect(ligne1.getByRole("button", { name: "Annuler" }).filter({ visible: true })).toBeVisible();
     const apres = (await ligne2.boundingBox())!;
     expect(Math.abs(apres.y - avant.y)).toBeLessThan(1);
     await expect(ligne2.getByRole("button", { name: "Marquer comme faite" })).toBeEnabled();
@@ -142,8 +142,8 @@ test.describe("écrit", () => {
     await charger(page, "/dashboard");
     const ligne = page.locator("li", { hasText: "ZZ annuler — relance" }).first();
     await ligne.getByRole("button", { name: "Marquer comme faite" }).tap();
-    await ligne.getByRole("button", { name: "Annuler" }).tap();
-    await expect(ligne.getByRole("button", { name: "Annuler" })).toHaveCount(0);
+    await ligne.getByRole("button", { name: "Annuler" }).filter({ visible: true }).tap();
+    await expect(ligne.getByRole("button", { name: "Annuler" }).filter({ visible: true })).toHaveCount(0);
     await page.waitForTimeout(2_500);
     await expect(page.locator("li", { hasText: "ZZ annuler — relance" }).first()).toBeVisible();
     await expect(async () => {

@@ -74,6 +74,14 @@ export async function zonesTactiles(conteneur: Locator, min = 44): Promise<void>
         l = Math.max(l, r.width - Math.min(0, px(a.left)) - Math.min(0, px(a.right)));
         h = Math.max(h, r.height - Math.min(0, px(a.top)) - Math.min(0, px(a.bottom)));
       }
+      // Un lien ÉTIRÉ (`before:absolute inset-0`, la ligne d'une liste) répond
+      // sur toute sa ligne : sa zone est celle de son bloc conteneur.
+      const avant = getComputedStyle(el, "::before");
+      if (avant.content && avant.content !== "none" && avant.position === "absolute" && el.offsetParent) {
+        const c = (el.offsetParent as HTMLElement).getBoundingClientRect();
+        l = Math.max(l, c.width);
+        h = Math.max(h, c.height);
+      }
       if (l < min - 0.5 || h < min - 0.5) {
         const nom = (el.getAttribute("aria-label") ?? el.textContent ?? el.tagName).trim().replace(/\s+/g, " ").slice(0, 30);
         out.push(`${nom} (${Math.round(l)}×${Math.round(h)})`);

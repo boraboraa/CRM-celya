@@ -122,7 +122,8 @@ export function FiltresProspects({
   }
 
   const quiActif = qui?.find((o) => o.actif)?.href ?? "";
-  const menu = "input min-h-[40px] w-auto py-1.5 text-xs";
+  // 40 px à la souris, 44 au doigt (3/11 — un iPad en paysage a cette ligne).
+  const menu = "input min-h-[44px] w-auto py-1.5 text-xs souris:min-h-[40px]";
 
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -132,7 +133,7 @@ export function FiltresProspects({
           type="search"
           value={texte}
           onChange={(e) => setTexte(e.target.value)}
-          className="input min-h-[40px] py-1.5"
+          className="input min-h-[44px] py-1.5 souris:min-h-[40px]"
           placeholder="Rechercher : société, contact, téléphone, ville…"
           aria-label="Rechercher une fiche"
           autoComplete="off"

@@ -209,7 +209,7 @@ export function ListeProspects({
           return (
             <li
               key={p.id}
-              className={`rendu-paresseux relative px-3 py-2.5 transition xl:grid xl:items-center xl:gap-3 xl:py-2 xl:hover:bg-white/[0.025] ${
+              className={`relative px-3 py-2.5 transition xl:grid xl:items-center xl:gap-3 xl:py-2 xl:hover:bg-white/[0.025] ${
                 admin ? GRILLE_ADMIN : GRILLE
               } ${choisies.has(p.id) ? "bg-celya-blue/[0.06]" : ""}`}
             >
@@ -256,9 +256,11 @@ export function ListeProspects({
                         sous le nom plus étroit. */}
                     <PastilleRegion region={p.region} className="hidden min-w-0 max-w-[11rem] shrink-[0.2] xl:inline-flex" />
                     {qui && (
-                      // Sur la ligne du nom à partir de `xl` seulement : plus étroit, le nom,
-                      // l'étiquette Janet et l'avatar ne laissent pas de quoi lire.
-                      <span className="hidden min-w-[3rem] max-w-[45%] truncate text-xs text-slate-400 xl:inline" title={qui}>
+                      // Sur la ligne du nom à partir de `2xl` seulement (3/11) : à
+                      // `xl` (1280), la colonne du nom ne tient pas le nom, la
+                      // région ET le contact — le contact sortait de 15 px et la
+                      // région était écrasée. Il passe sous le nom jusqu'à 1536.
+                      <span className="hidden min-w-[3rem] max-w-[45%] truncate text-xs text-slate-400 2xl:inline" title={qui}>
                         {qui}
                       </span>
                     )}
@@ -269,8 +271,8 @@ export function ListeProspects({
                       </span>
                     )}
                   </p>
-                  <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400 xl:hidden">
-                    <PastilleRegion region={p.region} className="max-w-[60%] shrink-0" />
+                  <p className={`mt-0.5 min-w-0 items-center gap-1.5 text-xs text-slate-400 ${qui ? "flex 2xl:hidden" : "flex xl:hidden"}`}>
+                    <PastilleRegion region={p.region} className="max-w-[60%] shrink-0 xl:hidden" />
                     {qui && (
                       <span className="min-w-[3rem] truncate" title={qui}>
                         {qui}

@@ -389,7 +389,7 @@ export function PipelineBoard({
                           setDragId(null);
                           setOverColumn(null);
                         }}
-                        className={`card card-hover card-lift rendu-paresseux border-l-4 p-3.5 ${
+                        className={`card card-hover card-lift border-l-4 p-3.5 ${
                           glissable
                             ? // Pas d'aperçu de lien pendant un déplacement
                               // (iPad avec trackpad : souris ET appui long).

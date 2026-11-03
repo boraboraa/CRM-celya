@@ -53,15 +53,6 @@ body {
     animation: none;
   }
 
-  /* Rendu paresseux des longues listes (3/11) : une carte ou une ligne hors
-     de l'écran n'est ni mise en page ni peinte tant qu'on n'y défile pas — la
-     recherche dans la page (⌘F) la trouve quand même. La hauteur réservée
-     évite que la barre de défilement saute. */
-  .rendu-paresseux {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 96px;
-  }
-
   /* La feuille du bas monte depuis le bord : 150 ms, l'élan d'un tiroir. */
   .animate-feuille {
     animation: feuille 150ms cubic-bezier(0.32, 0.72, 0, 1) both;

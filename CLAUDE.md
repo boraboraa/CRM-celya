@@ -7,203 +7,153 @@ contexte acquis : ne le redemande pas.
 
 ## État au 3 novembre 2026 — l'iPad tactile, le filtre métier, les filtres gardés au retour
 
-**PLAN — EN ATTENTE DE L'ACCORD DE BORA, RIEN N'EST CODÉ.** Branche
-`claude/ipad-tactile-filtres`, une seule PR. Aucune migration. Demande : Colin
-(commercial) travaille sur iPad — des taps perdus ou posés sur la mauvaise
-relance, une app peu fluide ; et Bora veut un filtre par métier et des filtres
-qui ne disparaissent plus au retour d'une fiche.
+Demande : Colin (commercial) travaille sur **iPad** — des taps perdus ou posés
+sur la mauvaise relance, une app peu fluide ; et Bora veut un **filtre par
+métier** et des **filtres qui ne disparaissent plus** au retour d'une fiche.
+Plan validé par Bora le 3/11 (avec trois ajustements, intégrés ci-dessous),
+codé sur `claude/ipad-tactile-filtres`, UNE PR. **Aucune migration.**
 
-### Le diagnostic, revérifié dans le code le 3/11
+### La règle : `souris:` pour les CIBLES, `lg:` pour la MISE EN PAGE
 
-Confirmé, avec quatre corrections :
+La version « ordinateur » se choisissait à la LARGEUR : un iPad en paysage
+(1180 px) ou un iPad Pro (1024 px) recevait les cibles d'une souris — case de
+20 px, « Résultat » en lien de 11 px, croix de 12 px, date à 36 px — et 14
+`sm:min-h-0` retiraient les 44 px dès 640 px (l'iPad PORTRAIT aussi). Pire :
+en paysage, le menu d'étape d'une carte du pipeline était `lg:hidden` — au
+doigt, sans glisser-déposer, **aucun moyen de changer l'étape**.
 
-1. **Juste** : la version « ordinateur » se choisit à la LARGEUR. 77 bascules
-   `lg:` dans 19 fichiers ; dans `TaskRow`, à partir de 1024 px, la case perd
-   sa zone de 44 px (`lg:m-0 lg:h-5 lg:w-5`), « Résultat » et « Débriefer le
-   RDV » deviennent des liens de 11 px, la croix fait 12 px (`px-2 py-1`), la
-   date `min-h-[36px]`. **À ajouter** : **14 `sm:min-h-0`** (agenda,
-   `AgendaGrid`, `AppelTest`, `Ecran` des appels IA) qui retirent les 44 px dès
-   640 px — l'iPad en portrait (820 px) est donc touché aussi, pas seulement le
-   paysage.
-2. **Juste** : `appliquerPatch` retire la ligne cochée ; `revalidatePath` re-rend.
-3. **Juste** : `done = t.status === "fait" ? "0" : "1"` ; la case n'est PAS
-   `disabled` pendant l'enregistrement (seulement `opacity-60`) ; `enCours` est
-   un seul `string | null`.
-4. **Juste** : `.card-hover` / `.card-lift` et les `hover:` restent collés au tap.
-5. **Juste, et pire que prévu** : en paysage (≥ 1024 px), le menu d'étape de
-   la carte du pipeline est **`lg:hidden`** — au doigt, sans glisser-déposer,
-   **il n'y a AUCUN moyen de changer l'étape**. Il faut l'afficher au pointeur
-   grossier, pas à la largeur.
-6. **Juste** : `.card` porte `backdrop-blur-sm` ; 4 autres `backdrop-blur`
-   (RechercheGlobale, BarreOnglets, FeuilleBas, en-tête mobile) — tous les
-   quatre ont réellement du contenu dessous. 3 `transition-all`.
-7. **Juste** : pas d'iPad dans `playwright.config.ts`.
-8. **Juste** : pas de secteur dans `ParamsProspects` ; retours en dur vers
-   `/prospects` dans la fiche, `import`, `nouveau`, `ZonesAFaire`, `ImportWizard`,
-   `SupprimerFiche` (après suppression), et l'onglet de `lib/nav.ts`.
-   **Correction** : le balayage de l'agenda n'existe que sur téléphone (vue
-   Jour, `sm:hidden`) — l'iPad n'en a pas ; il rejette déjà un geste à plus de
-   40 px de vertical. **Correction** : `Nav` et `BarreOnglets` sont des
-   composants CLIENT dans un layout qui ne se re-rend pas à la navigation : le
-   lien de l'onglet se calcule donc côté client (relu à chaque changement de
-   page), et la page serveur sert de filet (voir lot 6).
+- **`lib/pointeur.ts`** : LA requête (`REQUETE_SOURIS` = `(hover: hover) and
+  (pointer: fine)`, `REQUETE_DOIGT` = `(pointer: coarse)`), `deplacable`,
+  `balayage`. `tailwind.config.ts` l'importe : écran **`souris:`** et
+  `future.hoverOnlyWhenSupported` (un `hover:` n'existe plus qu'à la souris —
+  il restait collé au tap). `globals.css` la recopie (vérifié par le test).
+- Les bascules de CIBLE passent à `lg:souris:` / `sm:souris:` (TaskRow, fiche,
+  pipeline, agenda, appels IA) : à la souris, RIEN ne change ; au doigt, la
+  rangée tactile (Appeler · Résultat · date, 44 px) reste, à toute largeur.
+  Les bascules de MISE EN PAGE restent `lg:` — **chacune inventoriée** dans
+  `lib/pointeur.test.ts` (`MISE_EN_PAGE`) : un nouveau `lg:` fait rougir le
+  test tant qu'il n'est pas classé.
+- **Le filet des 44 px** (`globals.css`, au doigt) : toute cible (`button`,
+  `a[href]`, `[role=button]`, `summary`, `label` cliquable) reçoit une
+  pseudo-zone `::after` centrée qui ne s'étend que de ce qui manque
+  (`min(0px, 50% - 22px)`), sous `:where()` (spécificité nulle : une classe
+  `absolute`/`fixed` l'emporte), `isolation: isolate` + `z-index: -1` (un
+  bouton logé dans un `label` reste touchable), jamais sur un élément qui
+  porte déjà un `before:`/`after:` (le lien étiré d'une ligne). `select` :
+  `min-height: 44px`. Exclure à la main : `.zone-libre`.
+- `touch-action: manipulation` sur `html` ; les champs à 16 px (anti-zoom
+  iOS) suivent `(pointer: coarse)`, plus `max-width: 639px` ; `.card-lift`
+  n'existe qu'à la souris.
+- Trouvé au passage : à 1280 px, la ligne de la liste mettait nom + région +
+  contact sur une colonne trop étroite (contact sorti de 15 px, région écrasée
+  à 29 px) — le contact rejoint la ligne du nom à `2xl` seulement.
 
-### Lot 1 — Tactile d'abord : le pointeur, pas la largeur
+### Les gestes sûrs sur les relances
 
-- **Change** : `tailwind.config.ts` — écran `souris: { raw: "(hover: hover)
-  and (pointer: fine)" }` et `future.hoverOnlyWhenSupported` (Tailwind 3.4.19,
-  vérifié dans le verrou). Chaque bascule de **taille/cible** passe de `lg:` à
-  `souris:` (ou `lg:souris:` quand la largeur compte aussi) ; les bascules de
-  **mise en page** restent `lg:` — l'inventaire complet des 77 `lg:` et des 14
-  `sm:min-h-0`, classé, est dans la PR. `TaskRow` sur iPad : case 44 px,
-  « Résultat » / « Débriefer » en vrais boutons de 44 px, croix 44 × 44, date
-  44 px. Le menu d'étape du pipeline : `lg:souris:hidden` (visible au doigt,
-  à toute largeur). `globals.css` : filet `@media (pointer: coarse)` — toute
-  cible interactive fait 44 × 44 de ZONE (pseudo-élément `::after` étendu
-  quand agrandir le dessin casserait la ligne) ; `.card-lift` sous souris
-  seulement ; `touch-action: manipulation` sur `html` ; la règle des champs à
-  16 px passe de `max-width: 639px` à `(pointer: coarse)`. La règle du
-  pointeur vit dans **`lib/pointeur.ts`** (requête unique, partagée par
-  Tailwind, la CSS et le hook client du lot 3).
-- **Affecté** : `tailwind.config.ts`, `app/globals.css`, `TaskRow`,
-  `PipelineBoard`, `DebriefList`, `Timeline`, `RepliMobile`, `PerimetreSwitcher`,
-  `ui.tsx` (`PageHeader`), fiche prospect (`tel:` visibles), `AgendaGrid`,
-  `agenda/page.tsx`, appels IA (`AppelTest`, `Ecran`). Aucune action serveur,
-  aucun outil MCP. Ordinateur à la souris : **inchangé**.
-- **Testé** : `test:pointeur` (nouveau) — la requête unique, et un GARDE-FOU
-  de structure qui relit les `.tsx` : plus aucune cible réduite par `lg:` ou
-  `sm:min-h-0` (liste blanche des bascules de mise en page) ; banc Playwright
-  (lot 7) : cibles ≥ 44 px au toucher, compactes à la souris.
+`lib/crm/gesteRelance.ts` (pur) + **`useGesteRelance`** (`TaskList.tsx`, il
+remplace `useOptimisticTasks`). Cocher, rouvrir, supprimer : la ligne **reste
+à sa place**, barrée, « Faite · Annuler » (44 px) pendant **1,5 s**, puis se
+**replie en hauteur** (180 ms) — rien ne remonte sous le doigt. Un tap sur une
+ligne engagée est **ignoré** ; la case des relances ouvertes envoie TOUJOURS
+`done = "1"`, celle des relances passées (`sens="rouvrir"`) toujours `"0"`
+(`valeurDone`) — un double tap ne rouvre plus rien. `enCours` est un
+**ensemble**. La liste revalidée par le serveur ne fait ni réapparaître une
+ligne repliée ni glisser une ligne engagée (`vueStable` : une ligne retirée
+par le serveur revient sous sa plus proche voisine du dessus, jamais à un
+index absolu — ce qu'un test a attrapé). « Annuler » d'une relance cochée la
+rouvre et la TIENT à sa place jusqu'à la réponse (`retour`). **Une
+suppression ne part qu'à la fin du délai**, ou tout de suite si l'écran se
+démonte ou si l'app passe en arrière-plan (`visibilitychange`, `pagehide`).
+Au doigt, « Annuler » prend la place EXACTE de la rangée d'actions (0 px de
+décalage, mesuré) ; à la souris, celle de la date. Case et boutons
+`disabled` + `aria-busy` pendant l'envoi.
+**`lib/unSeulEnvoi.ts`** (`creerVerrou`, `lancerUneFois`) : un envoi ne part
+jamais deux fois — posé dans le gestionnaire, avant tout rendu (600 ms
+anti-rebond), sur `ResultatAppel`, `NextActionCard`, `DebriefRdv`, `QuickNote`.
 
-### Lot 2 — Gestes sûrs sur les relances
+### Pipeline et agenda au doigt
 
-- **Change** : un module pur **`lib/crm/gesteRelance.ts`** (la machine à
-  états d'une ligne : `en_cours` → `fait_visible` (barrée, estompée,
-  « Annuler », ~1,5 s) → `repli` (150-200 ms) → `parti` ; idempotence : un tap
-  sur une ligne en cours ou en repli est IGNORÉ ; ce que le serveur renvoie ne
-  re-montre pas une ligne en repli et ne réordonne pas une ligne sous le
-  doigt). Un hook unique **`useGesteRelance`** remplace `useOptimisticTasks`
-  (un `Set` des lignes en cours, plus un seul `string`). La case des relances
-  OUVERTES envoie toujours `done = "1"` ; seule la liste des relances passées
-  envoie `"0"` (prop explicite `sens`, plus de déduction depuis le statut).
-  Case et boutons `disabled` + `aria-busy` pendant l'enregistrement.
-  « Annuler » rejoue l'inverse : rouvrir pour « fait » ; pour une
-  suppression (irréversible en base), l'écriture ne part qu'à la fin du
-  délai — ou tout de suite si l'on quitte l'écran —, et « Annuler » la
-  retient simplement. Vérifié et durci au même motif :
-  `ResultatAppel` (déjà `disabled={pending}`), `NextActionCard`,
-  `ChoixRelance`, `DebriefRdv`, `QuickNote` — un envoi ne part jamais deux fois.
-- **Affecté** : `TaskList` (et ses appelants `ZonesAFaire`, `RelancesSection`,
-  fiche), `TaskRow`, les cinq composants ci-dessus. Actions serveur
-  **inchangées** (`completeTaskAction`, `deleteTaskAction`…) ; MCP inchangé.
-- **Testé** : `test:geste-relance` (nouveau) — double tap = une seule
-  écriture, jamais « rouvrir » ; deux lignes en cours en même temps (la fin de
-  l'une n'efface pas l'autre) ; « Annuler » pendant le délai ; la liste
-  revalidée qui arrive pendant le repli ; échec serveur → la ligne revient avec
-  le message. Banc : double tap sur iPad.
+`components/useSouris.ts` (écouté en direct) : le **glisser-déposer n'existe
+qu'à la souris** (`deplacable`) — au doigt, une carte est un lien, sans
+`cursor-grab` ; `-webkit-touch-callout: none` sur ce qui se glisse. Le menu
+d'étape de la carte : `lg:souris:hidden`. Agenda : même règle pour reporter un
+RDV ; le balayage (téléphone) exige un geste franchement horizontal
+(|dx| ≥ 60 et ≥ 2 × |dy|).
 
-### Lot 3 — Pipeline et agenda au doigt
+### Fluidité
 
-- **Change** : un hook **`useSouris()`** (`components/useSouris.ts`, sur la
-  requête de `lib/pointeur.ts`, écouté en direct : souris branchée ou
-  débranchée). `PipelineBoard` : `draggable` seulement à la souris ; au doigt
-  la carte est un lien, sans `cursor-grab` ; le menu d'étape (lot 1) au doigt
-  en 44 px ; `-webkit-touch-callout: none` sur les cartes déplaçables.
-  `AgendaGrid` : même règle pour le déplacement des RDV ; le balayage (téléphone)
-  exige en plus un geste franchement horizontal (|dx| > 2 × |dy|).
-- **Affecté** : `PipelineBoard`, `AgendaGrid`. Rien côté serveur.
-- **Testé** : `test:pointeur` (la décision « déplaçable » et la règle du
-  balayage, pures) ; banc : au doigt, un tap ouvre la fiche, un appui long ne
-  déplace rien ; à la souris, le glisser-déposer marche toujours.
+`.card` sans `backdrop-blur` (fond plat — les quatre flous restants ont du
+contenu dessous et le disent en commentaire) ; plus de `transition-all` ;
+`animate-rise` décalé pour les 6 premiers seulement (`lib/apparition.ts`) et
+coupé au retour sur une page déjà vue (`MemoireApparition`, `data-revu` sur
+`<html>`). **`content-visibility` a été ESSAYÉ puis RETIRÉ** : une ligne hors
+écran prend la hauteur réservée (96 px) au lieu de la sienne — la position de
+défilement restaurée au retour tombait à côté, et le contrôle des cadres
+mesurait des débordements fantômes. Mesuré (page de démonstration LOCALE,
+80 fiches fictives, iPad paysage tactile, CPU ×4, médianes de 5) : défilement
+**21–26 ms → 16,4 ms par image** (≈ 60 i/s) ; chargement inchangé (± 10 %).
 
-### Lot 4 — Fluidité
+### Le filtre par métier
 
-- **Change** : `.card` sans `backdrop-blur` (fond plat) ; les 4 flous gardés
-  (contenu réellement dessous), chacun avec son commentaire ; `transition-all`
-  → la transition réelle ; `animate-rise` : décalage plafonné aux 6 premières
-  cartes, et rien ne s'anime au retour sur une page déjà vue (mémoire de
-  session) ; `content-visibility: auto` + `contain-intrinsic-size` sur les
-  lignes de la liste et les cartes du pipeline (vérifié : la recherche ⌘F du
-  navigateur et le défilement restent justes — sinon retiré).
-- **Affecté** : `globals.css`, `PipelineBoard`, `ListeProspects`, les
-  composants à `transition-all`.
-- **Testé** : `rienNeDepasse` sur toutes les pages (le `content-visibility`
-  ne doit rien couper) ; **mesure avant/après dans la PR** — `/prospects`
-  (Pipeline) et `/dashboard`, tactile 1180 px, CPU ×4 dans Chromium, sur la
-  page de démonstration LOCALE aux fiches fictives (comme le 27/10 : aucune
-  donnée de production) si aucun compte de test n'est disponible.
+`ParamsProspects.secteur`, **`secteurConnu`** (une des quinze `SECTEURS`, rien
+d'autre — comme `statutConnu`), `hrefProspects`, puce « Garage / carrosserie
+✕ », `nettoyerParams`. Page : `.eq("sector", …)`, combiné à tout le reste.
+Menu « Métier » à côté de « Région » (ordinateur, iPad paysage) et dans la
+feuille « Filtres » (téléphone, iPad portrait). **Le nombre de fiches par
+métier** : `lib/crm/comptesSecteurs.ts` — **quinze comptages `head: true` en
+parallèle** (jamais les fiches rapatriées : PostgREST plafonne à 1 000
+lignes), chacun borné comme la liste (même périmètre, perdues masquées) ; un
+échec → menu sans chiffres. MCP : `lister_prospects(secteur)` (même
+validation, `metier` dans les lignes).
 
-### Lot 5 — Filtre par métier
+### Les filtres gardés au retour
 
-- **Change** : `ParamsProspects.secteur`, `secteurConnu()` (une valeur de
-  `SECTEURS` ou rien, comme `statutConnu`), gérée par `hrefProspects`,
-  `filtresActifs` (puce « Garage / carrosserie ✕ ») et `nettoyerParams`. Page :
-  `.eq("sector", secteur)`, combiné à l'étape, la région, la recherche, le
-  tri et le périmètre. Menu « Métier » à côté de « Région » (ordinateur et
-  iPad) et dans `FeuilleFiltres` ; le compte par métier vient d'**une** requête
-  légère (`select sector` dans le périmètre, comptée en mémoire — PostgREST
-  n'agrège pas sans RPC, et une RPC serait une migration). MCP
-  `lister_prospects(secteur)`, validé par la même fonction.
-- **Affecté** : `lib/crm/filtresProspects.ts`, `prospects/page.tsx`,
-  `AffichageProspects`, `FiltresProspects`, `FeuilleFiltres`,
-  `app/[transport]/route.ts`.
-- **Testé** : `test:filtres` étendu (valide, inconnu, combiné, nettoyé de
-  l'URL, puce et son retrait).
+Cookie **`celya_filtres`** (`SameSite=Lax`, expire à **minuit, heure de
+Bruxelles**), écrit par le NAVIGATEUR (`MemoireFiltres`, monté dans
+`AffichageProspects`), valeur `AAAA-MM-JJ|<filtres>` — un cookie d'un autre
+jour est ignoré. Seuls les filtres (`q` non vide, `statut`, `region`,
+`secteur`, `filtre`, `tri`) ; vue et périmètre ont leurs cookies. Relu et
+**revalidé comme une URL** (`lireCookieFiltres`). **UN utilitaire,
+`lienListeProspects`** : le retour de la fiche, `import`, `nouveau`, « À
+faire » (`lienListeServeur`, serveur), l'onglet Prospects (`Nav`,
+`BarreOnglets` via `lienOnglet` + `useLienListe`, relu à chaque page et à
+chaque changement de filtre), `ImportWizard`, `SupprimerFiche`.
+**`/prospects` SANS AUCUN paramètre redirige vers la liste retenue**
+(`redirectionListe`) ; le moindre paramètre l'emporte. **« Tout effacer »
+vide le cookie lui-même** (`ToutEffacer`, 44 px, à côté des puces — visibles
+sur TOUS les écrans désormais) ; `?filtres=aucun` n'est qu'un SECOURS, posé
+par `hrefProspects` et `FiltresProspects` quand une liste devient vide (sans
+lui, la dernière puce retirée ramenait l'ancien filtre : la requête part avec
+l'ancien cookie). La position de défilement est retenue par URL
+(`sessionStorage`, try/catch) et rendue avant la peinture. Le retour « À
+faire » (`?depuis=a-faire`) ne change pas. **Règle : plus aucun
+`href="/prospects"` en dur pour revenir à la liste** — garde-fou dans
+`test:filtres-memorises`.
 
-### Lot 6 — Les filtres gardés au retour
+### Les tests
 
-- **Change** : cookie **`celya_filtres`** (`SameSite=Lax`, expire à minuit,
-  heure de Bruxelles), écrit par le navigateur quand les filtres changent.
-  Valeur : `AAAA-MM-JJ|<chaîne de requête>` — la date de Bruxelles du jour
-  d'écriture : un cookie d'un autre jour est IGNORÉ même si le navigateur le
-  garde (horloge, cookie trafiqué). Ne retient que les filtres (`q` non vide,
-  `statut`, `secteur`, `region`, `filtre`, `tri`) ; la vue et le périmètre ont
-  déjà leurs cookies. Relu et **revalidé comme une URL** (`nettoyerParams`,
-  `secteurConnu`, `lireFiltreRegion`…). UN utilitaire,
-  **`lienListeProspects(cookie, maintenant)`** : le retour de la fiche,
-  l'onglet Prospects (`Nav`, `BarreOnglets` — calculé côté client à chaque
-  changement de page), `ZonesAFaire`, `import`, `nouveau`, `ImportWizard`,
-  `SupprimerFiche`. `/prospects` SANS aucun paramètre et un cookie valide →
-  redirection serveur vers la liste mémorisée (filet pour tout lien resté
-  nu). Une liste VIDE explicite (« Tout effacer », dernière puce retirée,
-  lien partagé) porte le marqueur **`?filtres=aucun`**, qui l'emporte sur le
-  cookie ; « Tout effacer » (44 px, à côté des puces) vide aussi le cookie.
-  La position de défilement est mémorisée par URL (`sessionStorage`, en
-  try/catch) et restaurée au retour sans saut. Le retour « À faire »
-  (`?depuis=a-faire`) ne change pas.
-- **Affecté** : `lib/crm/filtresProspects.ts`, `lib/nav.ts`, `Nav`,
-  `BarreOnglets`, `prospects/page.tsx`, fiche, `import`, `nouveau`,
-  `ZonesAFaire`, `ImportWizard`, `SupprimerFiche`, `AffichageProspects` /
-  puces. MCP : rien.
-- **Testé** : `test:filtres-memorises` (nouveau) — cookie valide, trafiqué
-  (statut retiré, secteur inventé, clé inconnue, injection d'URL), d'un autre
-  jour, minuit de Bruxelles (heure d'été et d'hiver), `?` explicite qui
-  l'emporte, « Tout effacer », et un garde-fou de structure : **aucun
-  `href="/prospects"` ni `push("/prospects")` en dur** dans `app/` et
-  `components/`. Banc : filtrer métier + région, ouvrir une fiche, revenir
-  (lien, puis bouton retour du navigateur) → mêmes filtres, mêmes fiches.
-
-### Lot 7 — L'iPad dans le banc
-
-- **Change** : `ipad-portrait` 820 × 1180 et `ipad-paysage` 1180 × 820
-  (`isMobile: false`, `hasTouch: true`, `deviceScaleFactor: 2`, agent Safari
-  iPadOS, qui se dit Mac), × deux rôles. Nouveaux cas (fiches « ZZ Test
-  mobile » seulement) : cibles ≥ 44 px au toucher (`/dashboard`, `/prospects`
-  liste ET pipeline, fiche, `/agenda`) ; double tap sur une relance ; rien ne
-  déborde en portrait et en paysage ; filtres gardés ; pipeline au doigt.
-  Ordinateur 1280 à la souris : cibles compactes, survol, glisser-déposer.
-- ⚠ Le banc demande un serveur ET les deux comptes de test ; ils ont été
-  supprimés en octobre. S'ils ne sont pas recréés, la PR le dira clairement,
-  et les contrôles tourneront sur la page de démonstration locale.
-
-### Les règles qui en sortent (à retenir)
-
-- **`souris:` pour les cibles, `lg:` pour la mise en page.** Une cible ne
-  rétrécit jamais à cause de la largeur : un iPad paysage a la mise en page
-  large et des cibles de doigt.
-- **Pas de `href` en dur vers la liste** : `lienListeProspects`, testé.
-- **Un geste en un tap est idempotent** : une ligne en cours ignore le
-  second tap ; la case d'une relance ouverte ne sait que « faire ».
+Nouveaux : **`test:pointeur`** (la requête unique, le filet, glisser,
+balayage, apparition, et l'inventaire des `lg:`), **`test:geste-relance`**
+(double tap, deux lignes à la fois, horloge, « Annuler », arrière-plan,
+échec, verrou), **`test:filtres-memorises`** (cookie valide / trafiqué /
+d'un autre jour, minuit été-hiver, `?` explicite, « Tout effacer », garde-fou
+des liens). **`test:filtres`** étendu (métier ; les quinze comptages contre
+un faux client : `head: true`, en parallèle, périmètre sur CHACUN).
+**Le banc** gagne `ipad-portrait` (820 × 1180) et `ipad-paysage`
+(1180 × 820) — tactiles, agent Safari iPadOS (« Macintosh »), `isMobile`
+faux — × deux rôles, et `tests/mobile/ipad.spec.ts` (zones ≥ 44 au toucher via
+`zonesTactiles`, débordements, double tap en base, « Annuler », filtres gardés
+par lien / bouton retour / onglet, « Tout effacer », pipeline au doigt,
+non-régression ordinateur). `contexte()` distingue désormais `mobile` (mise
+en page étroite), `tactile`, `ipad` et `telephone`. Les fiches de test ont un
+métier (Alpha, Beta : garage ; Gamma : autre, à Namur). ⚠ **Le banc réel
+n'a PAS tourné le 3/11** : les comptes de test n'étaient pas encore recréés.
+Ce qui a tourné : la page de démonstration locale (avant = `main`, après =
+la branche, jamais commitée), 5 appareils × 3 écrans — **avant : 27 à 213
+cibles de moins de 44 px par écran au doigt ; après : 0 cible, 0 débordement**
+(et les 3 débordements préexistants à 1280 px corrigés) ; double tap en
+paysage — avant, le doigt finissait sur la relance SUIVANTE (cochée à tort),
+après il reste sur la sienne, ligne suivante immobile (0 px).
 
 ## État au 31 octobre 2026 — plus de « Barrage », « À appeler » = jamais appelée, Perdu l'emporte
 
@@ -3611,7 +3561,8 @@ l'edge et non dans la région des fonctions. Interroger une vraie fonction.
 `npm run test:raccourcis`, `npm run test:maps`, `npm run test:ia`,
 `npm run test:equipe`, `npm run test:agenda`, `npm run test:prochaine-action`,
 `npm run test:debrief`, `npm run test:etapes`, `npm run test:recherche`, `npm run test:fiche-suivante`,
-`npm run test:nav`, `npm run test:filtres`, `npm run test:ajout-rapide`,
+`npm run test:nav`, `npm run test:filtres`, `npm run test:filtres-memorises`,
+`npm run test:pointeur`, `npm run test:geste-relance`, `npm run test:ajout-rapide`,
 `npm run test:relance`,
 `npm run test:secteurs`, `npm run test:regions`, `npm run test:suppression`, `npm run test:perdues`, `npm run test:doublons`, `npm run test:ma-liste`,
 `npm run test:objectifs`, `npm run test:appels`, `npm run test:appels-ecran`, `npm run test:appels-live`,
@@ -3820,6 +3771,20 @@ qui ne rend rien (`BoutonEtoile` en lecture) fait disparaître sa CELLULE de
 grille, et la ligne glisse d'une colonne : une cellule vide explicite. Rien
 de tout cela ne casse avec des données de test courtes — **la page de
 démonstration aux noms très longs et `rienNeDepasse` sont faits pour ça**.
+
+**`content-visibility: auto` et la restauration du défilement ne vont pas
+ensemble (3 novembre 2026).** Une ligne hors écran jamais rendue prend la
+hauteur RÉSERVÉE (`contain-intrinsic-size`), pas la sienne : la page n'a pas
+la même hauteur qu'au départ, et un `scrollTo(y)` retenu tombe sur une autre
+fiche. Le contrôle des cadres, lui, mesure les enfants d'une ligne restée à
+96 px et signale des débordements qui n'existent pas. Essayé, mesuré, retiré :
+le gain réel venait du flou retiré des cartes.
+
+**Le filet des 44 px ne doit jamais toucher un lien étiré (3 novembre 2026).**
+Rendre `position: relative` un lien qui porte `before:absolute inset-0` (la
+ligne entière de la liste est cliquable par lui) réduirait sa zone à son
+texte. D'où `:not([class*="before:"], [class*="after:"])` dans le filet — et
+une mesure de zone qui, pour un tel lien, prend le bloc conteneur.
 
 **Une réponse RSC qui porte un `Set-Cookie`, et l'en-tête `rsc` que le
 middleware ne voit pas (27 octobre 2026).** Mesuré en production : chaque

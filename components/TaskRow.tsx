@@ -318,9 +318,15 @@ export function TaskRow({
 
         {/* Le geste vient d'être fait : la ligne le DIT, à sa place, et offre
             « Annuler » ~1,5 s avant de se replier (lib/crm/gesteRelance.ts). */}
+        {/* Au doigt (et sur la fiche), à la place EXACTE de la rangée d'actions
+            (mêmes marge et hauteur) : la ligne ne change pas de taille, rien
+            ne bouge sous le doigt. À la souris, « Annuler » est à droite du
+            titre, à la place de la date. */}
         {engagee && geste && (
           <p
-            className="geste-annuler mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300"
+            className={`geste-annuler mt-2.5 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300 ${
+              compact ? "flex" : "flex lg:souris:hidden"
+            }`}
             aria-live="polite"
           >
             <span className="inline-flex items-center gap-1">
@@ -444,6 +450,20 @@ export function TaskRow({
           </div>
         )}
       </div>
+
+      {!lecture && engagee && geste && !compact && (
+        <div className="hidden shrink-0 items-center gap-2 text-xs text-slate-300 lg:souris:flex" aria-live="polite">
+          <span className="inline-flex items-center gap-1">
+            <Icone nom={geste.type === "supprime" ? "croix" : "coche"} className="h-3 w-3" />
+            {LIBELLE_GESTE[geste.type]}
+          </span>
+          {onAnnuler && (
+            <button type="button" onClick={onAnnuler} className="btn-ghost min-h-[36px] px-3 py-1 text-xs">
+              Annuler
+            </button>
+          )}
+        </div>
+      )}
 
       {!lecture && !done && !geste && !compact && (
         // Ordinateur : à droite du titre, la date — un clic déplie le choix

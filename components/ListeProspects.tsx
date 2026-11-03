@@ -209,7 +209,7 @@ export function ListeProspects({
           return (
             <li
               key={p.id}
-              className={`relative px-3 py-2.5 transition xl:grid xl:items-center xl:gap-3 xl:py-2 xl:hover:bg-white/[0.025] ${
+              className={`rendu-paresseux relative px-3 py-2.5 transition xl:grid xl:items-center xl:gap-3 xl:py-2 xl:hover:bg-white/[0.025] ${
                 admin ? GRILLE_ADMIN : GRILLE
               } ${choisies.has(p.id) ? "bg-celya-blue/[0.06]" : ""}`}
             >
@@ -321,7 +321,9 @@ export function ListeProspects({
                         disabled={pending}
                         aria-label={`Étape de ${p.company_name}`}
                         title="Changer l'étape — ce choix est alors verrouillé"
-                        className="absolute inset-0 h-full min-h-[36px] w-full cursor-pointer appearance-none opacity-0"
+                        // 44 px de haut au doigt, centrés sur la puce (3/11) : la
+                        // zone déborde de la puce, pas de la ligne.
+                        className="absolute inset-x-0 top-1/2 h-full min-h-[36px] w-full -translate-y-1/2 cursor-pointer appearance-none opacity-0 [@media(pointer:coarse)]:min-h-[44px]"
                       >
                         {STATUS_ORDER.map((s) => (
                           <option key={s} value={s} className="bg-[#121829] text-slate-100">

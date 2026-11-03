@@ -8,7 +8,7 @@ import type { TaskWithProspect } from "@/components/TaskRow";
 import {
   MessageErreur,
   TaskRows,
-  useOptimisticTasks,
+  useGesteRelance,
 } from "@/components/TaskList";
 import { dateInputToISO } from "@/lib/time";
 import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
@@ -63,7 +63,8 @@ export function RelancesSection({
    *  Perdu l'emporte (lib/crm/perdues.ts). */
   perdue?: boolean;
 }) {
-  const { vue, erreur, setErreur, enCours, geste } = useOptimisticTasks(openTasks);
+  const etat = useGesteRelance(openTasks);
+  const { vue, erreur, setErreur, optimisteGeste } = etat;
   const [provisoires, setProvisoires] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -82,7 +83,7 @@ export function RelancesSection({
     setProvisoires((s) => new Set(s).add(idProvisoire));
     formRef.current?.reset();
 
-    geste(
+    optimisteGeste(
       idProvisoire,
       {
         type: "ajoute",
@@ -122,9 +123,7 @@ export function RelancesSection({
       ) : (
         <ul className="card divide-y divide-white/[0.05]">
           <TaskRows
-            vue={vue}
-            enCours={enCours}
-            geste={geste}
+            etat={etat}
             compact
             lecture={(i) => lectureSeule || (premiereDansLaCarte && i === 0)}
             provisoires={provisoires}

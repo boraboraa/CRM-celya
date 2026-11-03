@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LISTE_PROSPECTS } from "@/lib/crm/filtresProspects";
 import {
   EmptyState,
   Icone,
@@ -39,6 +40,7 @@ export function ZonesAFaire({
   waiting,
   replies,
   admin,
+  lienListe = LISTE_PROSPECTS,
 }: {
   /** L'agenda du jour, déjà dérivé (`ligneAgendaJour`). */
   lignesJour: LigneAgendaJour[];
@@ -49,6 +51,8 @@ export function ZonesAFaire({
   waiting: WaitingProspect[];
   replies: ReplyCardEmail[];
   admin: boolean;
+  /** La liste des prospects telle qu'on l'a laissée (filtres retenus, 3/11). */
+  lienListe?: string;
 }) {
   const nothingAtAll =
     overdue.length +
@@ -168,7 +172,7 @@ export function ZonesAFaire({
         <EmptyState
           title="Rien à faire aujourd'hui"
           hint="Posez une relance ou un rendez-vous sur une fiche prospect : il remontera ici à sa date."
-          href="/prospects"
+          href={lienListe}
           cta="Voir les prospects"
         />
       ) : (

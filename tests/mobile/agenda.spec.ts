@@ -3,8 +3,8 @@ import { ciblesTactiles, contexte, MARQUE_E2E, nettoyer, sessionDe } from "./out
 
 /** Lot C — l'agenda au téléphone. */
 
-test("vue par défaut : Jour sur téléphone, Semaine sur ordinateur", async ({ page }, info) => {
-  const { mobile, role } = contexte(info);
+test("vue par défaut : Jour sur téléphone, Semaine sur ordinateur (et sur iPad)", async ({ page }, info) => {
+  const { telephone: mobile, role } = contexte(info);
   await page.goto(role === "admin" ? "/agenda?perimetre=moi" : "/agenda");
   const jour = page.getByRole("link", { name: "Jour", exact: true });
   const semaine = page.getByRole("link", { name: "Semaine", exact: true });
@@ -25,7 +25,7 @@ test("vue par défaut : Jour sur téléphone, Semaine sur ordinateur", async ({ 
 });
 
 test("téléphone : la liste du jour, au pouce", async ({ page }, info) => {
-  const { mobile, role } = contexte(info);
+  const { telephone: mobile, role } = contexte(info);
   test.skip(!mobile || role !== "commercial", "le RDV de test du jour est au commercial");
   await page.goto("/agenda");
   const liste = page.getByRole("list", { name: "Rendez-vous du jour" });

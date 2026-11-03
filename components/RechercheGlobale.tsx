@@ -132,6 +132,7 @@ export function RechercheGlobale() {
           qu'à deux résultats. */}
       {ouvert && (
         <div
+          // Flou GARDÉ (3/11) : toute la page passe réellement sous ce voile.
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm sm:px-4 sm:pt-[12vh]"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) fermer();

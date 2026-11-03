@@ -19,6 +19,7 @@ import { StatusControl } from "@/components/StatusControl";
 import { NextActionCard } from "@/components/NextActionCard";
 import { BoutonFicheSuivante } from "@/components/FicheSuivante";
 import { DEPUIS_A_FAIRE } from "@/lib/crm/ficheSuivante";
+import { lienListeServeur } from "@/lib/crm/lienListeServeur";
 import { type TimelineEntry } from "@/components/Timeline";
 import { DraftsSection } from "@/components/DraftsSection";
 import { type TaskWithProspect } from "@/components/TaskRow";
@@ -325,7 +326,8 @@ export default async function ProspectDetailPage({
               À faire
             </Link>
           ) : (
-            <Link href="/prospects" className="btn-link text-xs">
+            // La liste QU'ON AVAIT — filtres et tri retenus (3/11), pas la liste nue.
+            <Link href={await lienListeServeur()} className="btn-link text-xs">
               <Icone nom="chevron" className="h-3 w-3 rotate-90" />
               Tous les prospects
             </Link>
@@ -370,7 +372,7 @@ export default async function ProspectDetailPage({
               {telFiche && (
                 <a
                   href={telFiche}
-                  className="hidden text-celya-blue hover:underline lg:inline"
+                  className="hidden text-celya-blue hover:underline lg:souris:inline"
                 >
                   {prospect.phone}
                 </a>
@@ -378,7 +380,7 @@ export default async function ProspectDetailPage({
               {prospect.email && (
                 <a
                   href={`mailto:${prospect.email}`}
-                  className="hidden text-celya-blue hover:underline lg:inline"
+                  className="hidden text-celya-blue hover:underline lg:souris:inline"
                 >
                   {prospect.email}
                 </a>
@@ -409,7 +411,7 @@ export default async function ProspectDetailPage({
                 (19/10) — appeler, et y aller. Un petit lien bleu n'est pas un
                 bouton qu'on vise d'un pouce entre deux visites. */}
             {(telFiche || lienAdresse) && (
-              <div className="mt-3 grid grid-cols-2 gap-2 lg:hidden">
+              <div className="mt-3 grid grid-cols-2 gap-2 lg:souris:hidden">
                 {telFiche ? (
                   <a href={telFiche} className="btn-primary min-h-[48px]">
                     <Icone nom="telephone" className="h-4 w-4" />
@@ -674,6 +676,8 @@ export default async function ProspectDetailPage({
                 </summary>
                 <TaskList
                   tasks={doneTasks}
+                  // Une relance passée se ROUVRE — et la case ne sait faire que ça.
+                  sens="rouvrir"
                   compact
                   className="card mt-2 divide-y divide-white/[0.05]"
                 />

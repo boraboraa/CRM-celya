@@ -11,6 +11,8 @@ import { lireRaccourcis, type Raccourci } from "@/lib/crm/raccourcis";
 import { infoRdvPrevu } from "@/lib/crm/prochaineAction";
 import type { TimelineEntry } from "@/components/Timeline";
 import type { ActivityType, ProspectStatus } from "@/lib/types";
+import { lancerUneFois } from "@/lib/unSeulEnvoi";
+import { useUnSeulEnvoi } from "@/components/useUnSeulEnvoi";
 
 /**
  * La note redevient une note : du TEXTE, et ce que le parseur en lit.
@@ -87,6 +89,8 @@ export function QuickNote({
   const [feedback, setFeedback] = useState<string>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
+  /** Un envoi ne part jamais deux fois (3/11, lib/unSeulEnvoi.ts). */
+  const verrou = useUnSeulEnvoi();
   const [analyzing, startAnalyze] = useTransition();
 
   // ---- Les raccourcis — un parseur DÉTERMINISTE tourne à la frappe (150 ms
@@ -302,7 +306,7 @@ export function QuickNote({
     setError(undefined);
     setFeedback(undefined);
     const provisoire = entreeProvisoire();
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       if (provisoire) onOptimistic?.(provisoire);
       const res = await saveExchangeAction({
         prospectId,

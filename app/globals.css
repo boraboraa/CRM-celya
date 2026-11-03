@@ -6,6 +6,12 @@
   color-scheme: dark;
 }
 
+html {
+  /* Au doigt, un tap est un tap : ni délai d'attente d'un double tap, ni
+     zoom par double tap (3/11). Le pincement pour zoomer reste possible. */
+  touch-action: manipulation;
+}
+
 html,
 body {
   background-color: #0a0e1a;
@@ -21,22 +27,39 @@ body {
    teintaient tout ce qui se posait dessus. */
 
 @layer components {
+  /* Fond plat, SANS flou (3/11) : depuis le retrait des halos, rien ne passe
+     sous une carte — le `backdrop-blur` ne floutait qu'un fond uni, et coûtait
+     cher sur iPad avec des dizaines de cartes à l'écran. Le flou ne reste que
+     là où du contenu défile réellement dessous (barre d'onglets, en-tête du
+     téléphone, recherche, feuille du bas). */
   .card {
-    @apply rounded-2xl bg-space-800/70 ring-1 ring-white/[0.06] backdrop-blur-sm;
+    @apply rounded-2xl bg-space-800/70 ring-1 ring-white/[0.06];
   }
 
+  /* Le survol n'existe qu'à la souris (`hoverOnlyWhenSupported`) : au doigt,
+     la carte ne reste plus « survolée » après le tap. */
   .card-hover {
-    @apply transition-all duration-200 hover:ring-white/15 hover:bg-space-700/70;
-  }
-
-  /* Survol qui soulève légèrement — réservé aux cartes cliquables. */
-  .card-lift {
-    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift;
+    @apply transition-colors duration-200 hover:ring-white/15 hover:bg-space-700/70;
   }
 
   /* Apparition en fondu des listes et colonnes (150–250 ms, rien de plus). */
   .animate-rise {
     animation: rise 220ms ease-out both;
+  }
+
+  /* Une page déjà vue dans la session ne rejoue rien au retour (3/11,
+     components/MemoireApparition.tsx). */
+  :root[data-revu] .animate-rise {
+    animation: none;
+  }
+
+  /* Rendu paresseux des longues listes (3/11) : une carte ou une ligne hors
+     de l'écran n'est ni mise en page ni peinte tant qu'on n'y défile pas — la
+     recherche dans la page (⌘F) la trouve quand même. La hauteur réservée
+     évite que la barre de défilement saute. */
+  .rendu-paresseux {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
   }
 
   /* La feuille du bas monte depuis le bord : 150 ms, l'élan d'un tiroir. */
@@ -147,14 +170,72 @@ body {
   }
 }
 
-/* Tout champ à 16 px sur téléphone : en dessous, Safari iOS zoome la page à
-   chaque champ touché, et ne dézoome pas en sortant. Une règle ici plutôt
-   qu'une classe par champ — les « text-xs » des champs compacts la battraient. */
-@media (max-width: 639px) {
+/* Survol qui soulève légèrement — réservé aux cartes cliquables, et à la
+   SOURIS seule (3/11) : au doigt, le soulèvement restait collé après le tap.
+   La requête est celle de lib/pointeur.ts (REQUETE_SOURIS). */
+@media (hover: hover) and (pointer: fine) {
+  .card-lift {
+    transition: transform 200ms, box-shadow 200ms;
+  }
+  .card-lift:hover {
+    transform: translateY(-0.125rem);
+    box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Tout champ à 16 px AU DOIGT (téléphone ET iPad, 3/11 — c'était la largeur,
+   max-width: 639px, et l'iPad zoomait) : en dessous, Safari iOS zoome la page
+   à chaque champ touché, et ne dézoome pas en sortant. Une règle ici plutôt
+   qu'une classe par champ — les « text-xs » des champs compacts la battraient.
+   La requête est celle de lib/pointeur.ts (REQUETE_DOIGT). */
+@media (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]),
   textarea,
   select {
     font-size: 16px !important;
+  }
+}
+
+/* Le FILET des 44 px, au doigt (3/11) — la requête est REQUETE_DOIGT
+   (lib/pointeur.ts). Toute cible fait au moins 44 × 44 px de ZONE qui répond,
+   sans que le dessin change : une pseudo-zone invisible (`::after`), centrée,
+   qui ne s'étend que de ce qui manque (`min(0px, 50% - 22px)` : rien pour une
+   cible déjà assez grande). Tout est sous `:where()` — spécificité nulle :
+   une classe de l'élément (`absolute`, `fixed`…) l'emporte toujours, et un
+   élément qui porte déjà un `before:`/`after:` (le lien étiré d'une ligne de
+   la liste) est laissé tel quel. `.zone-libre` exclut un élément à la main.
+   Le menu déroulant n'a pas de pseudo-élément : il reçoit une hauteur. */
+@media (pointer: coarse) {
+  :where(
+      :is(button, a[href], [role="button"], summary, label[for], label:has(> input)):not(
+          [class*="before:"],
+          [class*="after:"],
+          .zone-libre
+        )
+    ) {
+    position: relative;
+    /* La pseudo-zone passe SOUS le contenu de la cible (z-index -1 dans son
+       propre contexte d'empilement) : un bouton logé dans un `summary` ou un
+       `label` reste touchable, la zone ne le recouvre pas. */
+    isolation: isolate;
+  }
+  :where(
+      :is(button, a[href], [role="button"], summary, label[for], label:has(> input)):not(
+          [class*="before:"],
+          [class*="after:"],
+          .zone-libre
+        )
+    )::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    top: min(0px, calc(50% - 22px));
+    bottom: min(0px, calc(50% - 22px));
+    left: min(0px, calc(50% - 22px));
+    right: min(0px, calc(50% - 22px));
+  }
+  :where(select) {
+    min-height: 44px;
   }
 }
 

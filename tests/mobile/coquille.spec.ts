@@ -91,7 +91,7 @@ test("en-tête compact : loupe et compte, pas de « Se déconnecter »", async (
 });
 
 test("la recherche prend tout l'écran sur téléphone", async ({ page }, info) => {
-  const { mobile } = contexte(info);
+  const { telephone: mobile } = contexte(info);
   test.skip(!mobile, "téléphone");
   await page.goto("/dashboard");
   await page.locator("header").getByRole("button", { name: /Rechercher/ }).click();

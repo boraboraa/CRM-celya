@@ -20,6 +20,9 @@ import type { LastActionKind } from "@/lib/crm/lastAction";
 import type { ConfidenceLevel, ProspectStatus } from "@/lib/types";
 import { PastilleRegion } from "@/components/PastilleRegion";
 import { communeAffichee } from "@/lib/crm/regions";
+import { deplacable } from "@/lib/pointeur";
+import { delaiApparition } from "@/lib/apparition";
+import { useSouris } from "@/components/useSouris";
 
 /**
  * La couleur de chaque étape, déclinée pour la colonne : bandeau d'en-tête,
@@ -123,6 +126,13 @@ export function PipelineBoard({
   janetIds?: string[];
 }) {
   const parJanet = useMemo(() => new Set(janetIds), [janetIds]);
+  /**
+   * Glisser-déposer à la SOURIS seulement (3/11). Au doigt, une carte
+   * `draggable` qui contient un lien partait en déplacement ou ouvrait
+   * l'aperçu du lien à l'appui long, et accrochait le défilement de côté :
+   * elle est désormais un simple lien, et l'étape se change par son menu.
+   */
+  const souris = useSouris();
   const [dragId, setDragId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<ProspectStatus | null>(null);
   const [justMoved, setJustMoved] = useState<string | null>(null);
@@ -195,7 +205,7 @@ export function PipelineBoard({
         </p>
       )}
 
-      <p className="mb-4 hidden text-xs text-slate-500 lg:block">
+      <p className="mb-4 hidden text-xs text-slate-500 lg:souris:block">
         Faites glisser une fiche d&apos;une colonne à l&apos;autre pour corriger son
         étape — ce choix est alors verrouillé, l&apos;assistant n&apos;y touchera plus.
       </p>
@@ -226,7 +236,7 @@ export function PipelineBoard({
           })}
         </div>
       </div>
-      <p className="mb-3 text-[11px] text-slate-500 lg:hidden">
+      <p className="mb-3 text-[11px] text-slate-500 lg:souris:hidden">
         Pour changer l&apos;étape d&apos;une fiche, utilisez le menu de sa carte — ce
         choix est alors verrouillé.
       </p>
@@ -261,8 +271,14 @@ export function PipelineBoard({
                   setDragId(null);
                   if (id) move(id, status);
                 }}
-                style={{ animationDelay: `${columnIndex * 40}ms` }}
-                className={`w-full shrink-0 animate-rise rounded-2xl p-2 ring-1 transition-all duration-200 lg:block ${
+                style={
+                  delaiApparition(columnIndex) !== null
+                    ? { animationDelay: `${delaiApparition(columnIndex)}ms` }
+                    : undefined
+                }
+                className={`w-full shrink-0 rounded-2xl p-2 ring-1 transition-colors duration-200 lg:block ${
+                  delaiApparition(columnIndex) !== null ? "animate-rise" : ""
+                } ${
                   repliee ? "lg:w-[76px]" : "lg:w-[272px]"
                 } ${
                   status === etapeMobile ? "" : "hidden"
@@ -296,7 +312,7 @@ export function PipelineBoard({
                   {/* Un vrai bandeau dans la couleur de l'étape, compteur
                       dans une pastille de la même teinte. */}
                   <h2
-                    className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition-all duration-200 ${
+                    className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition duration-200 ${
                       COLUMN_BANNER[status]
                     } ${isTarget ? "brightness-125" : ""}`}
                   >
@@ -329,7 +345,7 @@ export function PipelineBoard({
                 <div className="space-y-2.5">
                   {list.length === 0 && (
                     <p
-                      className={`rounded-xl border border-dashed px-3 py-6 text-center text-xs transition-all duration-200 ${
+                      className={`rounded-xl border border-dashed px-3 py-6 text-center text-xs transition-colors duration-200 ${
                         isTarget
                           ? COLUMN_DROP[status]
                           : "border-white/[0.07] text-slate-500"
@@ -354,13 +370,14 @@ export function PipelineBoard({
                     // Le repère d'attente est sur LA carte manipulée, pas sur
                     // l'écran entier : le reste du pipeline reste utilisable.
                     const enregistre = enCours === c.id;
+                    const glissable = deplacable(souris, c.modifiable !== false);
 
                     return (
                       <article
                         key={c.id}
-                        draggable={c.modifiable !== false}
+                        draggable={glissable}
                         onDragStart={(e) => {
-                          if (c.modifiable === false) {
+                          if (!glissable) {
                             e.preventDefault();
                             return;
                           }
@@ -372,10 +389,12 @@ export function PipelineBoard({
                           setDragId(null);
                           setOverColumn(null);
                         }}
-                        className={`card card-hover card-lift border-l-4 p-3.5 ${
-                          c.modifiable === false
-                            ? "cursor-default"
-                            : "cursor-grab active:cursor-grabbing"
+                        className={`card card-hover card-lift rendu-paresseux border-l-4 p-3.5 ${
+                          glissable
+                            ? // Pas d'aperçu de lien pendant un déplacement
+                              // (iPad avec trackpad : souris ET appui long).
+                              "cursor-grab active:cursor-grabbing [-webkit-touch-callout:none]"
+                            : ""
                         } ${
                           STATUS_EDGE[c.status]
                         } ${
@@ -474,7 +493,7 @@ export function PipelineBoard({
                           value={c.status}
                           onChange={(e) => move(c.id, e.target.value as ProspectStatus)}
                           aria-label={`Étape de ${c.company_name}`}
-                          className="mt-2.5 min-h-[44px] w-full rounded-lg bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60 lg:hidden"
+                          className="mt-2.5 min-h-[44px] w-full rounded-lg bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/10 outline-none transition focus:ring-celya-blue/60 lg:souris:hidden"
                         >
                           {STATUS_ORDER.map((s) => (
                             <option key={s} value={s}>

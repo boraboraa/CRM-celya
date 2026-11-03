@@ -12,8 +12,10 @@ import { defineConfig, devices } from "@playwright/test";
  *   E2E_ADMIN_EMAIL      / E2E_ADMIN_PASSWORD
  *   PLAYWRIGHT_CHROMIUM     un Chromium déjà installé (sinon `npx playwright install chromium`)
  *
- * Trois tailles × deux rôles : 390 × 844 (iPhone), 360 × 800 (Android) et
- * 1280 × 900 pour la non-régression ordinateur.
+ * Cinq appareils × deux rôles : 390 × 844 (iPhone), 360 × 800 (Android),
+ * l'iPad en portrait (820 × 1180) et en paysage (1180 × 820) — TACTILES
+ * (3/11 : Colin travaille sur iPad, et un iPad paysage dépasse 1024 px) — et
+ * 1280 × 900 à la souris pour la non-régression ordinateur.
  */
 const chromium =
   process.env.PLAYWRIGHT_CHROMIUM ??
@@ -33,9 +35,29 @@ const android = {
   hasTouch: true,
   userAgent: devices["Galaxy S9+"].userAgent,
 };
+/**
+ * L'iPad (3/11) : tactile (`pointer: coarse`), mais PAS un téléphone — Safari
+ * iPadOS se présente comme un Mac (agent « Macintosh »), sans `isMobile`.
+ */
+const SAFARI_IPADOS =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
+const ipadPortrait = {
+  viewport: { width: 820, height: 1180 },
+  deviceScaleFactor: 2,
+  isMobile: false,
+  hasTouch: true,
+  userAgent: SAFARI_IPADOS,
+};
+const ipadPaysage = { ...ipadPortrait, viewport: { width: 1180, height: 820 } };
 const ordinateur = { viewport: { width: 1280, height: 900 } };
 
-const appareils = { iphone, android, ordinateur } as const;
+const appareils = {
+  iphone,
+  android,
+  "ipad-portrait": ipadPortrait,
+  "ipad-paysage": ipadPaysage,
+  ordinateur,
+} as const;
 const roles = ["commercial", "admin"] as const;
 
 export default defineConfig({

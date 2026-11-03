@@ -1,4 +1,5 @@
 import { avecRepliColonne } from "@/lib/crm/tolerance";
+import { lienListeServeur } from "@/lib/crm/lienListeServeur";
 import { lireMesObjectifs } from "@/lib/crm/lectureObjectifs";
 import { CarteObjectifs } from "@/components/CarteObjectifs";
 import { etoileesDabord } from "@/lib/crm/ordreProspects";
@@ -523,6 +524,7 @@ export default async function TodoPage({
           waiting={waiting}
           replies={replies}
           admin={session?.me?.role === "admin"}
+          lienListe={await lienListeServeur()}
         />
       </AvecColonneAppels>
     </>

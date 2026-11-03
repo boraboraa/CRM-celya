@@ -1,10 +1,18 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, getPerimetreViewer, perimetreMemorise } from "@/lib/auth";
 import { type LigneListe } from "@/components/ListeProspects";
 import { optionsPerimetre } from "@/components/PerimetreSwitcher";
 import { AffichageProspects } from "@/components/AffichageProspects";
-import { lireVue, nettoyerParams, VUE_COOKIE } from "@/lib/crm/filtresProspects";
+import {
+  FILTRES_COOKIE,
+  lireVue,
+  nettoyerParams,
+  redirectionListe,
+  VUE_COOKIE,
+} from "@/lib/crm/filtresProspects";
+import { comptesParSecteur, type ClientCompte, type RequeteCompte } from "@/lib/crm/comptesSecteurs";
 import { ETAPES_MASQUEES, masquerPerdues } from "@/lib/crm/perdues";
 import { filtreRecherche } from "@/lib/crm/recherche";
 import { type BoardProspect } from "@/components/PipelineBoard";
@@ -39,6 +47,10 @@ type Search = {
   filtre?: string;
   perimetre?: string;
   region?: string;
+  /** Le métier (3/11) — une valeur de SECTEURS, validée par `nettoyerParams`. */
+  secteur?: string;
+  /** `?filtres=aucun` : une liste vide VOULUE, qui l'emporte sur les filtres retenus. */
+  filtres?: string;
 };
 
 /**
@@ -59,13 +71,22 @@ export default async function ProspectsPage({
 }: {
   searchParams: Promise<Search>;
 }) {
-  // Une étape retirée restée dans un lien (`?statut=contacte`, 29/10) est
-  // ignorée partout : filtre, menu, puces, liens recopiés.
-  const params = nettoyerParams(await searchParams);
+  const brut = await searchParams;
+  const magasin = await cookies();
+  // Les filtres GARDÉS AU RETOUR (3/11) : `/prospects` sans AUCUN paramètre
+  // (onglet, lien resté nu) reprend la liste retenue du jour. Le moindre
+  // paramètre — ou `?filtres=aucun` — l'emporte. Le cookie est revalidé
+  // comme une URL (lib/crm/filtresProspects.ts).
+  const retour = redirectionListe(brut, magasin.get(FILTRES_COOKIE)?.value, new Date());
+  if (retour) redirect(retour);
+  // Une étape retirée restée dans un lien (`?statut=contacte`, 29/10) — ou un
+  // métier inventé — est ignorée partout : filtre, menu, puces, liens recopiés.
+  const { filtres: _marqueur, ...sansMarqueur } = brut;
+  const params = nettoyerParams(sansMarqueur);
   const { q, statut, tri, vue, filtre } = params;
   const supabase = await createClient();
   const session = await getSession();
-  const view = lireVue(vue, (await cookies()).get(VUE_COOKIE)?.value ?? null);
+  const view = lireVue(vue, magasin.get(VUE_COOKIE)?.value ?? null);
   // « Emails envoyés » : ne garder que les fiches à qui un mail est parti,
   // triées par date du dernier envoi — pour les retrouver d'un coup.
   const filtreEmails = filtre === "emails";
@@ -122,6 +143,8 @@ export default async function ProspectsPage({
   }
   if (filtreRegion?.type === "aucune") query = query.is("region", null);
   else if (filtreRegion) query = query.in("region", filtreRegion.regions);
+  // Le métier (3/11) : déjà validé (une des quinze valeurs fixes), poussé en SQL.
+  if (params.secteur) query = query.eq("sector", params.secteur);
 
   if (sort === "relance" || sort === "priorite") {
     query = query.order("next_action_at", { ascending: true, nullsFirst: false });
@@ -151,7 +174,22 @@ export default async function ProspectsPage({
   // Les fiches qu'un appel RÉEL de Janet a touchées — l'étiquette « Janet »,
   // ADMIN SEUL. Cette lecture a besoin des identifiants de la liste : elle part
   // dès que la liste revient, sans attendre les trois autres lectures.
-  const [[{ data, error }, appeleesParJanet], actionsRes, membresRes, rdvClosRes] =
+  // Le nombre de fiches par métier (le menu « Métier ») : quinze comptages
+  // `head: true` en parallèle — jamais les fiches rapatriées, plafonnées à
+  // 1 000 lignes — bornés comme la liste : même périmètre, perdues masquées en
+  // liste (lib/crm/comptesSecteurs.ts).
+  const bornerCompte = <Q extends RequeteCompte>(q: Q): Q => {
+    let b = filtrerProspects(q, perimetre, viewer);
+    if (view === "liste" && masquerPerdues(statut) && !statutFilter) {
+      b = (b as unknown as { not(c: string, o: string, v: string): Q }).not(
+        "status",
+        "in",
+        `(${ETAPES_MASQUEES.join(",")})`
+      );
+    }
+    return b;
+  };
+  const [[{ data, error }, appeleesParJanet], actionsRes, membresRes, rdvClosRes, comptesSecteurs] =
     await Promise.all([
       avecRepliColonne(fabriquer).then(
         async (res) =>
@@ -183,6 +221,7 @@ export default async function ProspectsPage({
         .in("status", ["honore", "annule"])
         .not("prospect_id", "is", null)
         .limit(2000),
+      comptesParSecteur(supabase as unknown as ClientCompte<RequeteCompte>, bornerCompte),
     ]);
   const avecRdvClos = new Set(
     ((rdvClosRes.data ?? []) as { prospect_id: string | null }[])
@@ -340,6 +379,7 @@ export default async function ProspectsPage({
         viewer.isAdmin ? membres.map((m) => [m.id, m.full_name ?? m.email] as [string, string]) : []
       }
       tri={sort}
+      comptesSecteurs={comptesSecteurs}
     />
   );
 }

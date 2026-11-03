@@ -149,7 +149,7 @@ export function EcranAppels({
         <p className="-mt-3 mb-5">
           <a
             href={`/appels-ia?onglet=${onglet === "suivi" ? "campagnes" : onglet}&connexion=1#connexion`}
-            className="inline-flex min-h-[44px] items-center gap-2 text-xs text-slate-400 transition hover:text-slate-100 sm:min-h-0"
+            className="inline-flex min-h-[44px] items-center gap-2 text-xs text-slate-400 transition hover:text-slate-100 sm:souris:min-h-0"
           >
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />
             {LIGNE_CONNEXION} →

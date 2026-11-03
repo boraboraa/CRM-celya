@@ -1,29 +1,48 @@
 "use client";
 
-import { useOptimistic, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import {
   completeTaskAction,
   rescheduleTaskAction,
   deleteTaskAction,
 } from "@/app/actions";
 import { TaskRow, type TaskWithProspect } from "@/components/TaskRow";
+import {
+  annuler as annulerGeste,
+  avancer,
+  demarrer,
+  echec,
+  finRetour,
+  gesteDeLaCase,
+  oublierPartis,
+  valeurDone,
+  vider,
+  vueStable,
+  type GesteLigne,
+  type SensCase,
+  type TypeGeste,
+} from "@/lib/crm/gesteRelance";
 
 /**
- * L'état optimiste d'une liste de relances, et les trois gestes qui la
- * modifient.
+ * L'état d'une liste de relances, et les gestes qui la modifient — UN hook,
+ * `useGesteRelance` (3/11 : il remplace `useOptimisticTasks`).
  *
- * Tout est OPTIMISTE : cocher une relance la retire immédiatement, la reporter
- * affiche tout de suite la nouvelle date, la supprimer la fait disparaître. Le
- * serveur travaille pendant ce temps ; s'il refuse, `useOptimistic` rend la
- * main à la donnée serveur à la fin de la transition — la ligne réapparaît
- * telle qu'elle était et le message dit pourquoi. Avant, cocher une relance
- * immobilisait l'écran le temps de l'aller-retour.
+ * Deux familles de gestes :
+ * - **cocher, rouvrir, supprimer** passent par `lib/crm/gesteRelance.ts` : la
+ *   ligne RESTE à sa place, barrée, avec « Annuler » ~1,5 s, puis se replie.
+ *   Un second tap sur une ligne engagée est ignoré ; la case d'une relance
+ *   ouverte ne sait que « faire » (jamais « rouvrir ») ;
+ * - **reporter, ajouter** restent optimistes (`useOptimistic`) : la nouvelle
+ *   date ou la nouvelle ligne s'affiche tout de suite, et revient seule si le
+ *   serveur refuse.
+ *
+ * `enCours` est un ENSEMBLE : deux gestes rapprochés sur deux lignes ont
+ * chacun leur indicateur (avec un seul identifiant, la fin du premier effaçait
+ * celui du second).
  */
 
 export type PatchRelance =
-  | { type: "fait"; id: string }
   | { type: "reporte"; id: string; due_at: string }
-  | { type: "supprime"; id: string }
   | { type: "ajoute"; tache: TaskWithProspect };
 
 function appliquerPatch(
@@ -31,11 +50,6 @@ function appliquerPatch(
   patch: PatchRelance
 ): TaskWithProspect[] {
   switch (patch.type) {
-    case "supprime":
-    case "fait":
-      // La ligne quitte la liste où elle était : relances ouvertes et relances
-      // passées ne se mélangent pas.
-      return taches.filter((t) => t.id !== patch.id);
     case "reporte":
       return taches
         .map((t) => (t.id === patch.id ? { ...t, due_at: patch.due_at } : t))
@@ -47,20 +61,153 @@ function appliquerPatch(
   }
 }
 
-export function useOptimisticTasks(tasks: TaskWithProspect[]) {
-  const [vue, appliquer] = useOptimistic(tasks, appliquerPatch);
+type Reponse = { error?: string } | void;
+
+/** L'écriture d'un geste de ligne (cocher, rouvrir, supprimer). */
+function ecrire(type: TypeGeste, t: TaskWithProspect): Promise<Reponse> {
+  if (type === "supprime") return deleteTaskAction(champsRelance(t));
+  return completeTaskAction(champsRelance(t, { done: valeurDone(type) }));
+}
+
+export function useGesteRelance(tasks: TaskWithProspect[]) {
+  const [optimiste, appliquer] = useOptimistic(tasks, appliquerPatch);
   const [erreur, setErreur] = useState<string>();
-  const [enCours, setEnCours] = useState<string | null>(null);
+  const [enCours, setEnCours] = useState<ReadonlySet<string>>(new Set());
+  const [gestes, setGestes] = useState<Map<string, GesteLigne<TaskWithProspect>>>(new Map());
+  const [partis, setPartis] = useState<ReadonlySet<string>>(new Set());
   const [, startTransition] = useTransition();
 
-  /** Un geste : on peint d'abord, on enregistre ensuite. */
-  function geste(
+  // La dernière valeur, pour les écouteurs (arrière-plan, démontage).
+  const gestesRef = useRef(gestes);
+  gestesRef.current = gestes;
+
+  const marquer = useCallback((id: string, oui: boolean) => {
+    setEnCours((s) => {
+      const n = new Set(s);
+      if (oui) n.add(id);
+      else n.delete(id);
+      return n;
+    });
+  }, []);
+
+  /** Envoie l'écriture d'un geste ; un refus ramène la ligne, avec le message. */
+  const envoyer = useCallback(
+    (type: TypeGeste, t: TaskWithProspect, apres?: () => void) => {
+      marquer(t.id, true);
+      startTransition(async () => {
+        try {
+          const res = await ecrire(type, t);
+          if (res && "error" in res && res.error) {
+            setErreur(res.error);
+            const r = echec(gestesRef.current, new Set(), t.id);
+            setGestes(r.gestes);
+            setPartis((p) => {
+              const n = new Set(p);
+              n.delete(t.id);
+              return n;
+            });
+          }
+        } catch {
+          setErreur("Action impossible pour l'instant. Réessayez.");
+          setGestes((g) => echec(g, new Set(), t.id).gestes);
+          setPartis((p) => {
+            const n = new Set(p);
+            n.delete(t.id);
+            return n;
+          });
+        } finally {
+          marquer(t.id, false);
+          apres?.();
+        }
+      });
+    },
+    [marquer]
+  );
+
+  // L'horloge : attente → repli → parti. Une minuterie, sur la prochaine échéance.
+  useEffect(() => {
+    if (gestes.size === 0) return;
+    const r = avancer(gestes, partis, Date.now());
+    if (r.prochain === null) return;
+    const t = setTimeout(() => {
+      const s = avancer(gestesRef.current, partis, Date.now());
+      for (const g of s.aEnvoyer) envoyer(g.type, g.tache);
+      setGestes(s.gestes);
+      setPartis(s.partis);
+    }, Math.max(0, r.prochain - Date.now()));
+    return () => clearTimeout(t);
+  }, [gestes, partis, envoyer]);
+
+  // Arrière-plan ou démontage : les suppressions en attente partent TOUT DE SUITE.
+  useEffect(() => {
+    const viderMaintenant = () => {
+      const r = vider(gestesRef.current);
+      if (r.aEnvoyer.length === 0) return;
+      gestesRef.current = r.gestes;
+      setGestes(r.gestes);
+      for (const g of r.aEnvoyer) void ecrire(g.type, g.tache);
+    };
+    const visibilite = () => {
+      if (document.visibilityState === "hidden") viderMaintenant();
+    };
+    document.addEventListener("visibilitychange", visibilite);
+    window.addEventListener("pagehide", viderMaintenant);
+    return () => {
+      document.removeEventListener("visibilitychange", visibilite);
+      window.removeEventListener("pagehide", viderMaintenant);
+      // Démontage (on quitte l'écran) : rien d'engagé ne se perd.
+      for (const g of vider(gestesRef.current).aEnvoyer) void ecrire(g.type, g.tache);
+    };
+  }, []);
+
+  // Les lignes parties que le serveur ne renvoie plus peuvent être oubliées.
+  const partisUtiles = useMemo(() => oublierPartis(optimiste, partis), [optimiste, partis]);
+
+  const vue = useMemo(() => vueStable(optimiste, gestes, partisUtiles), [optimiste, gestes, partisUtiles]);
+
+  /** Cocher, rouvrir ou supprimer : la ligne s'engage, ou le tap est ignoré. */
+  function geste(type: TypeGeste, t: TaskWithProspect) {
+    // La place de la ligne : les lignes au-dessus, la plus proche d'abord.
+    const index = vue.findIndex((l) => l.tache.id === t.id);
+    const avant = vue
+      .slice(0, index < 0 ? vue.length : index)
+      .map((l) => l.tache.id)
+      .reverse();
+    const suite = demarrer(gestesRef.current, enCours, {
+      id: t.id,
+      type,
+      avant,
+      tache: t,
+      maintenant: Date.now(),
+    });
+    if (!suite) return; // déjà engagée : un double tap ne fait rien de plus
+    setErreur(undefined);
+    gestesRef.current = suite;
+    setGestes(suite);
+    if (type !== "supprime") envoyer(type, t);
+  }
+
+  /** « Annuler » : rejoue l'inverse (ou retient une suppression pas encore partie). */
+  function annuler(id: string) {
+    const r = annulerGeste(gestesRef.current, id);
+    if (!r) return;
+    gestesRef.current = r.gestes;
+    setGestes(r.gestes);
+    const g = gestes.get(id);
+    if (r.ecrire && g) {
+      envoyer(r.ecrire, g.tache, () => setGestes((s) => finRetour(s, id)));
+    }
+  }
+
+  /** Reporter ou ajouter : optimiste — on peint, puis on enregistre. */
+  function optimisteGeste(
     id: string,
     patch: PatchRelance,
-    action: () => Promise<{ error?: string } | void>
+    action: () => Promise<Reponse>
   ) {
+    if (enCours.has(id) || gestesRef.current.has(id)) return;
     setErreur(undefined);
-    setEnCours(id);
+    marquer(id, true);
     startTransition(async () => {
       appliquer(patch);
       try {
@@ -69,15 +216,15 @@ export function useOptimisticTasks(tasks: TaskWithProspect[]) {
       } catch {
         setErreur("Action impossible pour l'instant. Réessayez.");
       } finally {
-        setEnCours(null);
+        marquer(id, false);
       }
     });
   }
 
-  return { vue, erreur, setErreur, enCours, geste };
+  return { vue, erreur, setErreur, enCours, geste, annuler, optimisteGeste };
 }
 
-/** Les champs communs aux trois gestes. */
+/** Les champs communs aux gestes. */
 export function champsRelance(
   t: TaskWithProspect,
   extra: Record<string, string> = {}
@@ -102,29 +249,28 @@ export function MessageErreur({ message }: { message?: string }) {
 }
 
 /**
- * Les lignes de relance, branchées sur l'état optimiste. `provisoires` liste
+ * Les lignes de relance, branchées sur `useGesteRelance`. `provisoires` liste
  * les identifiants encore inconnus du serveur : ces lignes s'affichent, mais
  * sans commandes — on ne coche pas une relance qui n'existe pas encore.
  *
  * `lecture` traverse jusqu'à `TaskRow`, qui n'affiche alors plus aucune
  * commande. Elle se décide ligne par ligne (`(index) => boolean`) : sur la
  * fiche, seule la PREMIÈRE relance se lit — c'est celle que pilote la carte
- * PROCHAINE ACTION. Les rappels restent branchés : c'est la ligne qui les
- * ignore, et l'état optimiste reste le même des deux côtés.
+ * PROCHAINE ACTION.
+ *
+ * `sens` : ce que fait la case. « faire » sur les relances ouvertes (défaut),
+ * « rouvrir » sur la liste des relances passées — jamais déduit du statut.
  */
-type Geste = ReturnType<typeof useOptimisticTasks>["geste"];
+type Etat = ReturnType<typeof useGesteRelance>;
 
 export function TaskRows({
-  vue,
-  enCours,
-  geste,
+  etat,
   compact,
   lecture,
   provisoires,
+  sens = "faire",
 }: {
-  vue: TaskWithProspect[];
-  enCours: string | null;
-  geste: Geste;
+  etat: Etat;
   compact?: boolean;
   /**
    * Lecture seule : la ligne se lit, les gestes vivent ailleurs. En fonction,
@@ -133,10 +279,12 @@ export function TaskRows({
   lecture?: boolean | ((index: number, task: TaskWithProspect) => boolean);
   /** Identifiants pas encore connus du serveur (lignes provisoires). */
   provisoires?: Set<string>;
+  sens?: SensCase;
 }) {
+  const { vue, enCours, geste, annuler, optimisteGeste } = etat;
   return (
     <>
-      {vue.map((t, i) => {
+      {vue.map(({ tache: t, geste: g }, i) => {
         const provisoire = provisoires?.has(t.id) ?? false;
         const enLecture =
           typeof lecture === "function" ? lecture(i, t) : Boolean(lecture);
@@ -146,24 +294,15 @@ export function TaskRows({
             task={t}
             compact={compact}
             lecture={enLecture}
-            pending={enCours === t.id || provisoire}
-            onComplete={
-              provisoire
-                ? undefined
-                : () =>
-                    geste(t.id, { type: "fait", id: t.id }, () =>
-                      completeTaskAction(
-                        champsRelance(t, {
-                          done: t.status === "fait" ? "0" : "1",
-                        })
-                      )
-                    )
-            }
+            pending={enCours.has(t.id) || provisoire}
+            geste={g ? { type: g.type, phase: g.phase } : undefined}
+            onAnnuler={g?.phase === "attente" ? () => annuler(t.id) : undefined}
+            onComplete={provisoire ? undefined : () => geste(gesteDeLaCase(sens), t)}
             onReschedule={
               provisoire
                 ? undefined
                 : (dueLocal, dueISO) =>
-                    geste(
+                    optimisteGeste(
                       t.id,
                       { type: "reporte", id: t.id, due_at: dueISO },
                       () =>
@@ -172,14 +311,7 @@ export function TaskRows({
                         )
                     )
             }
-            onDelete={
-              provisoire
-                ? undefined
-                : () =>
-                    geste(t.id, { type: "supprime", id: t.id }, () =>
-                      deleteTaskAction(champsRelance(t))
-                    )
-            }
+            onDelete={provisoire ? undefined : () => geste("supprime", t)}
           />
         );
       })}
@@ -188,14 +320,15 @@ export function TaskRows({
 }
 
 /**
- * La liste seule — dashboard, et relances passées de la fiche. Ses lignes
- * gardent toujours leurs commandes : une relance passée se rouvre d'un clic.
+ * La liste seule — dashboard, et relances passées de la fiche (`sens =
+ * "rouvrir"` : la case y rouvre, et ne sait faire que ça).
  */
 export function TaskList({
   tasks,
   compact = false,
   className = "card divide-y divide-white/[0.05]",
   lecture,
+  sens = "faire",
 }: {
   tasks: TaskWithProspect[];
   compact?: boolean;
@@ -217,23 +350,24 @@ export function TaskList({
    * la calcule.
    */
   lecture?: boolean | string[];
+  /** Ce que fait la case : « faire » (relances ouvertes) ou « rouvrir » (passées). */
+  sens?: SensCase;
 }) {
-  const { vue, erreur, enCours, geste } = useOptimisticTasks(tasks);
+  const etat = useGesteRelance(tasks);
 
-  if (vue.length === 0) return null;
+  if (etat.vue.length === 0) return null;
 
   // La closure naît ICI, du côté client de la frontière : elle ne traverse rien.
   const lues = Array.isArray(lecture) ? new Set(lecture) : null;
 
   return (
     <>
-      <MessageErreur message={erreur} />
+      <MessageErreur message={etat.erreur} />
       <ul className={className}>
         <TaskRows
-          vue={vue}
-          enCours={enCours}
-          geste={geste}
+          etat={etat}
           compact={compact}
+          sens={sens}
           lecture={lues ? (_i, t) => lues.has(t.id) : Boolean(lecture)}
         />
       </ul>

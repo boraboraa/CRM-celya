@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fmtDate, fmtDateTime, relative } from "@/lib/constants";
 import { localInputToISO } from "@/lib/time";
@@ -13,6 +13,14 @@ import { Icone, LastActionLine } from "@/components/ui";
 import type { LastActionKind } from "@/lib/crm/lastAction";
 import { lienDepuisAFaire } from "@/lib/crm/ficheSuivante";
 import { lienTel } from "@/lib/crm/telephone";
+import { DUREE_REPLI_MS, type Phase, type TypeGeste } from "@/lib/crm/gesteRelance";
+
+/** Ce que la ligne dit pendant un geste — « Annuler » à côté. */
+const LIBELLE_GESTE: Record<TypeGeste, string> = {
+  fait: "Faite",
+  rouvrir: "Rouverte",
+  supprime: "Supprimée",
+};
 
 export type TaskWithProspect = {
   id: string;
@@ -86,6 +94,8 @@ export function TaskRow({
   compact = false,
   lecture = false,
   pending = false,
+  geste,
+  onAnnuler,
   onComplete,
   onReschedule,
   onDelete,
@@ -97,6 +107,13 @@ export function TaskRow({
   lecture?: boolean;
   /** Un geste est en cours sur CETTE ligne — le spinner est ici, pas ailleurs. */
   pending?: boolean;
+  /**
+   * Un geste a ENGAGÉ la ligne (lib/crm/gesteRelance.ts) : elle reste à sa
+   * place, barrée, « Annuler » offert, puis se replie — et ne reçoit plus
+   * aucun tap. Rien sous le doigt ne remonte pendant ce temps.
+   */
+  geste?: { type: TypeGeste; phase: Phase };
+  onAnnuler?: () => void;
   onComplete?: () => void;
   /** (valeur du champ « YYYY-MM-DDTHH:mm » en heure de Bruxelles, ISO UTC) */
   onReschedule?: (dueLocal: string, dueISO: string) => void;
@@ -120,6 +137,20 @@ export function TaskRow({
    */
   const [reprogOuvert, setReprogOuvert] = useState(false);
   const tel = lienTel(task.prospects?.phone);
+  /** Une ligne engagée ou en cours d'enregistrement ne prend plus aucun tap. */
+  const bloque = pending || Boolean(geste);
+  const engagee = geste && geste.phase !== "retour";
+  const repliee = geste?.phase === "repli";
+  /**
+   * Le repli se fait EN HAUTEUR, depuis la hauteur réelle de la ligne : on la
+   * mesure quand le geste l'engage, et la transition part de là vers zéro.
+   */
+  const ref = useRef<HTMLLIElement>(null);
+  const [hauteur, setHauteur] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (engagee && hauteur === null && ref.current) setHauteur(ref.current.offsetHeight);
+    if (!engagee && hauteur !== null) setHauteur(null);
+  }, [engagee, hauteur]);
 
   /** Reprogramme au jour ET à l'heure choisis (ChoixRelance : « YYYY-MM-DDTHH:mm »). */
   function reschedule(valeur: string) {
@@ -133,8 +164,24 @@ export function TaskRow({
 
   return (
     <li
+      ref={ref}
+      aria-busy={pending || undefined}
+      // Pendant le repli, la ligne ne reçoit plus de taps (et ne se lit plus).
+      aria-hidden={repliee || undefined}
+      style={
+        engagee && hauteur !== null
+          ? {
+              maxHeight: repliee ? 0 : hauteur,
+              transition: `max-height ${DUREE_REPLI_MS}ms ease-out, opacity ${DUREE_REPLI_MS}ms ease-out, padding ${DUREE_REPLI_MS}ms ease-out`,
+              overflow: "hidden",
+              ...(repliee ? { paddingTop: 0, paddingBottom: 0, opacity: 0 } : {}),
+            }
+          : undefined
+      }
       className={`gap-3 px-4 py-3.5 transition-opacity duration-150 ${
-        pending ? "opacity-60" : ""
+        repliee ? "pointer-events-none" : ""
+      } ${
+        !engagee && pending ? "opacity-60" : ""
       } ${
         lecture
           ? "block"
@@ -150,13 +197,14 @@ export function TaskRow({
           <button
             type="button"
             onClick={onComplete}
-            disabled={!onComplete}
+            disabled={!onComplete || bloque}
+            aria-busy={pending || undefined}
             aria-label={done ? "Rouvrir la relance" : "Marquer comme faite"}
-            className="group -m-3 grid h-11 w-11 place-items-center lg:m-0 lg:h-5 lg:w-5"
+            className="group -m-3 grid h-11 w-11 place-items-center lg:souris:m-0 lg:souris:h-5 lg:souris:w-5"
           >
             <span
               className={`grid h-5 w-5 place-items-center rounded-md ring-1 transition ${
-                done
+                (geste ? geste.type === "fait" : done)
                   ? "bg-emerald-500/25 text-emerald-300 ring-emerald-400/30"
                   : "bg-white/[0.04] text-transparent ring-white/15 group-hover:ring-celya-blue/60"
               }`}
@@ -169,12 +217,14 @@ export function TaskRow({
         </div>
       )}
 
-      <div className="min-w-0 flex-1">
+      <div className={`min-w-0 flex-1 ${engagee ? "[&>*:not(.geste-annuler)]:opacity-60" : ""}`}>
         {/* Un bloc, pas une rangée flex : le texte d'un élément flex ne passe
             pas à la ligne au milieu d'un mot trop long, il pousse la ligne. */}
         <p
           className={`text-sm font-medium ${
-            done ? "text-slate-500 line-through" : "text-slate-100"
+            (done && geste?.type !== "rouvrir") || (engagee && geste?.type !== "rouvrir")
+              ? "text-slate-500 line-through"
+              : "text-slate-100"
           }`}
         >
           {task.priority === 1 && !done && (
@@ -204,7 +254,7 @@ export function TaskRow({
                 {task.prospects.company_name}
               </Link>
               {tel && (
-                <a href={tel} className="hidden text-celya-blue hover:underline lg:inline">
+                <a href={tel} className="hidden text-celya-blue hover:underline lg:souris:inline">
                   {task.prospects.phone}
                 </a>
               )}
@@ -266,11 +316,34 @@ export function TaskRow({
           </p>
         )}
 
+        {/* Le geste vient d'être fait : la ligne le DIT, à sa place, et offre
+            « Annuler » ~1,5 s avant de se replier (lib/crm/gesteRelance.ts). */}
+        {engagee && geste && (
+          <p
+            className="geste-annuler mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-1">
+              <Icone nom={geste.type === "supprime" ? "croix" : "coche"} className="h-3 w-3" />
+              {LIBELLE_GESTE[geste.type]}
+            </span>
+            {onAnnuler && (
+              <button
+                type="button"
+                onClick={onAnnuler}
+                className="btn-ghost min-h-[44px] px-3.5 py-1.5 text-xs"
+              >
+                Annuler
+              </button>
+            )}
+          </p>
+        )}
+
         {/* « Résultat » : deux taps depuis « À faire », sans ouvrir la fiche.
             C'est le geste qui manquait — après un appel, on ne navigue pas.
             Absent en lecture : sur la fiche, le résultat d'appel vit dans la
             carte PROCHAINE ACTION, et ici c'est le SEUL endroit où il tient. */}
-        {!lecture && !done && task.prospects && rdvEnAttente && (
+        {!lecture && !done && !geste && task.prospects && rdvEnAttente && (
           <div className="mt-2">
             {resultatOuvert ? (
               <div className="rounded-xl bg-white/[0.02] p-3 ring-1 ring-white/[0.06]">
@@ -293,15 +366,16 @@ export function TaskRow({
               <button
                 type="button"
                 onClick={() => setResultatOuvert(true)}
+                disabled={bloque}
                 aria-expanded={resultatOuvert}
-                className="btn-link hidden text-[11px] lg:inline-flex"
+                className="btn-link hidden text-[11px] lg:souris:inline-flex"
               >
                 Débriefer le RDV du {jourHeureCourt(rdvEnAttente.starts_at)}
               </button>
             )}
           </div>
         )}
-        {!lecture && !done && task.prospects && !rdvEnAttente && (
+        {!lecture && !done && !geste && task.prospects && !rdvEnAttente && (
           <div className="mt-2">
             {resultatOuvert ? (
               <ResultatAppel
@@ -314,8 +388,9 @@ export function TaskRow({
               <button
                 type="button"
                 onClick={() => setResultatOuvert(true)}
+                disabled={bloque}
                 aria-expanded={resultatOuvert}
-                className="btn-link hidden text-[11px] lg:inline-flex"
+                className="btn-link hidden text-[11px] lg:souris:inline-flex"
               >
                 Résultat
               </button>
@@ -326,8 +401,8 @@ export function TaskRow({
         {/* Téléphone : UNE ligne d'actions sous le titre, au pouce (19/10) —
             Appeler, Résultat (ou le débrief du RDV), la date. Le titre garde
             toute la largeur au lieu d'être écrasé par les commandes. */}
-        {!lecture && !done && !compact && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-2 lg:hidden">
+        {!lecture && !done && !geste && !compact && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-2 lg:souris:hidden">
             {tel && (
               <a href={tel} className="btn-ghost min-h-[44px] px-3.5 text-xs">
                 <Icone nom="telephone" className="h-4 w-4" />
@@ -338,6 +413,7 @@ export function TaskRow({
               <button
                 type="button"
                 onClick={() => setResultatOuvert(true)}
+                disabled={bloque}
                 aria-expanded={false}
                 className="btn-ghost min-h-[44px] px-3.5 text-xs"
               >
@@ -354,6 +430,7 @@ export function TaskRow({
             <button
               type="button"
               onClick={() => setReprogOuvert((o) => !o)}
+              disabled={bloque}
               aria-expanded={reprogOuvert}
               aria-label={`Reprogrammer — ${fmtDateTime(task.due_at)}`}
               className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-3 text-xs ring-1 ring-white/10 transition hover:bg-white/[0.05] ${
@@ -368,14 +445,15 @@ export function TaskRow({
         )}
       </div>
 
-      {!lecture && !done && !compact && (
+      {!lecture && !done && !geste && !compact && (
         // Ordinateur : à droite du titre, la date — un clic déplie le choix
         // SOUS la ligne (28/10 : le choix tactile est trop grand pour rester
         // ouvert sur chaque relance), et la croix.
-        <div className="hidden shrink-0 items-center gap-1 lg:flex">
+        <div className="hidden shrink-0 items-center gap-1 lg:souris:flex">
           <button
             type="button"
             onClick={() => setReprogOuvert((o) => !o)}
+              disabled={bloque}
             aria-expanded={reprogOuvert || pourQuand}
             aria-label={`Reprogrammer — ${fmtDateTime(task.due_at)}`}
             className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-xl px-3 text-xs ring-1 ring-white/10 transition hover:bg-white/[0.05] ${
@@ -389,7 +467,7 @@ export function TaskRow({
           <button
             type="button"
             onClick={onDelete}
-            disabled={!onDelete}
+            disabled={!onDelete || bloque}
             title="Supprimer la relance"
             aria-label="Supprimer la relance"
             className="rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400"
@@ -399,7 +477,7 @@ export function TaskRow({
         </div>
       )}
 
-      {!lecture && !done && (
+      {!lecture && !done && !geste && (
         // Le choix du jour et de l'heure (lib/crm/relance.ts — le même
         // composant que la carte PROCHAINE ACTION) : déplié SOUS la ligne,
         // aligné sur le titre (pl-8, la largeur de la case à cocher), d'un tap
@@ -418,7 +496,7 @@ export function TaskRow({
               setReprogOuvert(false);
               reschedule(v);
             }}
-            pending={!onReschedule}
+            pending={!onReschedule || bloque}
             avertissement={pourQuand ? "Pour quand ?" : null}
           />
           {/* Supprimer est définitif : c'est le seul rose de la ligne. Sur
@@ -426,11 +504,11 @@ export function TaskRow({
           <button
             type="button"
             onClick={onDelete}
-            disabled={!onDelete}
+            disabled={!onDelete || bloque}
             title="Supprimer la relance"
             aria-label="Supprimer la relance"
             className={`min-h-[44px] min-w-[44px] rounded-lg px-2 py-1 text-[11px] text-slate-600 transition hover:text-rose-400 ${
-              compact ? "" : "mt-1 lg:hidden"
+              compact ? "" : "mt-1 lg:souris:hidden"
             }`}
           >
             <Icone nom="croix" className="h-3 w-3" />

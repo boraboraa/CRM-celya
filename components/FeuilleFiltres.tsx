@@ -12,6 +12,8 @@ export type LienFiltre = { href: string; label: string; actif: boolean };
 type OptionPerimetre = LienFiltre & { personne: boolean };
 /** Le menu « Région » : des liens rangés par groupe (31 choix : un menu, pas des puces). */
 export type MenuRegion = { tous: LienFiltre; groupes: [string, LienFiltre[]][] };
+/** Le menu « Métier » (3/11) : les quinze secteurs, chacun un lien tout fait. */
+export type MenuMetier = { tous: LienFiltre; liens: LienFiltre[] };
 
 /**
  * /prospects sur téléphone (19/10) : la recherche reste à l'écran, TOUT le
@@ -31,6 +33,7 @@ export function FeuilleFiltres({
   tris,
   raccourcis,
   regions = null,
+  metiers = null,
 }: {
   nbActifs: number;
   vues: LienFiltre[];
@@ -40,6 +43,7 @@ export function FeuilleFiltres({
   tris: LienFiltre[] | null;
   raccourcis: LienFiltre[];
   regions?: MenuRegion | null;
+  metiers?: MenuMetier | null;
 }) {
   const router = useRouter();
   const [ouvert, setOuvert] = useState(false);
@@ -106,6 +110,25 @@ export function FeuilleFiltres({
                       </option>
                     ))}
                   </optgroup>
+                ))}
+              </select>
+            </Groupe>
+          )}
+          {metiers && (
+            <Groupe titre="Métier">
+              <select
+                aria-label="Métier"
+                className="input min-h-[44px]"
+                value={[metiers.tous, ...metiers.liens].find((l) => l.actif)?.href ?? metiers.tous.href}
+                onChange={(e) => {
+                  fermer();
+                  router.push(e.target.value, { scroll: false });
+                }}
+              >
+                {[metiers.tous, ...metiers.liens].map((l) => (
+                  <option key={l.href} value={l.href}>
+                    {l.label}
+                  </option>
                 ))}
               </select>
             </Groupe>

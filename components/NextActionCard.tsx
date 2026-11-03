@@ -21,6 +21,8 @@ import { ResultatAppel } from "@/components/ResultatAppel";
 import { DebriefRdv } from "@/components/DebriefRdv";
 import { ChoixRelance } from "@/components/ChoixRelance";
 import { REFUS_RELANCE_PERDUE } from "@/lib/crm/perdues";
+import { lancerUneFois } from "@/lib/unSeulEnvoi";
+import { useUnSeulEnvoi } from "@/components/useUnSeulEnvoi";
 
 /**
  * PROCHAINE ACTION — c'est ici qu'on arrive en raccrochant.
@@ -86,6 +88,8 @@ export function NextActionCard({
   perdue?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
+  /** Un envoi ne part jamais deux fois (3/11, lib/unSeulEnvoi.ts). */
+  const verrou = useUnSeulEnvoi();
   const [erreur, setErreur] = useState<string>();
   /** « À rappeler » vient d'être tapé : la ligne Relancer réclame une date. */
   const [pourQuand, setPourQuand] = useState(false);
@@ -172,7 +176,7 @@ export function NextActionCard({
     const local = valeur.length >= 16 ? valeur.slice(0, 16) : `${valeur}T09:00`;
 
     if (relanceOuverte) {
-      startTransition(async () => {
+      lancerUneFois(verrou, startTransition, async () => {
         appliquer({ due_at: localInputToISO(local) ?? relanceOuverte.due_at });
         const res = await rescheduleTaskAction(
           champs(relanceOuverte.id, { due_local: local })
@@ -184,7 +188,7 @@ export function NextActionCard({
 
     const due = localInputToISO(local);
     if (!due) return;
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       appliquer({ relance: due });
       const res = await saveExchangeAction({
         prospectId,
@@ -199,7 +203,7 @@ export function NextActionCard({
   function complete() {
     if (!action.task) return;
     setErreur(undefined);
-    startTransition(async () => {
+    lancerUneFois(verrou, startTransition, async () => {
       appliquer({ fait: true });
       const res = await completeTaskAction(
         champs(action.task!.id, { done: "1" })

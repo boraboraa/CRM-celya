@@ -14,6 +14,7 @@ import {
   type ImportFieldKey,
 } from "@/lib/csv";
 import type { Profile } from "@/lib/types";
+import { useLienListe } from "@/components/useLienListe";
 
 type Members = Pick<Profile, "id" | "full_name" | "email">[];
 
@@ -24,6 +25,8 @@ export function ImportWizard({
   members: Members;
   currentUserId: string;
 }) {
+  /** « Voir les prospects » : la liste qu'on avait (filtres retenus, 3/11). */
+  const lienListe = useLienListe();
   const [fileName, setFileName] = useState<string>();
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
@@ -114,7 +117,7 @@ export function ImportWizard({
         )}
 
         <div className="mt-6 flex gap-2">
-          <Link href="/prospects" className="btn-primary">
+          <Link href={lienListe} className="btn-primary">
             Voir les prospects
           </Link>
           <button

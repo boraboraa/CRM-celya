@@ -2409,7 +2409,7 @@ function register(server: McpServer) {
   // --- mes_objectifs (031) -------------------------------------------------
   server.tool(
     "mes_objectifs",
-    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « suivi par email », « pas intéressé » — on a eu quelqu'un ; un « pas décroché » est un appel, pas une réponse), intéressés (« intéressé » SEUL : un « à rappeler » est une réponse, jamais un intéressé), rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
+    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « suivi par email », « pas intéressé » — on a eu le décideur ; un « pas décroché » est un appel, pas une réponse), intéressés (« intéressé » SEUL : un « à rappeler » est une réponse, jamais un intéressé), rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
     {},
     async (_args, extra) => {
       const ctx = await context(extra);

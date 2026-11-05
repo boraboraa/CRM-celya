@@ -85,7 +85,7 @@ export default async function ClassementPage({
 
       <p className="mt-4 text-xs leading-relaxed text-slate-500">
         Appels : chaque résultat d&apos;appel noté (un débrief de rendez-vous n&apos;en est pas un). Réponses :
-        « à rappeler », « intéressé », « suivi par email » ou « pas intéressé » — on a eu quelqu&apos;un ; un
+        « à rappeler », « intéressé », « suivi par email » ou « pas intéressé » — on a eu le décideur ; un
         « pas décroché » reste un appel. Intéressés : seulement « intéressé » — un « à rappeler » est une réponse,
         pas un intéressé. Essais : fiches passées en « Essai gratuit ».
       </p>

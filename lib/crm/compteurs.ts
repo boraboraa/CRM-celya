@@ -12,8 +12,8 @@
  *               rendez-vous rattaché (un débrief porte « intéressé » ou
  *               « refus » : ce n'est pas un appel) — à l'auteur ;
  *   réponses    rappeler · intéressé · suivi par email (033) · refus — on a eu
- *               quelqu'un ; un « pas décroché » (et l'ancien barrage) reste un
- *               appel, pas une réponse ;
+ *               le décideur ; un « pas décroché » (et l'ancien barrage) reste
+ *               un appel, pas une réponse ;
  *   intéressés  « Intéressé » SEUL (045, Bora 05/11) — « À rappeler » (on m'a
  *               dit de rappeler plus tard) est une réponse, JAMAIS un
  *               intéressé ;

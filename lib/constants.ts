@@ -130,6 +130,19 @@ export const OUTCOME_LABEL: Record<CallOutcome, string> = {
   refus: "Pas intéressé",
 };
 
+/**
+ * La précision sous chaque bouton de résultat (05/11/2026, Bora) — ce qui
+ * empêche de mal comprendre le bouton. « À rappeler » était choisi pour « je
+ * vais rappeler » alors que personne n'avait répondu : c'est « Pas décroché ».
+ * Une seule source, lue par `ResultatAppel` (carte PROCHAINE ACTION, relance
+ * dépliée) et par le débrief (« Pas décroché »). Absente = pas de précision.
+ */
+export const OUTCOME_PRECISION: Partial<Record<CallOutcome, string>> = {
+  sans_reponse: "personne · messagerie · fermé",
+  rappeler: "on m'a dit de rappeler plus tard",
+  interesse: "veut en savoir plus ou une démo",
+};
+
 /** Le pictogramme accompagne toujours le libellé — la couleur ne porte jamais seule. */
 export const OUTCOME_ICON: Record<CallOutcome, IconeNom> = {
   sans_reponse: "telephone-barre",

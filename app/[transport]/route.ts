@@ -104,6 +104,7 @@ import {
   manualStatusPatch,
   applyAutoStatus,
   readProspectFacts,
+  raisonAffichee,
 } from "@/lib/crm/status";
 import { recalcConfidence } from "@/lib/crm/confidence";
 import { filtreRecherche } from "@/lib/crm/recherche";
@@ -129,6 +130,7 @@ import {
   estResultatSaisissable,
   fmtDate,
   fmtDateTime,
+  normalizeStatus,
 } from "@/lib/constants";
 import { todayBounds, localInputToISO, isoToLocalInput, dateInputToISO } from "@/lib/time";
 import {
@@ -665,7 +667,7 @@ function register(server: McpServer) {
       const resolved = await resolveProspect(admin, viewer, args);
       if ("error" in resolved) return fail(resolved.error);
 
-      const [fiche, activites, taches, rdvs] = await Promise.all([
+      const [fiche, activites, taches, rdvs, faits] = await Promise.all([
         admin.from("prospects").select("*").eq("id", resolved.id).single(),
         admin
           .from("activities")
@@ -685,6 +687,9 @@ function register(server: McpServer) {
           .eq("prospect_id", resolved.id)
           .order("starts_at", { ascending: false })
           .limit(5),
+        // Le motif affiché, comme sur la fiche : relu des faits d'aujourd'hui
+        // (« appelée le 05/11, sans réponse » sous « À appeler », 05/11).
+        readProspectFacts(admin, resolved.id),
       ]);
 
       if (fiche.error) return fail(`Erreur : ${fiche.error.message}`);
@@ -706,7 +711,9 @@ function register(server: McpServer) {
         probabilite: p.probability,
         valeur_ponderee: p.weighted_value,
         etape_verrouillee: p.status_locked,
-        etape_motif_auto: p.status_auto_reason,
+        etape_motif_auto: p.status_locked
+          ? p.status_auto_reason
+          : raisonAffichee(normalizeStatus(p.status), p.status_auto_reason, faits),
         ...prochaineActionPourClaude(p.next_action_at, p.next_action_kind, p.status),
         dernier_contact: p.last_contact_at,
         notes: p.notes,
@@ -1013,7 +1020,7 @@ function register(server: McpServer) {
   // --- mettre_a_jour_statut -------------------------------------------------
   server.tool(
     "mettre_a_jour_statut",
-    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler (la fiche n'a JAMAIS été appelée), rendez_vous, a_rappeler (la fiche a été appelée et il faut la rappeler : « sans_reponse », « rappeler » ou « interesse », échange noté, rendez-vous débriefé — ne pas confondre avec a_appeler), suivi_email (on a eu la personne, qui veut l'information par mail — l'étape suit d'elle-même un résultat « suivi_email » d'« ajouter_note »), essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
+    "Change l'étape d'un prospect (par identifiant ou nom). Étapes valides : a_appeler (la fiche n'a jamais eu de vrai échange : jamais appelée, ou uniquement des « sans_reponse »), rendez_vous, a_rappeler (on a eu un vrai échange et il faut rappeler : « rappeler », « interesse », échange noté, rendez-vous débriefé — un « sans_reponse » n'y mène PAS : la fiche reste a_appeler), suivi_email (on a eu la personne, qui veut l'information par mail — l'étape suit d'elle-même un résultat « suivi_email » d'« ajouter_note »), essai_gratuit (le client a démarré un essai gratuit — le « win » d'un étudiant ; ce n'est PAS une fin de parcours, la fiche garde ses relances), gagne (l'essai est devenu payant), perdu. Après un rendez-vous, préférez « debriefer_rendez_vous », qui fait suivre l'étape. ATTENTION : c'est une décision explicite — elle VERROUILLE l'étape, qui ne sera plus déduite automatiquement des faits (email envoyé, rendez-vous posé). Ne l'utilisez que si l'utilisateur demande vraiment de fixer l'étape ; pour un simple compte rendu, préférez « ajouter_note ». « rendez_vous » est REFUSÉ tant qu'aucun rendez-vous réel (daté) n'est enregistré sur la fiche : posez d'abord le rendez-vous, l'étape suivra toute seule.",
     {
       id: z.string().optional(),
       nom: z.string().optional().describe("Nom de société si l'identifiant n'est pas fourni."),
@@ -1099,7 +1106,7 @@ function register(server: McpServer) {
         .enum(OUTCOME_ORDER as [string, ...string[]])
         .optional()
         .describe(
-          "Ce qu'a donné l'APPEL — « sans_reponse » (pas de réponse, messagerie, standard automatique — l'étape passe en « À rappeler » : la fiche a été appelée), « rappeler » (à rappeler, y compris une secrétaire qui filtre — précisez-le dans la note ; l'étape passe en « À rappeler »), « interesse » (intéressé — l'étape passe aussi en « À rappeler »), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; le commercial envoie le mail depuis SA boîte, que le CRM ne voit pas : une relance « Vérifier la réponse au mail » est posée TOUTE SEULE 2 jours ouvrés plus tard à 9h, sauf relance déjà prévue après aujourd'hui, RDV à venir ou fiche gagnée/perdue ; la réponse le dit, et « planifier_relance » la change), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » pose TOUT SEUL un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
+          "Ce qu'a donné l'APPEL — « sans_reponse » (personne au bout : pas de réponse, messagerie, répondeur, standard automatique, établissement fermé, personne en consultation ou indisponible — la fiche RESTE « À appeler », ou garde son étape si elle a déjà eu un vrai échange), « rappeler » (quelqu'un a répondu et a dit de rappeler à un autre moment, y compris une secrétaire qui filtre — précisez-le dans la note ; l'étape passe en « À rappeler » ; c'est une réponse, PAS un intéressé), « interesse » (la personne est réellement intéressée : veut en savoir plus ou une démo — le SEUL résultat compté en « intéressés » ; l'étape passe aussi en « À rappeler »), « suivi_email » (la personne veut l'info par mail — c'est une réponse ; l'étape passe en « Suivi par email » ; le commercial envoie le mail depuis SA boîte, que le CRM ne voit pas : une relance « Vérifier la réponse au mail » est posée TOUTE SEULE 2 jours ouvrés plus tard à 9h, sauf relance déjà prévue après aujourd'hui, RDV à venir ou fiche gagnée/perdue ; la réponse le dit, et « planifier_relance » la change), « refus » (pas intéressé — « motif » OBLIGATOIRE ; la fiche passe en Perdu, verrouillée, ses relances sont annulées, et elle n'apparaît plus par défaut dans la liste ni dans « À faire »). « sans_reponse » s'affiche « Pas décroché » à l'écran ; c'est le seul qui n'atteste pas d'un échange. « sans_reponse » pose TOUT SEUL un rappel le prochain jour ouvré, à l'autre moitié de la journée (appelé le matin → 14h, l'après-midi → 10h) — sauf si une relance est déjà prévue après aujourd'hui, si un rendez-vous est à venir ou si la fiche est gagnée/perdue ; la réponse le dit, et « planifier_relance » le change. Ne le devinez jamais : seulement si l'utilisateur l'a dit."
         ),
     },
     async (args, extra) => {

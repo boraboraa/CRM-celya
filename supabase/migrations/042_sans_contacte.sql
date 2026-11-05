@@ -1,9 +1,14 @@
 -- 042 — L'étape « Contacté » est retirée (29/10/2026, décision de Bora :
 -- « Contacté, ça ne sera jamais une prochaine action »). Données seulement.
 --
--- Et (31/10, décision de Bora) « À appeler, c'est uniquement les fiches qui
--- n'ont jamais été appelées » : une fiche « À appeler » non verrouillée qui
--- a DÉJÀ été appelée (un « Pas décroché ») la quitte aussi.
+-- AJUSTÉE LE 05/11, AVANT d'être appliquée (décision de Bora : « Pas
+-- décroché » renvoie en « À appeler »). La règle du 31/10 (« À appeler =
+-- jamais appelée » : un « Pas décroché » faisait quitter l'étape) est
+-- REMPLACÉE : « À appeler » = jamais appelée OU uniquement des « Pas
+-- décroché » (et anciens « Barrage »). Une fiche qui a eu un vrai échange
+-- reste « À rappeler », même si un « Pas décroché » suit. La 042 ne déplace
+-- donc plus les « À appeler » déjà appelées ; elle range seulement les
+-- « Contacté » (et une « À appeler » non verrouillée qui aurait un vrai fait).
 --
 -- Chaque fiche concernée va dans l'étape que son JOURNAL justifie — la règle
 -- de `statusFromFacts` (lib/crm/status.ts), recopiée ici une fois, sans liste
@@ -12,12 +17,13 @@
 --   2. un résultat « À rappeler » / « Intéressé », ou un RDV débriefé
 --      « à rappeler »                                            → a_rappeler
 --   3. un rendez-vous (activité, ou agenda non annulé)          → rendez_vous
---   4. entre le dernier email (envoyé ou reçu) et le dernier APPEL ou échange
---      noté (« Pas décroché », ancien « Barrage », note attestée SANS
---      résultat), le plus récent : email → suivi_email, appel → a_rappeler
---   5. rien de tout cela (jamais appelée)                       → a_appeler
--- « Barrage » n'est plus proposé (31/10) ; ses anciennes entrées comptent
--- comme un appel. Les brouillons ne comptent pas.
+--   4. entre le dernier email (envoyé ou reçu) et la dernière note
+--      attestée SANS résultat, le plus récent : email → suivi_email,
+--      note → a_rappeler
+--   5. rien de tout cela (jamais appelée, ou uniquement des « Pas
+--      décroché » / anciens « Barrage »)                          → a_appeler
+-- Un « Pas décroché » n'est plus un fait d'étape (05/11) : il ne sert qu'au
+-- motif (« appelée, sans réponse »). Les brouillons ne comptent pas.
 --
 -- Garde-fous :
 --   • la copie d'AVANT est gardée dans `reprise_042` (RLS fermée, aucune
@@ -63,8 +69,10 @@ with f as (
     ) as dernier_email,
     (select max(a.occurred_at) from public.activities a
       where a.prospect_id = p.id and not coalesce(a.is_draft, false)
-        and (a.outcome in ('sans_reponse', 'barrage')
-             or (a.type = 'note' and coalesce(a.is_exchange, true) and a.outcome is null))) as dernier_echange
+        and a.type = 'note' and coalesce(a.is_exchange, true) and a.outcome is null) as dernier_echange,
+    exists (select 1 from public.activities a
+             where a.prospect_id = p.id and not coalesce(a.is_draft, false)
+               and a.outcome in ('sans_reponse', 'barrage')) as tentee
   from public.prospects p
   where p.status = 'contacte'
      or (p.status = 'a_appeler' and not coalesce(p.status_locked, false))
@@ -78,10 +86,11 @@ with f as (
        and (f.dernier_echange is null or f.dernier_email >= f.dernier_echange) then 'suivi_email'
       when f.dernier_echange is not null then 'a_rappeler'
       else 'a_appeler'
-    end::public.prospect_status as vers
+    end::public.prospect_status as vers,
+    f.tentee
   from f
 )
-select r.id, r.vers from r where r.vers::text <> r.status::text;
+select r.id, r.vers, r.tentee from r where r.vers::text <> r.status::text;
 
 create table public.reprise_042 as
 select p.id, p.status, p.status_locked, p.status_auto_reason, p.status_auto_at,
@@ -93,7 +102,7 @@ alter table public.reprise_042 add primary key (id);
 alter table public.reprise_042 enable row level security;
 revoke all on public.reprise_042 from anon, authenticated;
 comment on table public.reprise_042 is
-  'Copie des fiches déplacées par la 042 (« Contacté » retirée, « À appeler » = jamais appelée), avant le déplacement. RLS fermée. À supprimer une fois validée par Bora.';
+  'Copie des fiches déplacées par la 042 (« Contacté » retirée ; « À appeler » = jamais appelée ou seulement des « Pas décroché », 05/11), avant le déplacement. RLS fermée. À supprimer une fois validée par Bora.';
 
 set local session_replication_role = replica;
 
@@ -102,7 +111,7 @@ update public.prospects p
        status_auto_at = case when coalesce(p.status_locked, false) then p.status_auto_at else now() end,
        status_auto_reason = case when coalesce(p.status_locked, false) then p.status_auto_reason
          else case v.vers::text
-           when 'a_appeler'   then 'jamais appelée'
+           when 'a_appeler'   then case when v.tentee then 'appelée, sans réponse' else 'jamais appelée' end
            when 'a_rappeler'  then 'déjà appelée, il faut la rappeler'
            when 'suivi_email' then 'la suite se joue par email'
            else 'un rendez-vous est enregistré'

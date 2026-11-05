@@ -5,16 +5,21 @@
  * (c'est ainsi qu'une fiche s'est retrouvée en « Rendez-vous » sans qu'aucun
  * rendez-vous ne soit posé). Elle se déduit de faits vérifiables :
  *
- *   a_appeler    défaut — la fiche n'a JAMAIS été appelée (31/10, décision
- *                de Bora : « À appeler, c'est uniquement les fiches qui n'ont
- *                jamais été appelées »)
+ *   a_appeler    défaut — la fiche n'a JAMAIS eu de vrai échange : jamais
+ *                appelée, ou UNIQUEMENT des « Pas décroché » (et l'ancien
+ *                « Barrage »). Décision de Bora du 05/11, qui REMPLACE celle
+ *                du 31/10 (« À appeler = jamais appelée ») : un appel sans
+ *                réponse n'est plus un fait d'étape. Il reste un fait
+ *                (`tentative`) qui ne sert qu'au MOTIF affiché sous l'étape
+ *                (« appelée le 05/11, sans réponse »), pour qu'on voie
+ *                qu'elle a déjà été tentée.
  *   rendez_vous  UNIQUEMENT une activité « rendez_vous » réellement
  *                enregistrée, ou un rendez-vous (non annulé) dans l'agenda
- *   a_rappeler   un résultat d'appel « À rappeler » ou « Intéressé »
- *                (activities.outcome, 29/10), un APPEL quel qu'il soit
- *                (« Pas décroché », et l'ancien « Barrage ») ou une note
- *                attestée sans résultat, plus récents que le dernier email,
- *                ou un
+ *   a_rappeler   un résultat d'appel « À rappeler » (la personne a dit de
+ *                rappeler plus tard) ou « Intéressé » (activities.outcome,
+ *                29/10) — un vrai échange, qui RESTE valable même si un
+ *                « Pas décroché » le suit (Bora, 05/11) —, une note attestée
+ *                sans résultat plus récente que le dernier email, ou un
  *                rendez-vous débriefé « intéressé, à
  *                rappeler » (meetings.debrief_issue, migration 027) — par
  *                le débrief explicite, ou par un résultat « À rappeler » /
@@ -25,10 +30,11 @@
  *                faute de plus précis (ni résultat d'appel ni rendez-vous),
  *                un email envoyé ou reçu plus récent que la dernière note
  *                d'échange (« déjà appelé, à contacter par mail », puis
- *                quatre mails : la suite se joue par mail)
+ *                quatre mails : la suite se joue par mail). Un « Pas
+ *                décroché » n'entre plus dans cette concurrence (05/11).
  *   (« Contacté » est RETIRÉE le 29/10, décision de Bora : ce n'était jamais
- *    une prochaine action. Un barrage reste « À appeler », un échange part
- *    en « À rappeler », un email en « Suivi par email ». La valeur d'enum
+ *    une prochaine action. Un appel sans réponse reste « À appeler », un
+ *    échange part en « À rappeler », un email en « Suivi par email ». La valeur d'enum
  *    reste en base, inerte, refusée par la contrainte 043.)
  *   (« Proposition » est RETIRÉE le 29/10 : plus aucun fait n'y mène, et
  *    `proposal_sent_at` n'est plus lu — la colonne reste, inerte)
@@ -50,7 +56,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProspectStatus } from "../types.ts";
-import { normalizeStatus, fmtDate, fmtDateTime } from "../constants.ts";
+import { normalizeStatus, fmtDate, fmtDateTime, fmtJourMois } from "../constants.ts";
 
 /** Ordre d'avancement. « Gagné » et « Perdu » sont des fins de parcours. */
 export const STATUS_RANK: Record<ProspectStatus, number> = {
@@ -91,10 +97,14 @@ export type ProspectFacts = {
   /** Une suite à donner par téléphone : résultat « À rappeler » ou
    *  « Intéressé », débrief « intéressé, à rappeler » (027). */
   rappel: Fact | null;
-  /** Dernier APPEL ou échange noté : « Pas décroché » (et l'ancien
-   *  « Barrage »), ou une note attestée SANS résultat (« j'ai réellement eu
-   *  cet échange ») — mène à « À rappeler », sauf si un email est plus récent. */
+  /** Dernière note attestée SANS résultat (« j'ai réellement eu cet
+   *  échange ») — mène à « À rappeler », sauf si un email est plus récent.
+   *  Un « Pas décroché » n'en est PAS un (05/11). */
   echange: Fact | null;
+  /** Dernier appel SANS RÉPONSE (« Pas décroché », ancien « Barrage »). Ne
+   *  décide d'AUCUNE étape (05/11) : il ne sert qu'au motif affiché sous
+   *  « À appeler » — la fiche a déjà été tentée. */
+  tentative: Fact | null;
   /** Un « Suivi par email » : résultat d'appel ou issue de débrief (033). */
   suiviEmail: Fact | null;
 };
@@ -102,6 +112,7 @@ export type ProspectFacts = {
 export const NO_FACTS: ProspectFacts = {
   email: null,
   echange: null,
+  tentative: null,
   meeting: null,
   rappel: null,
   suiviEmail: null,
@@ -151,10 +162,12 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
   const facts: ProspectFacts = {
     email: null,
     echange: null,
+    tentative: null,
     meeting: null,
     rappel: null,
     suiviEmail: null,
   };
+  let tentatives = 0;
 
   for (const a of rows.activities) {
     if (a.is_draft) continue;
@@ -179,17 +192,14 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
       });
     }
 
-    // Un appel sans personne au bout (31/10) : la fiche a été appelée, elle
-    // quitte « À appeler » — le rappel automatique est posé (PR #28).
-    // « barrage » n'est plus proposé, mais les anciennes entrées comptent.
+    // Un appel sans personne au bout : PAS un fait d'étape (Bora, 05/11 —
+    // remplace le 31/10). La fiche reste « À appeler » ; le rappel
+    // automatique est posé ailleurs (PR #28). On ne garde que la date de la
+    // dernière tentative, pour le motif. « barrage » n'est plus proposé, ses
+    // anciennes entrées se lisent pareil.
     if (outcome === "sans_reponse" || outcome === "barrage") {
-      facts.echange = latest(facts.echange, {
-        at: a.occurred_at,
-        label:
-          outcome === "sans_reponse"
-            ? `appelée le ${fmtDate(a.occurred_at)}, sans réponse`
-            : `appelée le ${fmtDate(a.occurred_at)} (barrage)`,
-      });
+      tentatives++;
+      facts.tentative = latest(facts.tentative, { at: a.occurred_at, label: "" });
     }
 
     if (outcome === "suivi_email") {
@@ -231,6 +241,8 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
     });
   }
 
+  if (facts.tentative) facts.tentative = { at: facts.tentative.at, label: libelleTentative(facts.tentative.at, tentatives) };
+
   // Les rendez-vous de l'agenda (non annulés). À venir : le fait que posait
   // autrefois la tâche « RDV avec … ». Passé : il reste un fait — et son
   // libellé dit ce qu'il est devenu (tenu, ou en attente de son issue), jamais
@@ -259,6 +271,17 @@ export function factsFromRows(rows: FactRows): ProspectFacts {
   }
 
   return facts;
+}
+
+/**
+ * Le motif d'une fiche déjà tentée, sous « À appeler » : « appelée le 05/11,
+ * sans réponse » (une fois), « appelée 3 fois sans réponse, la dernière le
+ * 05/11 » (plusieurs).
+ */
+export function libelleTentative(at: string, fois: number): string {
+  return fois > 1
+    ? `appelée ${fois} fois sans réponse, la dernière le ${fmtJourMois(at)}`
+    : `appelée le ${fmtJourMois(at)}, sans réponse`;
 }
 
 /**
@@ -362,6 +385,7 @@ export function factReason(
   if (derived === "suivi_email") return (facts.suiviEmail ?? facts.email)?.label ?? null;
   if (derived === "a_rappeler") return (facts.rappel ?? facts.echange)?.label ?? null;
   if (derived === "rendez_vous") return facts.meeting?.label ?? null;
+  if (derived === "a_appeler") return facts.tentative?.label ?? null;
   return null;
 }
 
@@ -377,6 +401,10 @@ export function raisonAffichee(
   stored: string | null,
   facts: ProspectFacts
 ): string | null {
+  // « À appeler » déjà tentée (05/11) : le motif se relit toujours des faits
+  // — aucune écriture ne le stocke, l'étape ne bouge pas sur un « Pas
+  // décroché ».
+  if (status === "a_appeler" && facts.tentative) return facts.tentative.label;
   // Pas de motif stocké : l'étape n'a pas été déduite, on n'en invente pas un.
   if (!stored) return null;
   if (status === "rendez_vous" && facts.meeting) return facts.meeting.label;

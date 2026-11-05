@@ -37,7 +37,8 @@ begin
   end loop;
 end $s$;
 
--- 2. Ce que la 042 doit donner aux fiches RÉELLES (le tableau du prompt).
+-- 2. Ce que la 042 doit donner aux fiches RÉELLES (recalculé le 05/11 sur la
+--    production, avec la règle ajustée : 042_attendus.json).
 create temp table attendus_042 (nom text primary key, vers text) on commit drop;
 insert into attendus_042 values
     -- <<ATTENDUS>>
@@ -131,7 +132,9 @@ begin
    where a.status = 'contacte' and a.status_locked and (not p.status_locked or p.status_auto_reason is distinct from a.status_auto_reason);
   if n = 0 then ok := ok + 1; else ko := ko + 1; log := log || ' | verrou ou motif d''une verrouillée touché : ' || n; end if;
   select status_auto_reason into e from prospects where company_name = 'Garage Nima';
-  if e = 'déjà appelée, il faut la rappeler' then ok := ok + 1;
+  -- 05/11 : Nima n'a eu que des « Pas décroché » — elle va en « À appeler »,
+  -- avec un motif qui dit qu'elle a déjà été tentée.
+  if e = 'appelée, sans réponse' then ok := ok + 1;
   else ko := ko + 1; log := log || ' | motif Nima : ' || coalesce(e, 'null'); end if;
   select status_auto_reason into e from prospects where company_name = 'Baradent';
   if e = 'la suite se joue par email' then ok := ok + 1;

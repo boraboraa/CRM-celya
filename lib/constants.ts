@@ -81,9 +81,9 @@ const LEGACY_STATUS: Record<string, ProspectStatus> = {
   // L'étape « Contacté » est retirée (29/10) : une valeur restée en base se
   // lit « À rappeler » (on a eu quelqu'un, il y a une suite à donner).
   contacte: "a_rappeler",
-  // Les plus anciennes (007) : « sans réponse » a été appelée (31/10 : « À
-  // appeler », c'est jamais appelée).
-  sans_reponse: "a_rappeler",
+  // Les plus anciennes (007) : « sans réponse » — un appel sans vrai échange
+  // reste « À appeler » (05/11, remplace le 31/10).
+  sans_reponse: "a_appeler",
   contact_etabli: "a_rappeler",
   rappel_programme: "a_rappeler",
   rdv: "rendez_vous",
@@ -233,6 +233,12 @@ export function fmtDate(value?: string | null): string {
     year: "numeric",
     timeZone: TZ,
   });
+}
+
+/** « 05/11 » — le jour et le mois, heure de Bruxelles (motifs courts). */
+export function fmtJourMois(value?: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("fr-BE", { day: "2-digit", month: "2-digit", timeZone: TZ });
 }
 
 export function fmtDateTime(value?: string | null): string {

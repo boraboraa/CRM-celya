@@ -5,6 +5,45 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 5 novembre 2026 — vrais « intéressés », « Pas décroché » renvoie en « À appeler » (PLAN, en attente du OK de Bora)
+
+⚠ **Rien n'est codé.** Ce qui suit est le plan soumis à Bora le 5/11
+(branche `claude/vrais-interesses`, PR en brouillon). Il sera remplacé par
+l'état réel une fois le lot fait.
+
+### Constats vérifiés (code + base, lecture seule, 05/11)
+
+- La règle des intéressés est écrite deux fois : `compteurs_pour` (corps de
+  la **033** en production, pas de la 031) et `lib/crm/compteurs.ts`
+  (`INTERESSES = interesse · rappeler`). `classement_equipe` ne recopie pas
+  la règle : il appelle `compteurs_pour` (vérifié sur le corps en production).
+- Depuis le 2/11, hors débrief : 1 seul « Intéressé » (Aïssata) pour 54
+  « À rappeler » ; le classement affiche 55 intéressés.
+- Sur 84 « À rappeler » saisis depuis toujours, 52 n'ont pas de note ; parmi
+  les 32 notes, une dizaine décrit une non-réponse (« Pas répondu », « Pas
+  rep », « Messager », « tombée sur boîte mail », « salon fermé », « était en
+  consultation »).
+- **Les migrations 042, 043 et 044 ne sont PAS appliquées** : 27 fiches sont
+  encore en « Contacté », `reprise_042` n'existe pas, les déclencheurs de la
+  044 non plus. Le lot vient donc APRÈS elles, et la 042 doit être ajustée
+  (voir « Ordre »).
+
+### Les décisions du 5/11 (remplacent celle du 31/10 sur « À appeler »)
+
+1. « Pas décroché » (et l'ancien « Barrage ») n'est plus un fait d'étape :
+   « À appeler » = jamais appelée, ou dont les seuls appels sont restés sans
+   réponse. Le motif sous l'étape dit « appelée le 05/11, sans réponse ».
+2. « À rappeler » = la personne a dit de rappeler : étape « À rappeler »,
+   une RÉPONSE, jamais un intéressé.
+3. « Intéressé » = seul résultat compté dans « intéressés ».
+4. **À trancher par Bora** : une fiche avec un « Intéressé » / « À rappeler »
+   puis un « Pas décroché » — recommandation : elle reste « À rappeler ».
+
+Le détail (lots 1 à 4, ce qui est touché, ce qui est testé, l'ordre
+d'application) est dans la description de la PR.
+
+---
+
 ## État au 3 novembre 2026 — l'iPad tactile, le filtre métier, les filtres gardés au retour
 
 Demande : Colin (commercial) travaille sur **iPad** — des taps perdus ou posés

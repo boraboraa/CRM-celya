@@ -5,6 +5,82 @@ contexte acquis : ne le redemande pas.
 
 ---
 
+## État au 5 novembre 2026 — vrais « intéressés », « Pas décroché » renvoie en « À appeler », boutons sans ambiguïté
+
+Constat du 05/11 (Sales Trophy) : le classement montrait 55 « intéressés »
+pour UN vrai « Intéressé » (Collins en voyait 7, il en avait 0) — la règle
+comptait « À rappeler » comme un intéressé ; et beaucoup de « À rappeler »
+étaient des non-réponses (« Pas répondu », « Messager », « salon ferme »).
+Décisions de Bora (05/11), codées sur `claude/vrais-interesses`, UNE PR,
+**migrations écrites, PAS appliquées** :
+
+1. **« Intéressé » est le SEUL résultat compté en « intéressés »** ; « À
+   rappeler » reste une RÉPONSE (on a eu le décideur), jamais un intéressé.
+   SQL : **`045_vrais_interesses.sql`** (`compteurs_pour`, corps de la 033 à
+   une ligne près ; `classement_equipe` et `compteurs_de` l'appellent, ils ne
+   recopient pas la règle — vérifié au catalogue). TS : `INTERESSES =
+   {interesse}` (`lib/crm/compteurs.ts`). Même jeu : `compteurs.cas.json`
+   (cas a14, a15 : « rappeler n'est pas un intéressé, reste une réponse »).
+   Textes : `/classement`, outils MCP `mes_objectifs` et `classement`.
+   L'historique se corrige seul (calcul à la volée).
+2. **« Pas décroché » renvoie en « À appeler »** — REMPLACE le 31/10. « À
+   appeler » = jamais appelée OU uniquement des « Pas décroché » (et anciens
+   « Barrage »). **Point A (tranché par Bora : non)** : une fiche qui a eu un
+   vrai échange (« À rappeler », « Intéressé », note attestée, RDV débriefé)
+   RESTE « À rappeler » même si un « Pas décroché » suit. `lib/crm/status.ts` :
+   un appel sans réponse n'est plus `facts.echange` ; il devient
+   `facts.tentative`, qui ne décide d'AUCUNE étape et ne sert qu'au motif
+   affiché sous « À appeler » (« appelée le 05/11, sans réponse », « appelée
+   3 fois sans réponse, la dernière le 05/11 » — `libelleTentative`,
+   `fmtJourMois`), relu des faits par `raisonAffichee` (fiche) et par
+   `obtenir_prospect` (MCP). Entre un email et un « Pas décroché », plus de
+   concurrence : « Suivi par email » garde sa place. Le rappel automatique
+   (`RESULTATS_RAPPEL_AUTO`) ne change pas. Import CSV et `normalizeStatus` :
+   « sans réponse », « pas décroché », « barrage » → À appeler. Descriptions
+   MCP (`ajouter_note`, `mettre_a_jour_statut`) réécrites. Janet : rien à
+   changer (`noter_resultat` passe par `saveExchangeCore`, et ses définitions
+   « intéressé = intérêt réel », « rappeler = il faut rappeler » collent
+   déjà). `crm-mail` : rien à changer dans le dépôt (il ne fait passer que
+   « À appeler » → « Suivi par email » sur une vraie réponse) — **mais la
+   version en production (v11, 25/08) est en retard, voir l'ordre ci-dessous**.
+   Jeu commun `etapes.cas.json` : 37 cas (11 nouveaux, dont ceux du point A).
+3. **La 042 (pas encore appliquée) est AJUSTÉE** : elle ne compte plus un
+   « Pas décroché » comme un échange ; motif « appelée, sans réponse » ou
+   « jamais appelée ». Attendus recalculés sur la production le 05/11 : les
+   27 « Contacté » → 7 À appeler, 12 À rappeler (dont 2 verrouillées), 8 Suivi
+   par email ; plus aucune « À appeler » déplacée.
+4. **`046_pas_decroche_a_appeler.sql`** : les « À rappeler » non verrouillées
+   dont le journal n'a QUE des « Pas décroché » repassent en « À appeler »
+   (39 au 05/11), copie dans `reprise_046` (RLS fermée), ni `updated_at`, ni
+   prochaine action, ni relances touchés.
+5. **Les « À rappeler » mal saisis** : `lib/crm/nonReponse.ts`
+   (`lireNoteRappeler` : non_reponse · a_trancher · interesse · null ;
+   `proposerPasDecroche`), UN utilitaire pour l'écran et pour la liste. Sur les
+   32 notes réelles (jeu `nonReponse.cas.json`) : 9 non-réponses, 3 à trancher
+   (Bora tranche), 1 « intéressé » (sens inverse). **Rien n'est écrit en base**
+   tant que Bora n'a pas validé la liste (PR) ; la **047** viendra ensuite.
+6. **Les boutons** : une précision sous chaque résultat (`OUTCOME_PRECISION`,
+   `lib/constants.ts`) — Pas décroché « personne · messagerie · fermé », À
+   rappeler « on m'a dit de rappeler plus tard », Intéressé « veut en savoir
+   plus ou une démo » —, lue par `ResultatAppel` (carte PROCHAINE ACTION,
+   relance dépliée) et par le débrief (« Pas décroché »). Garde-fou doux : « À
+   rappeler » + une note de non-réponse → « Pas de réponse ? → Pas décroché »
+   en un tap (jamais sur une note ambiguë, jamais automatique).
+
+**Recettes rejouées le 05/11 contre la production, en transaction annulée** :
+`045_assembler.sh` 23 OK · `042_assembler.sh` (042 ajustée + 043) 21 OK ·
+`044_assembler.sh` 15 OK (10 relances à annuler) · `046_assembler.sh` (042
+puis 046) 15 OK — 0 faute partout. **Ordre de mise en production** : fusion →
+redéploiement de `crm-mail` depuis le dépôt (+ diff vide) → 042 → 043 → 044
+→ 045 → 046 (détail et requêtes de contrôle : la PR). Tests : `test:objectifs`,
+`test:etapes`, `test:debrief`, nouveau `test:non-reponse` ; tous les `test:*`,
+`tsc`, `build` verts. Le banc réel n'a pas tourné (pas de comptes de test) :
+page de démonstration locale, jamais commitée, 5 appareils (360, 390, iPad
+portrait / paysage, 1280) — 0 débordement, cibles ≥ 44 px, garde-fou vérifié.
+
+⚠ L'état du 31/10 ci-dessous dit « À appeler = jamais appelée » : c'est
+REMPLACÉ par le point 2.
+
 ## État au 3 novembre 2026 — l'iPad tactile, le filtre métier, les filtres gardés au retour
 
 Demande : Colin (commercial) travaille sur **iPad** — des taps perdus ou posés
@@ -173,7 +249,8 @@ l'état du 29/10 au soir ci-dessous dit du Barrage :
   « Standard automatique » ; `noter_resultat` n'a plus `barrage` (lu
   « rappeler » s'il arrive quand même). Le rappel automatique : « Pas
   décroché » seul.
-- **« À appeler », c'est uniquement les fiches JAMAIS appelées** : tout
+- ⚠ **Remplacé le 05/11** (« Pas décroché » renvoie en « À appeler »).
+  **« À appeler », c'est uniquement les fiches JAMAIS appelées** : tout
   appel fait quitter l'étape — « Pas décroché » (et l'ancien barrage) est un
   fait `facts.echange` (`lib/crm/status.ts`), en concurrence avec l'email par
   la date : le plus récent dit la suite (appel → À rappeler, mail → Suivi par

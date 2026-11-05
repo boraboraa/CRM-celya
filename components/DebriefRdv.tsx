@@ -19,6 +19,7 @@ import {
 } from "@/lib/crm/debrief";
 import { lancerUneFois } from "@/lib/unSeulEnvoi";
 import { useUnSeulEnvoi } from "@/components/useUnSeulEnvoi";
+import { OUTCOME_PRECISION } from "@/lib/constants";
 
 /** Les issues qui attendent un complément avant de partir. */
 type IssueDepliee = "a_rappeler" | "suivi_email" | "pas_interesse" | "pas_decroche";
@@ -248,10 +249,15 @@ export function DebriefRdv({
               disabled={pending}
               onClick={() => choisir("pas_decroche")}
               aria-expanded={ouverte === "pas_decroche"}
-              className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium ring-1 transition ${ISSUE_CHIP.pas_decroche}`}
+              aria-label={`${ISSUE_LABEL.pas_decroche} — ${OUTCOME_PRECISION.sans_reponse}`}
+              className={`inline-flex min-h-[44px] max-w-full flex-col items-start justify-center rounded-lg px-2.5 py-1 text-left text-[11px] font-medium ring-1 transition ${ISSUE_CHIP.pas_decroche}`}
             >
-              <Icone nom={ISSUE_ICON.pas_decroche} className="h-3 w-3" />
-              {ISSUE_LABEL.pas_decroche}
+              <span className="inline-flex items-center gap-1.5">
+                <Icone nom={ISSUE_ICON.pas_decroche} className="h-3 w-3" />
+                {ISSUE_LABEL.pas_decroche}
+              </span>
+              {/* La même précision que le bouton du résultat d'appel (05/11). */}
+              <span className="text-[10px] font-normal leading-tight opacity-75">{OUTCOME_PRECISION.sans_reponse}</span>
             </button>
             <button
               type="button"

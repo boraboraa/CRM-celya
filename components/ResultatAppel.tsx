@@ -11,6 +11,7 @@ import {
   OUTCOME_ICON,
   OUTCOME_LABEL,
   OUTCOME_ORDER,
+  OUTCOME_PRECISION,
   STATUS_LABEL,
 } from "@/lib/constants";
 import { Icone } from "@/components/ui";
@@ -21,6 +22,7 @@ import type { AnnulationRefus } from "@/lib/crm/perdues";
 import { libelleRelance, phraseRappelAuto } from "@/lib/crm/relance";
 import { isoToLocalInput } from "@/lib/time";
 import { lancerUneFois } from "@/lib/unSeulEnvoi";
+import { proposerPasDecroche } from "@/lib/crm/nonReponse";
 import { useUnSeulEnvoi } from "@/components/useUnSeulEnvoi";
 
 /** Ce que « Pas intéressé » fait de la fiche, dit une fois (29/10). */
@@ -293,15 +295,23 @@ export function ResultatAppel({
               onClick={() => tap(o)}
               disabled={pending}
               aria-pressed={actif}
-              className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-3.5 text-xs font-medium ring-1 transition duration-200 disabled:opacity-60 ${
+              aria-label={OUTCOME_PRECISION[o] ? `${OUTCOME_LABEL[o]} — ${OUTCOME_PRECISION[o]}` : undefined}
+              className={`inline-flex min-h-[44px] max-w-full flex-col items-start justify-center gap-0.5 rounded-xl px-3.5 py-1.5 text-left text-xs font-medium ring-1 transition duration-200 disabled:opacity-60 ${
                 actif
                   ? `${OUTCOME_CHIP[o]} animate-pop`
                   : "bg-white/[0.04] text-slate-300 ring-white/10 hover:bg-white/[0.08] hover:text-slate-100"
               }`}
             >
-              <Icone nom={OUTCOME_ICON[o]} />
-              {OUTCOME_LABEL[o]}
-              {actif && enregistre && <Icone nom="coche" className="h-3 w-3" />}
+              <span className="inline-flex items-center gap-1.5">
+                <Icone nom={OUTCOME_ICON[o]} />
+                {OUTCOME_LABEL[o]}
+                {actif && enregistre && <Icone nom="coche" className="h-3 w-3" />}
+              </span>
+              {/* Ce que le bouton veut dire (05/11) — lisible au doigt, jamais
+                  coupé : la ligne passe à la ligne plutôt que de déborder. */}
+              {OUTCOME_PRECISION[o] && (
+                <span className="text-[11px] font-normal leading-tight opacity-75">{OUTCOME_PRECISION[o]}</span>
+              )}
             </button>
           );
         })}
@@ -351,6 +361,23 @@ export function ResultatAppel({
           )
         )}
       </div>
+
+      {/* Le garde-fou doux (05/11) : « À rappeler » avec une note qui décrit
+          une non-réponse (« Pas répondu », « messagerie », « fermé »…) —
+          on PROPOSE « Pas décroché » en un tap. Rien ne change tout seul. */}
+      {proposerPasDecroche(choisi, texte) && (
+        <button
+          type="button"
+          onClick={() => tap("sans_reponse")}
+          disabled={pending}
+          className="inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-xl bg-white/[0.04] px-3.5 text-left text-xs text-slate-300 ring-1 ring-white/10 hover:bg-white/[0.08] disabled:opacity-60"
+        >
+          <Icone nom={OUTCOME_ICON.sans_reponse} className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            Pas de réponse ? → <span className="font-medium text-slate-100">{OUTCOME_LABEL.sans_reponse}</span>
+          </span>
+        </button>
+      )}
 
       {/* Le nom de la personne, au bon endroit : lu dans la phrase, proposé
           d'un tap — ou demandé, quand on a eu quelqu'un et que la fiche n'a

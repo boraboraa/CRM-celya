@@ -81,9 +81,9 @@ const LEGACY_STATUS: Record<string, ProspectStatus> = {
   // L'étape « Contacté » est retirée (29/10) : une valeur restée en base se
   // lit « À rappeler » (on a eu quelqu'un, il y a une suite à donner).
   contacte: "a_rappeler",
-  // Les plus anciennes (007) : « sans réponse » a été appelée (31/10 : « À
-  // appeler », c'est jamais appelée).
-  sans_reponse: "a_rappeler",
+  // Les plus anciennes (007) : « sans réponse » — un appel sans vrai échange
+  // reste « À appeler » (05/11, remplace le 31/10).
+  sans_reponse: "a_appeler",
   contact_etabli: "a_rappeler",
   rappel_programme: "a_rappeler",
   rdv: "rendez_vous",
@@ -128,6 +128,19 @@ export const OUTCOME_LABEL: Record<CallOutcome, string> = {
   interesse: "Intéressé",
   suivi_email: "Suivi par email",
   refus: "Pas intéressé",
+};
+
+/**
+ * La précision sous chaque bouton de résultat (05/11/2026, Bora) — ce qui
+ * empêche de mal comprendre le bouton. « À rappeler » était choisi pour « je
+ * vais rappeler » alors que personne n'avait répondu : c'est « Pas décroché ».
+ * Une seule source, lue par `ResultatAppel` (carte PROCHAINE ACTION, relance
+ * dépliée) et par le débrief (« Pas décroché »). Absente = pas de précision.
+ */
+export const OUTCOME_PRECISION: Partial<Record<CallOutcome, string>> = {
+  sans_reponse: "personne · messagerie · fermé",
+  rappeler: "on m'a dit de rappeler plus tard",
+  interesse: "veut en savoir plus ou une démo",
 };
 
 /** Le pictogramme accompagne toujours le libellé — la couleur ne porte jamais seule. */
@@ -233,6 +246,12 @@ export function fmtDate(value?: string | null): string {
     year: "numeric",
     timeZone: TZ,
   });
+}
+
+/** « 05/11 » — le jour et le mois, heure de Bruxelles (motifs courts). */
+export function fmtJourMois(value?: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("fr-BE", { day: "2-digit", month: "2-digit", timeZone: TZ });
 }
 
 export function fmtDateTime(value?: string | null): string {

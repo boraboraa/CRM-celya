@@ -14,8 +14,8 @@
     ]
   },
   {
-    "nom": "ancien barrage seul (avant le 31/10, compté comme échange)",
-    "attendu": "a_rappeler",
+    "nom": "ancien barrage seul : un appel sans vrai échange (05/11)",
+    "attendu": "a_appeler",
     "activities": [
       {
         "at": "2026-09-17T08:00:00Z",
@@ -24,8 +24,8 @@
     ]
   },
   {
-    "nom": "trois anciens barrages d'affilée",
-    "attendu": "a_rappeler",
+    "nom": "trois anciens barrages d'affilée : toujours « À appeler » (05/11)",
+    "attendu": "a_appeler",
     "activities": [
       {
         "at": "2026-10-01T08:00:00Z",
@@ -43,7 +43,7 @@
   },
   {
     "nom": "ancien barrage de Janet (sans échange)",
-    "attendu": "a_rappeler",
+    "attendu": "a_appeler",
     "activities": [
       {
         "at": "2026-09-17T08:00:00Z",
@@ -53,8 +53,8 @@
     ]
   },
   {
-    "nom": "pas décroché : appelée, elle quitte « À appeler »",
-    "attendu": "a_rappeler",
+    "nom": "pas décroché : la fiche reste « À appeler » (05/11, remplace le 31/10)",
+    "attendu": "a_appeler",
     "activities": [
       {
         "at": "2026-09-17T08:00:00Z",
@@ -252,8 +252,8 @@
     ]
   },
   {
-    "nom": "trois « pas décroché » d'affilée",
-    "attendu": "a_rappeler",
+    "nom": "trois « pas décroché » d'affilée : toujours « À appeler »",
+    "attendu": "a_appeler",
     "activities": [
       {
         "at": "2026-10-28T08:00:00Z",
@@ -292,8 +292,8 @@
     ]
   },
   {
-    "nom": "mails puis pas décroché au téléphone",
-    "attendu": "a_rappeler",
+    "nom": "mails puis pas décroché : « Suivi par email » garde sa place (le pas décroché n'est plus un échange)",
+    "attendu": "suivi_email",
     "emails": [
       {
         "direction": "sortant",
@@ -317,6 +317,179 @@
         "outcome": "sans_reponse",
         "is_exchange": false,
         "is_draft": true
+      }
+    ]
+  },
+  {
+    "nom": "point A (Bora, 05/11) : À rappeler puis Pas décroché → reste « À rappeler »",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "rappeler"
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ]
+  },
+  {
+    "nom": "point A : Intéressé puis Pas décroché → reste « À rappeler »",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "interesse"
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ]
+  },
+  {
+    "nom": "point A : À rappeler, À rappeler puis Pas décroché (Lindsay Ashcroft) → « À rappeler »",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "rappeler"
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "rappeler"
+      },
+      {
+        "at": "2026-11-05T10:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ]
+  },
+  {
+    "nom": "point A : RDV débriefé « à rappeler » puis Pas décroché → « À rappeler »",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-10-20T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ],
+    "meetings": [
+      {
+        "starts_at": "2026-10-10T09:00:00Z",
+        "status": "honore",
+        "debrief_issue": "a_rappeler"
+      }
+    ]
+  },
+  {
+    "nom": "point A : note attestée puis Pas décroché → « À rappeler » (on a eu quelqu'un)",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z"
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ]
+  },
+  {
+    "nom": "Pas décroché puis À rappeler → « À rappeler »",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "rappeler"
+      }
+    ]
+  },
+  {
+    "nom": "Pas décroché puis Intéressé → « À rappeler »",
+    "attendu": "a_rappeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "interesse"
+      }
+    ]
+  },
+  {
+    "nom": "Pas décroché puis Pas intéressé (Perdu se pose à la main) → « À appeler »",
+    "attendu": "a_appeler",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "refus"
+      }
+    ]
+  },
+  {
+    "nom": "Suivi par email puis Pas décroché → « Suivi par email »",
+    "attendu": "suivi_email",
+    "activities": [
+      {
+        "at": "2026-11-02T09:00:00Z",
+        "outcome": "suivi_email"
+      },
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ]
+  },
+  {
+    "nom": "Pas décroché puis ancien barrage → « À appeler »",
+    "attendu": "a_appeler",
+    "activities": [
+      {
+        "at": "2026-10-02T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      },
+      {
+        "at": "2026-10-05T09:00:00Z",
+        "outcome": "barrage"
+      }
+    ]
+  },
+  {
+    "nom": "rendez-vous à venir puis Pas décroché → « Rendez-vous »",
+    "attendu": "rendez_vous",
+    "activities": [
+      {
+        "at": "2026-11-05T09:00:00Z",
+        "outcome": "sans_reponse",
+        "is_exchange": false
+      }
+    ],
+    "meetings": [
+      {
+        "starts_at": "2026-12-10T09:00:00Z",
+        "status": "prevu"
       }
     ]
   }

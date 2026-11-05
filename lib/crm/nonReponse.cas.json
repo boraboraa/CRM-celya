@@ -1,0 +1,239 @@
+{
+  "_note": "Le jeu de cas de lib/crm/nonReponse.ts (npm run test:non-reponse). « reel » : les 32 notes « À rappeler » non vides de la production au 05/11/2026 (société, note), avec le verdict attendu — c'est la liste soumise à Bora pour la 047. « synthetique » : les bords.",
+  "reel": [
+    {
+      "societe": "SMART ACCESS",
+      "note": "envoyé un email a rappeler d'ici semaine pro",
+      "verdict": null
+    },
+    {
+      "societe": "API CAR 3000",
+      "note": "À rappeler lundi 28 à rdv lundi à 11h",
+      "verdict": null
+    },
+    {
+      "societe": "Garage Fouta Pneus",
+      "note": "Ousmane — rappeler mardi à 14h",
+      "verdict": null
+    },
+    {
+      "societe": "S. Van Praet",
+      "note": "Rappeler Younes en fin de mois",
+      "verdict": null
+    },
+    {
+      "societe": "Moussa Admiral Pneus",
+      "note": "On a eu Issa — appeler avant midi",
+      "verdict": null
+    },
+    {
+      "societe": "Tyre Shop",
+      "note": "On a eu Alta — patron Mourad, rappeler mercredi à partir de 10h",
+      "verdict": null
+    },
+    {
+      "societe": "New Car 2001",
+      "note": "Le lundi, patron et Bobby présents de 9h à 12h",
+      "verdict": null
+    },
+    {
+      "societe": "Mecanorama",
+      "note": "Rappeler Claudio le matin",
+      "verdict": null
+    },
+    {
+      "societe": "Carglass",
+      "note": "Appeler Koen Verdeyen lundi, de la part de Karine",
+      "verdict": null
+    },
+    {
+      "societe": "Banden Peeters Overijs",
+      "note": "à rappler ce jeudi, le boss s'appelle leidijs, on a eu kelly au bigo, ils disent qu'ils ont du personnnel mais ratent comment des appels, penues usées",
+      "verdict": null
+    },
+    {
+      "societe": "Abel Concept",
+      "note": "À rappeler — rappel du lundi 26/10 manqué / Abdel m'avait donné rendez-vous pour le rappeler le lundi 26 octobre. Je n'ai pas pu le rappeler ce jour-là. À rappeler au plus vite : cet après-midi (29/10) ou demain (30/10). Il travaille seul et décroche rarement : insister.",
+      "verdict": null
+    },
+    {
+      "societe": "Garage Huma",
+      "note": "À rappeler le 9 quand il rentre de vacances",
+      "verdict": null
+    },
+    {
+      "societe": "Cabinet de podologie Podo Uccle",
+      "note": "tombée sur boite mail, à rappeller",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Beauty by Behice",
+      "note": "vient d'accoucher, travaille plus pour le moment , rappeler dans  3/4 mois",
+      "verdict": null
+    },
+    {
+      "societe": "Garage Halluent",
+      "note": "rappeler dans 6 mois",
+      "verdict": null
+    },
+    {
+      "societe": "ATR studio",
+      "note": "mauvais numéro",
+      "verdict": null
+    },
+    {
+      "societe": "Centre de Beauté Cléopâtre",
+      "note": "salon ferme",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Cabinet de Kinésithérapie des Garennes",
+      "note": "Pas répondu",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Cabinet de Kinésithérapie Piret Benoit",
+      "note": "Pas répondu",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Glam Up Studio & Academy",
+      "note": "salon vendu",
+      "verdict": null
+    },
+    {
+      "societe": "Carlo Studio",
+      "note": "Tombé sur l’assistante, donc je rappele dans 30-1h",
+      "verdict": "a_trancher"
+    },
+    {
+      "societe": "Cabinet du Martin Pêcheur",
+      "note": "Netais  pas le responsable",
+      "verdict": "a_trancher"
+    },
+    {
+      "societe": "Cabinet Kinésithérapie Célia Van Melderen",
+      "note": "Pas répondu",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Cabinet Médical de la Fauconnerie – Kiné Gil Gerin",
+      "note": "N’a pas répondu",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Cabinet Middelbourg – Laetitia Woog",
+      "note": "À rappeler",
+      "verdict": null
+    },
+    {
+      "societe": "CMC 328 – Crown Medical Center",
+      "note": "Il est intéressé",
+      "verdict": "interesse"
+    },
+    {
+      "societe": "Kiné Alexandre Mory",
+      "note": "Pas rep",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Kiné Antoine Poelaert",
+      "note": "Était en consultation",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Kiné César Natale",
+      "note": "Messager",
+      "verdict": "non_reponse"
+    },
+    {
+      "societe": "Dream Hair",
+      "note": "La responsable est disponible demain à 11h pour en parler",
+      "verdict": null
+    },
+    {
+      "societe": "Coiffure Istanbul",
+      "note": "Intercepté par étudiante qui m’a redirigé vers jeudi pour m’entretenir avec le patron",
+      "verdict": null
+    },
+    {
+      "societe": "Podologue Laure Lanthiez",
+      "note": "a rappeler pas avant 19 h car en consultation",
+      "verdict": "a_trancher"
+    }
+  ],
+  "synthetique": [
+    {
+      "note": "pas intéressé du tout",
+      "verdict": null
+    },
+    {
+      "note": "pas du tout intéressée",
+      "verdict": null
+    },
+    {
+      "note": "très intéressée par une démo",
+      "verdict": "interesse"
+    },
+    {
+      "note": "messagerie, rappeler demain matin",
+      "verdict": "a_trancher"
+    },
+    {
+      "note": "Ligne occupée",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "répondeur",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "Personne ne répond",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "boîte vocale",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "Pas dispo",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "il ferme à 18h, rappeler avant",
+      "verdict": null
+    },
+    {
+      "note": "Fermé",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "injoignable",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "on a eu la secrétaire, le patron rappelle",
+      "verdict": null
+    },
+    {
+      "note": "tombée sur la secrétaire",
+      "verdict": "a_trancher"
+    },
+    {
+      "note": "pas de réponse",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "ne répond plus",
+      "verdict": "non_reponse"
+    },
+    {
+      "note": "rappeler à la fermeture",
+      "verdict": null
+    },
+    {
+      "note": "",
+      "verdict": null
+    }
+  ]
+}

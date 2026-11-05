@@ -32,6 +32,7 @@
     "test:doublons": "node --experimental-strip-types lib/crm/doublons.test.ts",
     "test:ma-liste": "node --experimental-strip-types lib/crm/maListe.test.ts",
     "test:objectifs": "node --experimental-strip-types lib/crm/compteurs.test.ts",
+    "test:non-reponse": "node --experimental-strip-types lib/crm/nonReponse.test.ts",
     "test:appels": "node --experimental-strip-types lib/appelsIa/regles.test.ts && node --experimental-strip-types lib/appelsIa/cycle.test.ts && node --experimental-strip-types lib/appelsIa/classement.test.ts && node --experimental-strip-types lib/appelsIa/ecriture.test.ts && node --experimental-strip-types lib/appelsIa/instructions.test.ts",
     "test:appels-ecran": "node --experimental-strip-types lib/appelsIa/ecran/ecran.test.ts",
     "test:appels-live": "node --experimental-strip-types lib/appelsIa/faux-live.test.ts",

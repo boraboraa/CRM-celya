@@ -1,6 +1,6 @@
 // npm run test:objectifs — la règle de comptage (recopie de `compteurs_pour`,
-// migration 031), les bornes de semaine à Bruxelles, et ce que l'écran en dit.
-// Le jeu de cas `compteurs.cas.json` est joué AUSSI par la recette SQL de la 031.
+// migrations 031, 033, 045), les bornes de semaine à Bruxelles, et ce que l'écran en dit.
+// Le jeu de cas `compteurs.cas.json` est joué AUSSI par la recette SQL de la 045 (et de la 031).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
@@ -48,6 +48,25 @@ for (const [u, attendu] of Object.entries(jeu.attendu)) {
     assert.deepEqual(compter(lignes, u, jeu.semaine.debut, jeu.semaine.fin), attendu);
   });
 }
+
+cas("« À rappeler » n'est PAS un intéressé (045, Bora 05/11)", () => {
+  const l: LignesCompteurs = { activites: [{ author_id: "U", outcome: "rappeler", occurred_at: "2026-11-03T10:00:00Z" }], rdv: [], fiches: [] };
+  assert.equal(compter(l, "U", "2026-11-02", "2026-11-09").interesses, 0);
+});
+
+cas("« À rappeler » reste une RÉPONSE ; « Intéressé » est réponse ET intéressé", () => {
+  const l: LignesCompteurs = {
+    activites: [
+      { author_id: "U", outcome: "rappeler", occurred_at: "2026-11-03T10:00:00Z" },
+      { author_id: "U", outcome: "interesse", occurred_at: "2026-11-03T11:00:00Z" },
+      { author_id: "U", outcome: "sans_reponse", occurred_at: "2026-11-03T12:00:00Z" },
+    ],
+    rdv: [],
+    fiches: [],
+  };
+  const c = compter(l, "U", "2026-11-02", "2026-11-09");
+  assert.deepEqual([c.appels, c.reponses, c.interesses], [3, 2, 1]);
+});
 
 cas("bornes : minuit à Bruxelles, heure d'hiver (UTC+1) et d'été (UTC+2)", () => {
   assert.equal(new Date(minuitBruxelles("2026-11-02")).toISOString(), "2026-11-01T23:00:00.000Z");

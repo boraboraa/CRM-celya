@@ -1,19 +1,22 @@
 /**
  * Les COMPTEURS de l'équipe — objectifs et classement (27/10/2026). Module pur.
  *
- * La règle s'exécute EN SQL (`compteurs_pour`, migration 031) : le
+ * La règle s'exécute EN SQL (`compteurs_pour`, migrations 031, 033, 045) : le
  * classement doit compter le travail de chacun sans que personne ne lise les
  * fiches des autres. Cette fonction en est la RECOPIE, pour que la règle se
  * lise et se teste sans base ; les deux jouent le même jeu de cas
- * (`compteurs.cas.json` : test:objectifs et la recette 031). Toute évolution
+ * (`compteurs.cas.json` : test:objectifs et la recette 045). Toute évolution
  * se fait DES DEUX CÔTÉS.
  *
  *   appels      une activité non brouillon, avec un résultat d'appel, SANS
  *               rendez-vous rattaché (un débrief porte « intéressé » ou
  *               « refus » : ce n'est pas un appel) — à l'auteur ;
- *   réponses    rappeler · intéressé · suivi par email (033) · refus — on a eu le décideur ; un
- *               un « pas décroché » (et l'ancien barrage) reste un appel, pas une réponse ;
- *   intéressés  intéressé · rappeler ;
+ *   réponses    rappeler · intéressé · suivi par email (033) · refus — on a eu
+ *               quelqu'un ; un « pas décroché » (et l'ancien barrage) reste un
+ *               appel, pas une réponse ;
+ *   intéressés  « Intéressé » SEUL (045, Bora 05/11) — « À rappeler » (on m'a
+ *               dit de rappeler plus tard) est une réponse, JAMAIS un
+ *               intéressé ;
  *   rdv         RDV de prospect créés dans la période, non annulés — à qui
  *               les a posés ;
  *   essais      fiches entrées en essai gratuit dans la période — au
@@ -40,7 +43,7 @@ export type Compteurs = {
 export const ZERO: Compteurs = { appels: 0, reponses: 0, interesses: 0, rdv: 0, essais: 0, numeros: 0 };
 
 const REPONSES = new Set(["rappeler", "interesse", "suivi_email", "refus"]);
-const INTERESSES = new Set(["interesse", "rappeler"]);
+const INTERESSES = new Set(["interesse"]);
 
 // ---------------------------------------------------------------------------
 // Les dates — en jours de Bruxelles

@@ -2402,7 +2402,7 @@ function register(server: McpServer) {
   // --- mes_objectifs (031) -------------------------------------------------
   server.tool(
     "mes_objectifs",
-    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « pas intéressé » — on a eu le décideur ; un « pas décroché » est un appel, pas une réponse), intéressés, rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
+    "Mes compteurs de la semaine en cours (du lundi au dimanche, heure de Bruxelles) face à mes objectifs : appels, réponses (« à rappeler », « intéressé », « suivi par email », « pas intéressé » — on a eu quelqu'un ; un « pas décroché » est un appel, pas une réponse), intéressés (« intéressé » SEUL : un « à rappeler » est une réponse, jamais un intéressé), rendez-vous posés, numéros ajoutés ; et les essais gratuits depuis le début du Sales Trophy (l'objectif d'essais porte sur la période). Lecture seule, pour le porteur du jeton uniquement.",
     {},
     async (_args, extra) => {
       const ctx = await context(extra);
@@ -2440,7 +2440,7 @@ function register(server: McpServer) {
   // --- classement (031) ----------------------------------------------------
   server.tool(
     "classement",
-    "Le classement de l'équipe — les MÊMES chiffres que l'écran /classement : par participant (commerciaux actifs qui ont un objectif), appels, réponses, intéressés, rendez-vous, essais gratuits, numéros ajoutés. Des chiffres seulement : aucune fiche, aucun nom de prospect. Ordre : essais, puis RDV, puis réponses, puis appels.",
+    "Le classement de l'équipe — les MÊMES chiffres que l'écran /classement : par participant (commerciaux actifs qui ont un objectif), appels, réponses (à rappeler, intéressé, suivi par email, pas intéressé), intéressés (« intéressé » seul — un « à rappeler » n'en est pas un), rendez-vous, essais gratuits, numéros ajoutés. Des chiffres seulement : aucune fiche, aucun nom de prospect. Ordre : essais, puis RDV, puis réponses, puis appels.",
     {
       periode: z
         .enum(["semaine", "depuis_le_debut"])
